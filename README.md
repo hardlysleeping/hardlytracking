@@ -50,11 +50,16 @@ against: `ghcr.io/suwayomi/suwayomi-server:v2.4.2366`.
 ## Gates
 
 ```bash
-npm test      # node --test, no network
+npm test         # node --test, no network (24 tests)
 npx tsc --noEmit
 npm run build
-npm run smoke # live, needs the runtime on :4567
+npm run smoke        # live, needs the runtime on :4567
+npm run matrix:check # live: validates the iPhone test matrix against the extension index
 ```
+
+The iPhone MVP is gated by `docs/native-mvp-test-matrix.md` — 20 real extensions, capability checks,
+an airplane-mode matrix and data-ownership checks. Nothing is "done" for the native build until those
+rows are recorded from a device.
 
 ## Not built yet
 

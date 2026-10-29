@@ -1,0 +1,469 @@
+{
+ "index": "https://raw.githubusercontent.com/keiyoushi/extensions/repo/index.json",
+ "generated": "2026-10-29",
+ "rows": [
+  {
+   "name": "MangaDex",
+   "pkg": "eu.kanade.tachiyomi.extension.all.mangadex",
+   "version": "1.6.0",
+   "versionCode": "106000",
+   "extensionLib": "1.6",
+   "contentWarning": "MIXED",
+   "apk": "https://github.com/keiyoushi/extensions/releases/download/8ef06cd-0/tachiyomi-all.mangadex-v1.6.0.apk",
+   "sourceCount": 61,
+   "sources": [
+    {
+     "id": "4638673959522768501",
+     "name": "MangaDex",
+     "lang": "af"
+    },
+    {
+     "id": "987803387023224960",
+     "name": "MangaDex",
+     "lang": "sq"
+    },
+    {
+     "id": "3339599426223341161",
+     "name": "MangaDex",
+     "lang": "ar"
+    }
+   ],
+   "covers": [
+    "multi-source (61 sources)",
+    "json-api",
+    "real-source-ids"
+   ]
+  },
+  {
+   "name": "Manga Million",
+   "pkg": "eu.kanade.tachiyomi.extension.all.mangamillion",
+   "version": "1.6.2",
+   "versionCode": "106002",
+   "extensionLib": "1.6",
+   "contentWarning": "SAFE",
+   "apk": "https://github.com/keiyoushi/extensions/releases/download/d64b4de/tachiyomi-all.mangamillion-v1.6.2.apk",
+   "sourceCount": 108,
+   "sources": [
+    {
+     "id": "5427621842719614942",
+     "name": "Manga Million",
+     "lang": "en"
+    },
+    {
+     "id": "5892305961700928875",
+     "name": "Manga Million",
+     "lang": "zh-TW"
+    },
+    {
+     "id": "2911411952354074492",
+     "name": "Manga Million",
+     "lang": "th"
+    }
+   ],
+   "covers": [
+    "multi-source (108 sources)",
+    "source-id-scale"
+   ]
+  },
+  {
+   "name": "XCOMIC",
+   "pkg": "eu.kanade.tachiyomi.extension.all.xcomic",
+   "version": "1.6.10",
+   "versionCode": "106010",
+   "extensionLib": "1.6",
+   "contentWarning": "MIXED",
+   "apk": "https://github.com/keiyoushi/extensions/releases/download/f1edb03/tachiyomi-all.xcomic-v1.6.10.apk",
+   "sourceCount": 77,
+   "sources": [
+    {
+     "id": "7503768123990313103",
+     "name": "XCOMIC",
+     "lang": "all"
+    },
+    {
+     "id": "1951931397842101209",
+     "name": "XCOMIC",
+     "lang": "en"
+    },
+    {
+     "id": "2216072015554312879",
+     "name": "XCOMIC",
+     "lang": "fr"
+    }
+   ],
+   "covers": [
+    "multi-source (77 sources)",
+    "relative-urls"
+   ]
+  },
+  {
+   "name": "MangaFire",
+   "pkg": "eu.kanade.tachiyomi.extension.all.mangafire",
+   "version": "1.6.35",
+   "versionCode": "106035",
+   "extensionLib": "1.6",
+   "contentWarning": "MIXED",
+   "apk": "https://github.com/keiyoushi/extensions/releases/download/f1edb03/tachiyomi-all.mangafire-v1.6.35.apk",
+   "sourceCount": 7,
+   "sources": [
+    {
+     "id": "6084907896154116083",
+     "name": "MangaFire",
+     "lang": "en"
+    },
+    {
+     "id": "8098539940032331958",
+     "name": "MangaFire",
+     "lang": "es"
+    },
+    {
+     "id": "3849324770075062403",
+     "name": "MangaFire",
+     "lang": "es-419"
+    }
+   ],
+   "covers": [
+    "multi-source (7 sources)",
+    "captcha",
+    "cloudflare",
+    "json-api"
+   ]
+  },
+  {
+   "name": "MangaPill",
+   "pkg": "eu.kanade.tachiyomi.extension.en.mangapill",
+   "version": "1.6.0",
+   "versionCode": "106000",
+   "extensionLib": "1.6",
+   "contentWarning": "MIXED",
+   "apk": "https://github.com/keiyoushi/extensions/releases/download/bdcf84f/tachiyomi-en.mangapill-v1.6.0.apk",
+   "sourceCount": 1,
+   "sources": [
+    {
+     "id": "8448310129093543312",
+     "name": "MangaPill",
+     "lang": "en"
+    }
+   ],
+   "covers": [
+    "html-parsing",
+    "baseline"
+   ]
+  },
+  {
+   "name": "Asura Scans",
+   "pkg": "eu.kanade.tachiyomi.extension.en.asurascans",
+   "version": "1.6.70",
+   "versionCode": "106070",
+   "extensionLib": "1.6",
+   "contentWarning": "SAFE",
+   "apk": "https://github.com/keiyoushi/extensions/releases/download/6768cbc/tachiyomi-en.asurascans-v1.6.70.apk",
+   "sourceCount": 1,
+   "sources": [
+    {
+     "id": "6247824327199706550",
+     "name": "Asura Scans",
+     "lang": "en"
+    }
+   ],
+   "covers": [
+    "html-parsing",
+    "extension-upgrade"
+   ]
+  },
+  {
+   "name": "Toonily",
+   "pkg": "eu.kanade.tachiyomi.extension.en.toonily",
+   "version": "1.6.72",
+   "versionCode": "106072",
+   "extensionLib": "1.6",
+   "contentWarning": "MIXED",
+   "apk": "https://github.com/keiyoushi/extensions/releases/download/e97033f/tachiyomi-en.toonily-v1.6.72.apk",
+   "sourceCount": 1,
+   "sources": [
+    {
+     "id": "5190569675461947007",
+     "name": "Toonily",
+     "lang": "en"
+    }
+   ],
+   "covers": [
+    "cookies",
+    "html-parsing"
+   ]
+  },
+  {
+   "name": "Komix",
+   "pkg": "eu.kanade.tachiyomi.extension.en.komix",
+   "version": "1.6.2",
+   "versionCode": "106002",
+   "extensionLib": "1.6",
+   "contentWarning": "MIXED",
+   "apk": "https://github.com/keiyoushi/extensions/releases/download/7b21db6/tachiyomi-en.komix-v1.6.2.apk",
+   "sourceCount": 1,
+   "sources": [
+    {
+     "id": "6862842453918709699",
+     "name": "Komix",
+     "lang": "en"
+    }
+   ],
+   "covers": [
+    "filters"
+   ]
+  },
+  {
+   "name": "Qi Scans",
+   "pkg": "eu.kanade.tachiyomi.extension.en.qiscans",
+   "version": "1.6.0",
+   "versionCode": "106000",
+   "extensionLib": "1.6",
+   "contentWarning": "SAFE",
+   "apk": "https://github.com/keiyoushi/extensions/releases/download/39e8efc/tachiyomi-en.qiscans-v1.6.0.apk",
+   "sourceCount": 1,
+   "sources": [
+    {
+     "id": "5806040666300479660",
+     "name": "QiScans",
+     "lang": "en"
+    }
+   ],
+   "covers": [
+    "filters",
+    "custom-headers"
+   ]
+  },
+  {
+   "name": "Coolmic",
+   "pkg": "eu.kanade.tachiyomi.extension.en.coolmic",
+   "version": "1.6.2",
+   "versionCode": "106002",
+   "extensionLib": "1.6",
+   "contentWarning": "MIXED",
+   "apk": "https://github.com/keiyoushi/extensions/releases/download/d64b4de/tachiyomi-en.coolmic-v1.6.2.apk",
+   "sourceCount": 1,
+   "sources": [
+    {
+     "id": "5279120461134453793",
+     "name": "Coolmic",
+     "lang": "en"
+    }
+   ],
+   "covers": [
+    "cookies",
+    "preferences"
+   ]
+  },
+  {
+   "name": "J-Novel",
+   "pkg": "eu.kanade.tachiyomi.extension.en.jnovel",
+   "version": "1.6.2",
+   "versionCode": "106002",
+   "extensionLib": "1.6",
+   "contentWarning": "SAFE",
+   "apk": "https://github.com/keiyoushi/extensions/releases/download/7b21db6/tachiyomi-en.jnovel-v1.6.2.apk",
+   "sourceCount": 1,
+   "sources": [
+    {
+     "id": "2482510125735992610",
+     "name": "J-Novel",
+     "lang": "en"
+    }
+   ],
+   "covers": [
+    "preferences"
+   ]
+  },
+  {
+   "name": "Mangabz",
+   "pkg": "eu.kanade.tachiyomi.extension.zh.mangabz",
+   "version": "1.6.1",
+   "versionCode": "106001",
+   "extensionLib": "1.6",
+   "contentWarning": "SAFE",
+   "apk": "https://github.com/keiyoushi/extensions/releases/download/4c8cda7/tachiyomi-zh.mangabz-v1.6.1.apk",
+   "sourceCount": 1,
+   "sources": [
+    {
+     "id": "5234610795363016972",
+     "name": "Mangabz",
+     "lang": "zh"
+    }
+   ],
+   "covers": [
+    "filters",
+    "preferences",
+    "cookies",
+    "non-latin"
+   ]
+  },
+  {
+   "name": "Dynasty Scans",
+   "pkg": "eu.kanade.tachiyomi.extension.en.dynasty",
+   "version": "1.6.1",
+   "versionCode": "106001",
+   "extensionLib": "1.6",
+   "contentWarning": "MIXED",
+   "apk": "https://github.com/keiyoushi/extensions/releases/download/bdcf84f/tachiyomi-en.dynasty-v1.6.1.apk",
+   "sourceCount": 1,
+   "sources": [
+    {
+     "id": "669095474988166464",
+     "name": "Dynasty Scans",
+     "lang": "en"
+    }
+   ],
+   "covers": [
+    "custom-headers"
+   ]
+  },
+  {
+   "name": "Voyce.Me",
+   "pkg": "eu.kanade.tachiyomi.extension.en.voyceme",
+   "version": "1.6.8",
+   "versionCode": "106008",
+   "extensionLib": "1.6",
+   "contentWarning": "SAFE",
+   "apk": "https://github.com/keiyoushi/extensions/releases/download/f1edb03/tachiyomi-en.voyceme-v1.6.8.apk",
+   "sourceCount": 1,
+   "sources": [
+    {
+     "id": "4815322300278778429",
+     "name": "VoyceMe",
+     "lang": "en"
+    }
+   ],
+   "covers": [
+    "custom-headers",
+    "preferences"
+   ]
+  },
+  {
+   "name": "InfinityScans",
+   "pkg": "eu.kanade.tachiyomi.extension.en.infinityscans",
+   "version": "1.6.15",
+   "versionCode": "106015",
+   "extensionLib": "1.6",
+   "contentWarning": "MIXED",
+   "apk": "https://github.com/keiyoushi/extensions/releases/download/7b21db6/tachiyomi-en.infinityscans-v1.6.15.apk",
+   "sourceCount": 1,
+   "sources": [
+    {
+     "id": "7769612119788415733",
+     "name": "InfinityScans",
+     "lang": "en"
+    }
+   ],
+   "covers": [
+    "webview-login",
+    "challenge"
+   ]
+  },
+  {
+   "name": "Scythe Scans",
+   "pkg": "eu.kanade.tachiyomi.extension.en.erosscans",
+   "version": "1.6.9",
+   "versionCode": "106009",
+   "extensionLib": "1.6",
+   "contentWarning": "SAFE",
+   "apk": "https://github.com/keiyoushi/extensions/releases/download/d0c0864/tachiyomi-en.erosscans-v1.6.9.apk",
+   "sourceCount": 1,
+   "sources": [
+    {
+     "id": "1124131000360667434",
+     "name": "Scythe Scans",
+     "lang": "en"
+    }
+   ],
+   "covers": [
+    "cloudflare",
+    "custom-headers"
+   ]
+  },
+  {
+   "name": "Comix",
+   "pkg": "eu.kanade.tachiyomi.extension.en.comix",
+   "version": "1.6.59",
+   "versionCode": "106059",
+   "extensionLib": "1.6",
+   "contentWarning": "MIXED",
+   "apk": "https://github.com/keiyoushi/extensions/releases/download/949dea2/tachiyomi-en.comix-v1.6.59.apk",
+   "sourceCount": 1,
+   "sources": [
+    {
+     "id": "7537715367149829912",
+     "name": "Comix",
+     "lang": "en"
+    }
+   ],
+   "covers": [
+    "captcha",
+    "cloudflare"
+   ]
+  },
+  {
+   "name": "emaqi",
+   "pkg": "eu.kanade.tachiyomi.extension.en.emaqi",
+   "version": "1.6.2",
+   "versionCode": "106002",
+   "extensionLib": "1.6",
+   "contentWarning": "MIXED",
+   "apk": "https://github.com/keiyoushi/extensions/releases/download/d64b4de/tachiyomi-en.emaqi-v1.6.2.apk",
+   "sourceCount": 1,
+   "sources": [
+    {
+     "id": "3383118804501081522",
+     "name": "emaqi",
+     "lang": "en"
+    }
+   ],
+   "covers": [
+    "authentication"
+   ]
+  },
+  {
+   "name": "vomic",
+   "pkg": "eu.kanade.tachiyomi.extension.zh.vomic",
+   "version": "1.6.0",
+   "versionCode": "106000",
+   "extensionLib": "1.6",
+   "contentWarning": "SAFE",
+   "apk": "https://github.com/keiyoushi/extensions/releases/download/58fd63f/tachiyomi-zh.vomic-v1.6.0.apk",
+   "sourceCount": 1,
+   "sources": [
+    {
+     "id": "5428862423208834108",
+     "name": "vomic",
+     "lang": "zh"
+    }
+   ],
+   "covers": [
+    "authentication",
+    "preferences",
+    "custom-headers",
+    "non-latin"
+   ]
+  },
+  {
+   "name": "Manhua Plus",
+   "pkg": "eu.kanade.tachiyomi.extension.en.manhuaplus",
+   "version": "1.6.63",
+   "versionCode": "106063",
+   "extensionLib": "1.6",
+   "contentWarning": "SAFE",
+   "apk": "https://github.com/keiyoushi/extensions/releases/download/cfc0199/tachiyomi-en.manhuaplus-v1.6.63.apk",
+   "sourceCount": 1,
+   "sources": [
+    {
+     "id": "9030178752551947945",
+     "name": "Manhua Plus",
+     "lang": "en"
+    }
+   ],
+   "covers": [
+    "image-headers",
+    "html-parsing"
+   ]
+  }
+ ]
+}

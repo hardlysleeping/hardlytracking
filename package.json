@@ -10,7 +10,8 @@
     "check": "tsc --noEmit",
     "test": "node --experimental-strip-types --import ./tests/unit/register-ts.mjs --test tests/unit/*.test.mjs",
     "smoke": "node --experimental-strip-types --import ./tests/unit/register-ts.mjs scripts/smoke.mjs",
-    "serve": "node server/proxy.mjs"
+    "serve": "node server/proxy.mjs",
+    "matrix:check": "node --experimental-strip-types --import ./tests/unit/register-ts.mjs scripts/matrix-check.mjs"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^7.1.2",

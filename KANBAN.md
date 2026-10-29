@@ -1,43 +1,46 @@
 # KANBAN — HardlyTracking
 
 Board: `hermes kanban --board hardlytracking` · Backlog: `BACKLOG.md` · Plan (Native MVP boundary):
-`~/.hermes/plans/2026-10-29_133058-hardlytracking-mvp.md`
+`~/.hermes/plans/2026-10-29_133058-hardlytracking-mvp.md` · Gate: `docs/native-mvp-test-matrix.md`
 
 **Priority order: standalone iPhone first** (owner, 2026-10-29). **WIP limit: 2** — one card per file
-area, and `src/api/` + `src-tauri/` are the bottlenecks.
+area; `src/api/` + `src-tauri/` are the bottlenecks.
 
 Repo: `~/apps/hardlytracking` · branch `master` · remote `github.com/hardlysleeping/hardlytracking` (private).
 
-## Now (in order)
+## Now (in dispatch order)
 
 | Card | Backlog | Work | Gate |
 |---|---|---|---|
-| T11 `t_1da228de` | 3 | Bridge transport `POST /dalvik` + extension store (repo index → APK → base64) | proven on Linux against `MExtensionServer-Linux-x64` v1.0.9 with a real APK: sources, popular, search, chapters, pages |
+| T11 `t_1da228de` | 3 | Bridge transport `POST /dalvik` + extension store (index parser done) | proven on Linux against `MExtensionServer-Linux-x64` v1.0.9 with a real APK: sources, popular, search, chapters, pages |
 | T12 `t_7d2d23fe` | 2 | iOS shell: Tauri plugin wrapping `MihonEmbeddedBridge` + `OpenJDKRuntime.xcframework` | unsigned IPA builds on Codemagic; on device the server starts and `/capabilities` answers |
-| T13 `t_65a17602` | 1 | Native MVP acceptance test (7 steps, no server) | a physical iPhone passes all seven; per-step timings recorded |
-| T9 `t_1b9bcf7e` | 9 | Mihon/Komikku backup import | round-trip a real backup into the app DB |
-| T6 `t_f6e28ea6` | 10 | Tauri desktop with the embedded runtime (desktop jar, same bridge) | Linux artefact launches, `/capabilities` answers, a source browses |
-| T8 `t_19227cdc` | 11 | KomgaProvider | blocked on credentials |
-| T10 `t_d6ae631e` | 12 | Downloads (device, inside the native MVP) + sync polish | a chapter downloads and reads with the network off |
+| T14 `t_7eb8c34d` | 4 | Local authority DB: categories, history, read state, position, source mappings | unit tests + the matrix's data-ownership checks |
+| T18 `t_6cc60338` | 5 | Reader modes: vertical + paged, settings, offline pages | both modes read a downloaded chapter with the network off |
+| T15 `t_d6ae631e` | 6 | Device downloads: download, manage, delete, offline read | a chapter downloads, opens in airplane mode, deletes cleanly |
+| T17 `t_338636c0` | 7 | WebView login + cookie sharing into the runtime | an authenticated source works after a WebView login |
+| T16 `t_1b9bcf7e` | 8 | Backup import (source identity) + export round-trip | a Mihon/Komikku backup restores and reconnects to installed extensions |
+| T13 `t_65a17602` | 1 | The gate: run the 20-extension matrix on a device | matrix + capability + offline + ownership rows recorded, with timings |
+| T6 `t_f6e28ea6` | 14 | Tauri desktop with the embedded runtime (desktop jar, same bridge) | Linux artefact launches, `/capabilities` answers, a source browses |
+| T8 `t_19227cdc` | 15 | KomgaProvider | blocked on credentials |
 
 ## Done
 
 | Card | Backlog | Evidence |
 |---|---|---|
-| T1 `t_2a08f8b6` | 4 | 19/19 unit tests, `tsc --noEmit` clean, `svelte-check` 0/0, build 60.8 kB JS / 4.7 kB CSS |
-| T2 `t_3ee23911` | 5 | `npm run smoke` 9/9 direct at `:4567` and 9/9 through the proxy `:8460` |
-| T3 `t_8a225c2a` | 6 | authority tests + browser IndexedDB read-back |
-| T4 `t_ce5c97eb` | 7 | browser at `:8460`: 5 source chips, 1 chapter, reader `2 / 4` resuming from the stored page |
-| T5 `t_6abb03ac` | 8 | `/api/mihon/graphql` → sources JSON; thumbnail 200 `image/jpeg`; `/series/mihon:12` → 200 |
+| T1 `t_2a08f8b6` | 9 | 24/24 unit tests, `tsc --noEmit` clean, `svelte-check` 0/0, build 60.8 kB JS / 4.7 kB CSS |
+| T2 `t_3ee23911` | 10 | `npm run smoke` 9/9 direct at `:4567` and 9/9 through the proxy `:8460` |
+| T3 `t_8a225c2a` | 11 | authority tests + browser IndexedDB read-back |
+| T4 `t_ce5c97eb` | 12 | browser at `:8460`: 5 source chips, 1 chapter, reader `2 / 4` resuming from the stored page |
+| T5 `t_6abb03ac` | 13 | `/api/mihon/graphql` → sources JSON; thumbnail 200 `image/jpeg`; `/series/mihon:12` → 200 |
 
-## The native boundary in one paragraph
+## The gate in one paragraph
 
-On a physical iPhone with no server, no Suwayomi, no desktop and no LAN: add a Mihon extension repo,
-install and update an APK extension, browse/search, open a series, list chapters, render pages, download a
-chapter and read it offline, relaunch and keep library/history/position. Nothing else is in the native MVP.
-The stack is not speculative — `m_extension_server` ships an in-process **OpenJDK Zero interpreter**
-(no JIT) as `OpenJDKRuntime.xcframework` for iOS 13+, device-arch only, behind a four-function Obj-C++
-bridge that starts a loopback HTTP server speaking `POST /dalvik`.
+`docs/native-mvp-test-matrix.md`: 20 real extensions from the live Keiyoushi index (1 438 entries) —
+MangaDex (61 sources), Manga Million (108), XCOMIC (77), MangaFire (7), plus HTML, filters, preferences,
+cookies, auth, headers, WebView, Cloudflare/captcha, relative URLs and image headers — then capability
+checks, an airplane-mode matrix (11 steps plus a "must not happen" list), and data-ownership checks.
+`npm run matrix:check` validates every row against the live index today: 20 rows, missing 0, APK
+unreachable 0, version drift 0, source-id loss 0.
 
 ## Incident recorded on the board
 
