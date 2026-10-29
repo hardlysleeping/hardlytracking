@@ -38,12 +38,14 @@ The reader is free and stays free: standalone iPhone reading, Mihon/Komikku exte
 library, downloads, history, progress, manual backup export/import and Komga/Suwayomi all work with no
 account and no subscription.
 
-The only paid capability is **automatic cross-device sync** — $0.99/month or $9.99/year, one
+**Sync and billing are post-launch**, not part of the road to a release — nothing here delays the reader.
+When it ships, the only paid capability is **automatic cross-device sync** — $0.99/month or $9.99/year, one
 `cloudSync` entitlement covering every supported provider on every device under one account. An account
 is asked for only when sync is enabled. Supabase holds identity, the entitlement, the device list and the
 Stripe customer mapping; it never holds the library, history, downloads, extensions or sync documents —
 those stay on the device and in the user's own cloud storage. If a subscription lapses, sync stops and
-nothing else changes. Plan section: "Sync & monetization — priority 6".
+nothing else changes. Plan section: "Sync & monetization — post-launch". The sync document, merge engine and folder/WebDAV
+transports already exist in `src/lib/sync/` and are tested; they are deliberately not wired into the app.
 
 ## Run it
 
