@@ -7,6 +7,7 @@
  * decided per provider (`SourceProvider.ownsProgress`), never here.
  */
 import type { Chapter, Page, Series } from "../../api/source";
+import { normaliseCategories, type Category } from "../categories";
 import type { Database } from "./open";
 
 export interface ProgressRow {
@@ -97,5 +98,42 @@ export class LibraryStore {
 
   async setPref<T>(key: string, value: T): Promise<void> {
     await this.db.put("prefs", { key, value });
+  }
+
+  // ---- categories: hidden + pinned -----------------------------------------
+  //
+  // In HardlyReader these two marks live in a FreshRSS extension that writes
+  // `feed.priority`. Here the library is ours, so they are rows in our own
+  // database: nothing is written to the Mihon runtime, and there is no "Strict"
+  // mode to reconcile because there is no second authority.
+
+  async listCategories(): Promise<Category[]> {
+    return normaliseCategories(await this.db.all<Category>("categories"));
+  }
+
+  async putCategory(category: Category): Promise<void> {
+    await this.db.put("categories", { ...category } as unknown as Record<string, unknown>);
+  }
+
+  async removeCategory(categoryId: string): Promise<void> {
+    await this.db.remove("categories", categoryId);
+    // Membership lives on the series rows, so a deleted category must be taken off
+    // them too — otherwise a row keeps pointing at an id nothing resolves.
+    for (const series of await this.listSeries()) {
+      const ids = series.categoryIds ?? [];
+      if (!ids.includes(categoryId)) continue;
+      await this.setSeriesCategories(series.id, ids.filter((id) => id !== categoryId));
+    }
+  }
+
+  async setSeriesCategories(seriesId: string, categoryIds: string[]): Promise<void> {
+    const series = await this.getSeries(seriesId);
+    if (series === undefined) throw new Error(`not in the library: ${seriesId}`);
+    await this.db.put("series", { ...series, categoryIds, addedAt: Date.now() } as unknown as Record<string, unknown>);
+  }
+
+  /** Series that belong to one category, for the rail's selection. */
+  async seriesInCategory(categoryId: string): Promise<Series[]> {
+    return (await this.listSeries()).filter((s) => (s.categoryIds ?? []).includes(categoryId));
   }
 }

@@ -36,6 +36,8 @@ export interface Series {
   author?: string;
   description?: string;
   status?: string;
+  /** Ids of the local categories this row is filed under. Empty/absent = uncategorised. */
+  categoryIds?: string[];
 }
 
 export interface Chapter {

@@ -25,6 +25,10 @@ Svelte 5 UI  →  SourceProvider  →  MihonProvider  →  /api/mihon  →  Miho
 - **`LocalProvider`** (`src/api/local.ts`) is the library on this device, and the only provider that
   owns reading progress. `ownsProgress` decides the writer per provider — the server keeps its own
   state, our database keeps ours, and never both.
+- **Hidden and pinned categories** (`src/lib/categories.ts`, `CategoryRail.svelte`) in HardlyReader's
+  look: one eye cycling Hidden → Revealed → Only, one pin cycling Active → Only → Hidden, pinned rows
+  carrying the pin's ring and underlight, a per-row eye and pin, and a rail selection that narrows the
+  library without touching either mark. Both marks are ours — nothing is written to the runtime.
 - **`server/proxy.mjs`** serves the built app and proxies `/api/mihon/*` to the runtime, so the
   browser sees one origin and there is no CORS to configure.
 

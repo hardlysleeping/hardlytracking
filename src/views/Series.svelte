@@ -4,6 +4,7 @@
   import type { Chapter, Series } from "../api/source";
   import Cover from "../components/Cover.svelte";
   import { go } from "../lib/nav";
+  import { categories } from "../state/categories.svelte";
 
   interface Props {
     seriesId: string;
@@ -36,6 +37,15 @@
     }
   }
 
+  /** Membership is stored on the series row; a category toggle is one write. */
+  async function toggleCategory(categoryId: string): Promise<void> {
+    if (series === null) return;
+    const current = series.categoryIds ?? [];
+    const next = current.includes(categoryId) ? current.filter((id) => id !== categoryId) : [...current, categoryId];
+    await categories.assign(series.id, next);
+    series = { ...series, categoryIds: next };
+  }
+
   async function toggleSaved(): Promise<void> {
     if (series === null) return;
     if (saved) await library.unsave(series.id);
@@ -57,6 +67,24 @@
         <div class="actions">
           <button class="ghost" onclick={toggleSaved}>{saved ? "In library" : "Add to library"}</button>
         </div>
+        {#if saved}
+          <div class="cats">
+            <span class="cats-label">Categories</span>
+            {#each categories.items as category (category.id)}
+              <button
+                class="chip"
+                class:on={(series.categoryIds ?? []).includes(category.id)}
+                class:pinned={category.pinned}
+                onclick={() => toggleCategory(category.id)}
+              >
+                {category.name}
+              </button>
+            {/each}
+            {#if categories.items.length === 0}
+              <span class="cats-empty">None yet — make one in the library rail.</span>
+            {/if}
+          </div>
+        {/if}
         {#if series.description}<p class="description">{series.description}</p>{/if}
       </div>
     </header>
@@ -113,6 +141,43 @@
     font-size: 13px;
     line-height: 1.5;
     max-width: 60ch;
+  }
+  .cats {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+  }
+  .cats-label {
+    font-size: 11.5px;
+    color: #7d7d8a;
+    margin-right: 2px;
+  }
+  .chip {
+    all: unset;
+    cursor: pointer;
+    padding: 4px 10px;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+    font-size: 12px;
+    color: #a9a9b6;
+  }
+  .chip:hover {
+    border-color: #3a3a46;
+    color: #e6e6ee;
+  }
+  .chip.on {
+    background: #23232e;
+    border-color: #3a3a46;
+    color: #fff;
+  }
+  .chip.pinned.on {
+    border-color: color-mix(in srgb, var(--tone-pinned) 45%, transparent);
+    color: color-mix(in srgb, var(--tone-pinned) 70%, #fff);
+  }
+  .cats-empty {
+    font-size: 11.5px;
+    color: #6f6f7c;
   }
   .chapters {
     list-style: none;

@@ -4,6 +4,9 @@
   --fg: #e6e6ee;
   --muted: #8a8a96;
   --line: #23232c;
+  /* The pin's tone, the same blue HardlyReader uses for a pinned row. */
+  --tone-pinned: #0078e0;
+  --accent-soft: #23232e;
 }
 
 * {

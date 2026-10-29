@@ -9,7 +9,7 @@
  * desktop card (T6) and must land here, not in a second store.
  */
 
-export const STORES = ["series", "chapters", "progress", "prefs", "pages"] as const;
+export const STORES = ["series", "chapters", "progress", "prefs", "pages", "categories"] as const;
 export type StoreName = (typeof STORES)[number];
 
 export interface Database {
@@ -20,7 +20,7 @@ export interface Database {
 }
 
 const DB_NAME = "hardlytracking";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 function wrap<T>(request: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => {
