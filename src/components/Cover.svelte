@@ -1,8 +1,13 @@
 <script lang="ts">
-  /** A cover, with the honest fallback: a title, not a broken image icon. */
+  /**
+   * A cover, with an honest fallback: the title, not a broken-image icon.
+   *
+   * `loading="lazy"` plus `decoding="async"` is what keeps a 5 000-title library from opening
+   * every image at once; the fixed aspect ratio means nothing reflows when they arrive.
+   */
   interface Props {
     series: { title: string; cover?: string };
-    size?: "grid" | "hero";
+    size?: "grid" | "hero" | "row";
   }
   let { series, size = "grid" }: Props = $props();
   let broken = $state(false);
@@ -10,7 +15,7 @@
 
 <div class="cover {size}">
   {#if series.cover && !broken}
-    <img src={series.cover} alt="" loading="lazy" onerror={() => (broken = true)} />
+    <img src={series.cover} alt="" loading="lazy" decoding="async" onerror={() => (broken = true)} />
   {:else}
     <span class="fallback">{series.title}</span>
   {/if}
@@ -20,8 +25,8 @@
   .cover {
     position: relative;
     overflow: hidden;
-    border-radius: 10px;
-    background: #1c1c22;
+    border-radius: var(--r2);
+    background: var(--surface-2);
     display: grid;
     place-items: center;
   }
@@ -29,8 +34,13 @@
     aspect-ratio: 2 / 3;
   }
   .cover.hero {
-    width: 132px;
+    width: 128px;
     aspect-ratio: 2 / 3;
+  }
+  .cover.row {
+    width: 42px;
+    aspect-ratio: 2 / 3;
+    border-radius: var(--r1);
   }
   img {
     width: 100%;
@@ -39,10 +49,10 @@
     display: block;
   }
   .fallback {
-    padding: 10px;
-    font-size: 12px;
+    padding: var(--s2);
+    font-size: var(--t-xs);
     line-height: 1.3;
-    color: #9a9aa5;
+    color: var(--text-3);
     text-align: center;
   }
 </style>

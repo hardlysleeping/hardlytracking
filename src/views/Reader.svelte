@@ -1,8 +1,27 @@
 <script lang="ts">
+  /**
+   * The reader. Immersive by default, and the most careful screen in the app.
+   *
+   * Three behaviours matter and everything else serves them:
+   *
+   * 1. **The page owns the screen.** No chrome until you ask for it — a tap in the middle, or a
+   *    key. It hides again after three seconds.
+   * 2. **A tap on an edge turns the page**, and which edge means "forward" follows the reading
+   *    direction, not the physical side.
+   * 3. **The position is written as you read**, debounced, together with history — never by
+   *    opening the chapter, which is not the same thing as reading it.
+   *
+   * A downloaded chapter is read from this device: the pages come from the library database as
+   * blobs, so the extension host can be offline and the chapter still opens.
+   */
   import { library } from "../state/library.svelte";
+  import { downloads } from "../state/downloads.svelte";
+  import { settings } from "../state/settings.svelte";
   import { providerFor } from "../api/registry";
-  import type { Page } from "../api/source";
+  import type { Chapter, Page } from "../api/source";
   import { go, pathTo } from "../lib/nav";
+  import { imageSrc } from "../lib/pages";
+  import Sheet from "../components/Sheet.svelte";
 
   interface Props {
     seriesId: string;
@@ -11,30 +30,95 @@
   let { seriesId, chapterId }: Props = $props();
 
   let pages = $state<Page[]>([]);
+  let urls = $state<string[]>([]);
   let index = $state(0);
   let busy = $state(true);
   let error = $state<string | null>(null);
-  let strip = $state(false);
   let read = $state(false);
+  let chapterName = $state("");
+  let chapters = $state<Chapter[]>([]);
+  let fromDownload = $state(false);
+
+  let chrome = $state(true);
+  let settingsOpen = $state(false);
+  let hideTimer: ReturnType<typeof setTimeout> | null = null;
+
+  let scroller = $state<HTMLDivElement | null>(null);
+  let saveTimer: ReturnType<typeof setTimeout> | null = null;
+
+  const MODES = [
+    { id: "vertical", label: "Vertical" },
+    { id: "webtoon", label: "Webtoon" },
+    { id: "paged", label: "Paged" },
+    { id: "ltr", label: "Left → right" },
+    { id: "rtl", label: "Right → left" },
+  ] as const;
+
+  const FITS = [
+    { id: "width", label: "Width" },
+    { id: "height", label: "Height" },
+    { id: "contain", label: "Whole page" },
+  ] as const;
+
+  const horizontal = $derived(settings.readerMode === "paged" || settings.readerMode === "ltr" || settings.readerMode === "rtl");
+  const rtl = $derived(settings.readerMode === "rtl");
 
   $effect(() => {
     void load(chapterId);
   });
 
+  $effect(() => {
+    // Chrome starts visible and then gets out of the way, so a reader who opened the chapter
+    // knows where the controls are before they disappear.
+    if (chrome) arm();
+    return () => {
+      if (hideTimer !== null) clearTimeout(hideTimer);
+    };
+  });
+
+  function arm(): void {
+    if (hideTimer !== null) clearTimeout(hideTimer);
+    hideTimer = setTimeout(() => {
+      chrome = false;
+      hideTimer = null;
+    }, 3200);
+  }
+
+  function showChrome(): void {
+    chrome = true;
+    arm();
+  }
+
   async function load(id: string): Promise<void> {
     if (library.profile === null) return;
     busy = true;
     error = null;
+    index = 0;
     try {
-      pages = await library.pages(id);
+      // A downloaded chapter wins: it is the one that works with no network.
+      const local = await downloads.urls(id);
+      if (local !== null) {
+        urls = local;
+        fromDownload = true;
+        pages = local.map((url, i) => ({ index: i, url }));
+      } else {
+        fromDownload = false;
+        pages = await library.pages(id);
+        // A page that needs headers is loaded through our own server; one that does not is
+        // loaded straight from its URL. `imageSrc` is the single place that decides.
+        urls = pages.map((page) => imageSrc(page));
+      }
       const progress = await library.profile.store.getProgress(id);
       index = Math.min(progress?.page ?? 0, Math.max(pages.length - 1, 0));
-      // A provider whose read marks are the device's (local, dalvik) keeps them in our store,
-      // so the button has to start from the mark we wrote — otherwise it says "Mark read" for
-      // a chapter already marked and the first click writes the opposite of what it reads.
       read = library.ownsProgress(id) ? await library.profile.store.isRead(id) : false;
+
+      const list = await library.chapters(seriesId);
+      chapters = list;
+      chapterName = list.find((row) => row.id === id)?.name ?? "";
       // Opening a chapter is the moment history exists; it is not a read mark.
       await library.remember(seriesId, id, index, pages.length);
+      await tick();
+      scrollToPage(index, "auto");
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
     } finally {
@@ -42,127 +126,472 @@
     }
   }
 
-  /**
-   * Read state is written only when you say so.
-   *
-   * Opening a chapter used to mark it read on the server, which is a write to the
-   * runtime's own database the moment you glance at a page — and on a shared host that
-   * is someone else's data. It is a button now.
-   */
-  async function toggleRead(): Promise<void> {
-    if (library.profile === null) return;
-    try {
-      const provider = providerFor(library.profile.providers, chapterId);
-      await provider.setRead(chapterId, !read);
-      read = !read;
-    } catch (e) {
-      error = e instanceof Error ? e.message : String(e);
+  function tick(): Promise<void> {
+    return new Promise((resolve) => requestAnimationFrame(() => resolve()));
+  }
+
+  /** Page elements are found by index; the scroller is the only element that moves. */
+  function scrollToPage(target: number, behavior: ScrollBehavior = "smooth"): void {
+    const host = scroller;
+    if (host === null) return;
+    const child = host.querySelector<HTMLElement>(`[data-page="${target}"]`);
+    if (child === null) return;
+    if (horizontal) {
+      host.scrollTo({ left: child.offsetLeft, behavior });
+    } else {
+      host.scrollTo({ top: child.offsetTop, behavior });
     }
   }
 
-  async function remember(): Promise<void> {
-    if (library.profile === null || pages.length === 0) return;
-    await library.remember(seriesId, chapterId, index, pages.length);
+  function onScroll(): void {
+    const host = scroller;
+    if (host === null || pages.length === 0) return;
+    const position = horizontal ? host.scrollLeft : host.scrollTop;
+    // The page whose top/left edge is nearest the viewport's is the one being read.
+    let best = 0;
+    let bestDistance = Number.POSITIVE_INFINITY;
+    for (const element of host.querySelectorAll<HTMLElement>("[data-page]")) {
+      const start = horizontal ? element.offsetLeft : element.offsetTop;
+      const distance = Math.abs(start - position);
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        best = Number(element.dataset.page);
+      }
+    }
+    if (best !== index) {
+      index = best;
+      void saveSoon();
+    }
+  }
+
+  function saveSoon(): void {
+    if (saveTimer !== null) clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => {
+      saveTimer = null;
+      void library.remember(seriesId, chapterId, index, pages.length);
+    }, 500);
   }
 
   function step(delta: number): void {
     const next = Math.min(Math.max(index + delta, 0), Math.max(pages.length - 1, 0));
     if (next === index) return;
     index = next;
-    void remember();
+    scrollToPage(next);
+    void saveSoon();
   }
 
-  function onKey(event: KeyboardEvent): void {
-    if (event.key === "ArrowRight" || event.key === "ArrowDown" || event.key === " ") {
-      event.preventDefault();
-      step(1);
-    } else if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
-      event.preventDefault();
-      step(-1);
+  /** Which side of the screen means "next", given the reading direction. */
+  function advance(direction: "left" | "right"): void {
+    const forward = direction === (rtl ? "left" : "right");
+    step(forward ? 1 : -1);
+  }
+
+  async function toggleRead(): Promise<void> {
+    if (library.profile === null) return;
+    try {
+      if (library.ownsProgress(chapterId)) {
+        await library.profile.store.setRead(chapterId, !read);
+      } else {
+        const provider = providerFor(library.profile.providers, chapterId);
+        await provider.setRead(chapterId, !read);
+      }
+      read = !read;
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e);
     }
+  }
+
+  const position = $derived(chapters.findIndex((row) => row.id === chapterId));
+  const previous = $derived(position > 0 ? chapters[position - 1] : null);
+  const following = $derived(position >= 0 && position < chapters.length - 1 ? chapters[position + 1] : null);
+
+  function onKey(event: KeyboardEvent): void {
+    if (settingsOpen) return;
+    const key = event.key;
+    if (key === "ArrowRight" || key === "ArrowDown" || key === " " || key === "PageDown") {
+      event.preventDefault();
+      step(key === " " || key === "PageDown" ? 1 : rtl ? -1 : 1);
+    } else if (key === "ArrowLeft" || key === "ArrowUp" || key === "PageUp") {
+      event.preventDefault();
+      step(key === "PageUp" ? -1 : rtl ? 1 : -1);
+    } else if (key === "j" || key === "J") {
+      if (following !== null) go(pathTo("read", seriesId, following.id));
+    } else if (key === "k" || key === "K") {
+      if (previous !== null) go(pathTo("read", seriesId, previous.id));
+    } else if (key === "f" || key === "F") {
+      if (document.fullscreenElement === null) void document.documentElement.requestFullscreen?.();
+      else void document.exitFullscreen?.();
+    } else if (key === "r" || key === "R") {
+      void toggleRead();
+    } else if (key === "Escape") {
+      if (chrome) go(pathTo("series", seriesId));
+      else showChrome();
+    }
+  }
+
+  function mode(next: typeof settings.readerMode): void {
+    settings.set("readerMode", next);
+    requestAnimationFrame(() => scrollToPage(index, "auto"));
   }
 </script>
 
 <svelte:window onkeydown={onKey} />
 
-<section class="reader">
-  <header>
-    <button class="ghost" onclick={() => go(pathTo("series", seriesId))}>Back</button>
-    <span class="pos">{pages.length > 0 ? `${index + 1} / ${pages.length}` : "no pages"}</span>
-    <button class="ghost" onclick={toggleRead}>{read ? "Read" : "Mark read"}</button>
-    <button class="ghost" onclick={() => (strip = !strip)}>{strip ? "Single" : "Strip"}</button>
+<section class="reader" class:hide={!chrome}>
+  <header class="chrome top" class:shown={chrome}>
+    <button class="btn ghost icon" aria-label="Back to series" onclick={() => go(pathTo("series", seriesId))}>
+      <svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7" /></svg>
+    </button>
+    <div class="titles">
+      <span class="t">{chapterName || "Chapter"}</span>
+      <span class="s">{pages.length > 0 ? `${index + 1} / ${pages.length}` : ""}{fromDownload ? " · offline" : ""}</span>
+    </div>
+    <button class="btn ghost icon" aria-label="Mark as read" aria-pressed={read} onclick={() => void toggleRead()}>
+      <svg viewBox="0 0 24 24"><path d={read ? "M5 13l4 4L19 7" : "M5 12h14"} /></svg>
+    </button>
+    <button class="btn ghost icon" aria-label="Reader settings" onclick={() => (settingsOpen = true)}>
+      <svg viewBox="0 0 24 24"><path d="M4 7h9M17 7h3M4 17h3M11 17h9M15 5v4M9 15v4" /></svg>
+    </button>
   </header>
 
   {#if error}<p class="banner">{error}</p>{/if}
-  {#if busy}<p class="empty">Fetching pages…</p>{/if}
+  {#if busy}<p class="loading">Fetching pages…</p>{/if}
 
   {#if pages.length > 0}
-    {#if strip}
-      <div class="strip">
-        {#each pages as page (page.index)}
-          <img src={page.url} alt={`Page ${page.index + 1}`} loading="lazy" />
-        {/each}
-      </div>
-    {:else}
-      <div class="stage">
-        <img src={pages[index].url} alt={`Page ${index + 1}`} />
-        <button class="zone left" aria-label="Previous page" onclick={() => step(-1)}></button>
-        <button class="zone right" aria-label="Next page" onclick={() => step(1)}></button>
-      </div>
-    {/if}
+    <div
+      class="scroller"
+      class:horizontal
+      class:rtl
+      bind:this={scroller}
+      onscroll={onScroll}
+      style:--gap="{settings.pageGap}px"
+      style:--fit={settings.readerFit}
+    >
+      {#each pages as page (page.index)}
+        <div class="page" data-page={page.index}>
+          <img
+            src={urls[page.index] ?? page.url}
+            alt={`Page ${page.index + 1} of ${pages.length}`}
+            loading={page.index < 3 ? "eager" : "lazy"}
+            decoding="async"
+          />
+        </div>
+      {/each}
+    </div>
+
+    <!-- Tap zones: they sit above the pages and only exist when chrome is hidden, so a tap on a
+         control is never swallowed by a zone. -->
+    <div class="zones" class:off={chrome || !settings.tapZones}>
+      <button class="zone left" aria-label="Previous page" onclick={() => advance("left")}></button>
+      <button class="zone mid" aria-label="Show controls" onclick={showChrome}></button>
+      <button class="zone right" aria-label="Next page" onclick={() => advance("right")}></button>
+    </div>
   {/if}
+
+  <footer class="chrome bottom" class:shown={chrome}>
+    <div class="track">
+      <span class="count">{pages.length > 0 ? `${index + 1} / ${pages.length}` : "—"}</span>
+      <input
+        type="range"
+        min="0"
+        max={Math.max(pages.length - 1, 0)}
+        value={index}
+        aria-label="Page"
+        oninput={(event) => {
+          index = Number(event.currentTarget.value);
+          scrollToPage(index, "auto");
+          void saveSoon();
+        }}
+      />
+    </div>
+    <!-- Both chapter buttons sit at the bottom edge, where a thumb already is. -->
+    <div class="turn">
+      <button class="btn" disabled={previous === null} onclick={() => previous && go(pathTo("read", seriesId, previous.id))}>‹ Previous chapter</button>
+      <button class="btn" disabled={following === null} onclick={() => following && go(pathTo("read", seriesId, following.id))}>Next chapter ›</button>
+    </div>
+  </footer>
 </section>
 
+<Sheet open={settingsOpen} title="Reader" onclose={() => (settingsOpen = false)}>
+  <div class="group">
+    <span class="label">Reading mode</span>
+    <div class="chips">
+      {#each MODES as option (option.id)}
+        <button class="chip" class:on={settings.readerMode === option.id} onclick={() => mode(option.id)}>{option.label}</button>
+      {/each}
+    </div>
+  </div>
+  <div class="group">
+    <span class="label">Fit</span>
+    <div class="chips">
+      {#each FITS as option (option.id)}
+        <button class="chip" class:on={settings.readerFit === option.id} onclick={() => settings.set("readerFit", option.id)}>{option.label}</button>
+      {/each}
+    </div>
+  </div>
+  <label class="row">
+    <span>Page spacing</span>
+    <input type="range" min="0" max="24" step="2" value={settings.pageGap} oninput={(event) => settings.set("pageGap", Number(event.currentTarget.value))} />
+  </label>
+  <label class="row">
+    <span>Tap zones turn pages</span>
+    <input type="checkbox" checked={settings.tapZones} onchange={(event) => settings.set("tapZones", event.currentTarget.checked)} />
+  </label>
+  <label class="row">
+    <span>Keep the screen awake</span>
+    <input type="checkbox" checked={settings.keepAwake} onchange={(event) => settings.set("keepAwake", event.currentTarget.checked)} />
+  </label>
+  <p class="hint">Keys: ← → turn pages, J/K change chapter, F fullscreen, R mark read, Esc back.</p>
+</Sheet>
+
 <style>
-  .reader header {
+  .reader {
+    position: fixed;
+    inset: 0;
+    background: #07070a;
+    color: var(--text-1);
     display: flex;
-    align-items: center;
-    gap: 12px;
-    margin-bottom: 12px;
-  }
-  .pos {
-    flex: 1;
-    text-align: center;
-    color: #8a8a96;
-    font-size: 13px;
-  }
-  .stage {
-    position: relative;
-    display: grid;
-    place-items: center;
-    background: #0b0b0e;
-    border-radius: 10px;
+    flex-direction: column;
     overflow: hidden;
   }
-  .stage img {
-    max-width: 100%;
-    max-height: 82vh;
-    display: block;
+
+  .chrome {
+    position: absolute;
+    left: 0;
+    right: 0;
+    z-index: 6;
+    display: flex;
+    align-items: center;
+    gap: var(--s2);
+    padding: var(--s2) var(--s3);
+    background: color-mix(in srgb, #000 72%, transparent);
+    backdrop-filter: blur(14px);
+    transition: opacity var(--dur), transform var(--dur);
   }
+
+  .chrome.top {
+    top: 0;
+    padding-top: calc(var(--s2) + var(--safe-t));
+  }
+
+  .chrome.bottom {
+    bottom: 0;
+    padding-bottom: calc(var(--s2) + var(--safe-b));
+  }
+
+  .chrome:not(.shown) {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .chrome.top:not(.shown) {
+    transform: translateY(-100%);
+  }
+
+  .chrome.bottom:not(.shown) {
+    transform: translateY(100%);
+  }
+
+  .chrome svg {
+    width: 20px;
+    height: 20px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.7;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .titles {
+    flex: 1;
+    min-width: 0;
+    display: grid;
+    gap: 1px;
+  }
+
+  .t {
+    font-size: var(--t-sm);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .s {
+    font-size: var(--t-xs);
+    color: var(--text-3);
+  }
+
+  .scroller {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--gap);
+    scrollbar-width: none;
+    /* Room for the chrome, so the first and last page are never under a bar. */
+    padding: var(--s7) 0;
+  }
+
+  .scroller::-webkit-scrollbar {
+    display: none;
+  }
+
+  .scroller.horizontal {
+    flex-direction: row;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scroll-snap-type: x mandatory;
+    gap: 0;
+  }
+
+  .scroller.horizontal.rtl {
+    direction: rtl;
+  }
+
+  .page {
+    flex: none;
+    display: grid;
+    place-items: center;
+    width: 100%;
+  }
+
+  .scroller.horizontal .page {
+    width: 100vw;
+    height: 100%;
+    scroll-snap-align: start;
+  }
+
+  img {
+    display: block;
+    max-width: 100%;
+    height: auto;
+    /* `--fit` is width / height / contain, and each is a different way to fill the screen. */
+    object-fit: var(--fit);
+  }
+
+  .scroller:not(.horizontal) img {
+    width: 100%;
+    max-width: 900px;
+  }
+
+  .scroller.horizontal img {
+    max-height: 100vh;
+    width: auto;
+    margin: auto;
+  }
+
+  .zones {
+    position: absolute;
+    inset: 0;
+    z-index: 5;
+    display: grid;
+    grid-template-columns: 32% 36% 32%;
+  }
+
+  .zones.off {
+    pointer-events: none;
+  }
+
   .zone {
     all: unset;
-    position: absolute;
-    top: 0;
-    bottom: 0;
-    width: 35%;
     cursor: pointer;
+    height: 100%;
   }
-  .zone.left {
-    left: 0;
+
+  .loading {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    color: var(--text-3);
+    font-size: var(--t-sm);
   }
-  .zone.right {
-    right: 0;
-  }
-  .strip {
+
+  .chrome.bottom {
     display: grid;
-    gap: 6px;
-    justify-items: center;
+    gap: var(--s2);
+    padding-bottom: calc(var(--s3) + var(--safe-b));
   }
-  .strip img {
-    max-width: min(100%, 900px);
+
+  .track {
+    display: flex;
+    align-items: center;
+    gap: var(--s3);
   }
-  .empty {
-    color: #8a8a96;
-    font-size: 14px;
+
+  .turn {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--s2);
+  }
+
+  .turn .btn {
+    min-height: 48px;
+    justify-content: center;
+    color: var(--text-1);
+    border-color: var(--line-strong);
+    background: color-mix(in srgb, var(--surface) 70%, transparent);
+  }
+
+  .turn .btn:disabled {
+    opacity: 0.35;
+  }
+
+  .track input {
+    flex: 1;
+    accent-color: var(--accent);
+  }
+
+  .count {
+    font-size: var(--t-sm);
+    color: var(--text-2);
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .group {
+    display: grid;
+    gap: var(--s2);
+  }
+
+  .label {
+    font-size: var(--t-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-3);
+  }
+
+  .chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--s2);
+  }
+
+  .row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--s3);
+    min-height: 36px;
+    font-size: var(--t-md);
+  }
+
+  .hint {
+    margin: 0;
+    font-size: var(--t-xs);
+    color: var(--text-3);
+    line-height: 1.6;
+  }
+
+  .banner {
+    position: absolute;
+    top: 64px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 7;
+    max-width: 90vw;
+    background: color-mix(in srgb, var(--danger) 20%, #000);
   }
 </style>

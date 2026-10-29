@@ -4,7 +4,7 @@ A cross-platform manga reader with a Mihon/Komikku source layer, built on the
 architecture of HardlyReader: one Svelte 5 app, one `SourceProvider` seam, and the
 same UI on web/PWA and (later) packaged apps.
 
-**Status: web MVP, and it reads.** Add a Mihon extension repository by URL, install an extension
+**Status: iPhone-first web MVP, and it reads.** Add a Mihon extension repository by URL, install an extension
 from it, browse a source, open a series, read a chapter — all through a real extension host. The
 library remembers where you were and offers it back.
 
@@ -27,6 +27,18 @@ Svelte 5 UI  →  SourceProvider  →  MihonProvider  →  /api/mihon  →  Miho
 - **`LocalProvider`** (`src/api/local.ts`) is the library on this device. `ownsProgress` decides the
   writer per provider — the server keeps its own state, our database keeps ours, and never both. Two
   providers own it here: `local` and `dalvik` (a `/dalvik` host has no read-state API at all).
+- **Five destinations, phone-first** — Library, Updates, Browse, History, More, with a bottom bar.
+  Series pages and the reader push on top of a destination; the reader takes the whole screen and
+  hides its chrome until you tap. The same shell grows into a rail and a sidebar on a wide window,
+  but the phone layout is the one being built first.
+- **Reader modes** — vertical, webtoon, paged, left-to-right and right-to-left, with fit width /
+  height / whole page, page spacing, edge tap zones that follow the reading direction, and
+  keyboard: arrows, space, J/K for chapters, F, R, Esc.
+- **Downloads** — pages kept as blobs in the device database, read with no network at all; the
+  reader says `· offline` when it is reading them.
+- **History and Updates** — history grouped Today / Yesterday / This week, each row with Continue;
+  updates are the library's own chapter lists read again, newest first.
+- **Backup & restore** — one JSON file out and in, free, using the same document format as sync.
 - **Extension repositories** — one URL in, the index out: paste a repository (Keiyoushi publishes
   1 438 extensions), search it, install or update by version code. Indexes and APKs are fetched
   through `/api/repo` so the page stays on one origin; the host itself has no repository support.

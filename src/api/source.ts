@@ -54,11 +54,25 @@ export interface Chapter {
   number: number;
   pageCount: number;
   read: boolean;
+  /**
+   * When the chapter was published, in ms, when the host says so.
+   *
+   * Optional because the runtime does not always know: a missing date is left missing rather than
+   * filled with "now", which would make every chapter look new on every refresh.
+   */
+  uploadedAt?: number;
 }
 
 export interface Page {
   index: number;
   url: string;
+  /**
+   * Headers the source requires to serve this image (`Referer`, `Origin`, …).
+   *
+   * An `<img>` cannot send them, so a page that carries headers is fetched through the app's
+   * `/api/img` route instead of being pointed at directly. Absent means "plain URL, load it".
+   */
+  headers?: Record<string, string>;
 }
 
 export interface Paged<T> {

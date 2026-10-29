@@ -1,188 +1,206 @@
 <script lang="ts">
+  /**
+   * Browse: where sources live.
+   *
+   * Three doors, in the order a reader needs them: a source (browse it), every source at once
+   * (global search), and the extension manager (get more sources). Extensions are a first-class
+   * door rather than an advanced setting, because extension compatibility is what this app is.
+   */
   import { library } from "../state/library.svelte";
-  import { go } from "../lib/nav";
-  import { providerFor } from "../api/registry";
-  import type { Series } from "../api/source";
-  import SeriesGrid from "../components/SeriesGrid.svelte";
+  import { go, pathTo } from "../lib/nav";
 
-  let sourceId = $state<string | null>(null);
-  let mode = $state<"POPULAR" | "LATEST" | "SEARCH">("POPULAR");
+  let { current = null }: { current?: string | null } = $props();
+
   let query = $state("");
-  let items = $state<Series[]>([]);
-  let hasNext = $state(false);
-  let page = $state(1);
-  let busy = $state(false);
-  let error = $state<string | null>(null);
-  /** A host that did not answer is worth saying once, here, in words. */
-  const hostWarning = $derived(library.profile?.warnings.find((w) => w.startsWith("dalvik:")) ?? null);
 
-  async function run(next = 1): Promise<void> {
-    if (library.profile === null || sourceId === null) return;
-    if (mode === "SEARCH" && query.trim() === "") return;
-    busy = true;
-    error = null;
-    try {
-      const provider = providerFor(library.profile.providers, sourceId);
-      const result =
-        mode === "POPULAR"
-          ? await provider.popular(sourceId, next)
-          : mode === "LATEST"
-            ? await provider.latest(sourceId, next)
-            : await provider.search(sourceId, query.trim(), next);
-      items = next === 1 ? result.items : [...items, ...result.items];
-      hasNext = result.hasNext;
-      page = next;
-    } catch (e) {
-      error = e instanceof Error ? e.message : String(e);
-    } finally {
-      busy = false;
-    }
-  }
+  const sources = $derived.by(() => {
+    const needle = query.trim().toLowerCase();
+    const list = library.sources.filter(
+      (source) => needle === "" || `${source.name} ${source.lang ?? ""}`.toLowerCase().includes(needle),
+    );
+    // Grouped by provider, then by name, so a 60-source extension is a block and not a wall.
+    return [...list].sort((a, b) => a.provider.localeCompare(b.provider) || a.name.localeCompare(b.name) || (a.lang ?? "").localeCompare(b.lang ?? ""));
+  });
 
-  function pick(id: string): void {
-    sourceId = id;
-    items = [];
-    void run(1);
-  }
+  const byProvider = $derived(
+    [...new Set(sources.map((source) => source.provider))].map((provider) => ({
+      provider,
+      rows: sources.filter((source) => source.provider === provider),
+    })),
+  );
 
+  const installed = $derived(library.extensions.length);
+  const hostDown = $derived(library.sources.length === 0 && (library.profile?.warnings.length ?? 0) > 0);
 </script>
 
-<section>
-  <header class="head">
+<section class="view">
+  <header class="top">
     <h1>Browse</h1>
-    <button class="ghost" onclick={() => go("/extensions")}>Extensions</button>
+    <div class="acts">
+      <button class="btn ghost" onclick={() => go("/search")}>Search all</button>
+      <button class="btn" onclick={() => go("/extensions")}>Extensions{installed > 0 ? ` · ${installed}` : ""}</button>
+    </div>
   </header>
 
-  {#if hostWarning && library.sources.length === 0}
-    <p class="note warn">No extension host answered, so there is nothing to browse yet.</p>
+  {#if hostDown}
+    <p class="note warn">No extension host answered, so there is nothing to browse yet. Check the runtime, then reload.</p>
   {/if}
 
   {#if library.sources.length === 0}
-    <p class="empty">
-      No sources yet. <button class="ghost inline" onclick={() => go("/extensions")}>Add a repository</button> and
-      install an extension — its sources appear here.
-    </p>
+    <div class="blank">
+      <p class="blankline">No sources yet.</p>
+      <p class="blanksub">Add a repository and install an extension — its sources appear here, one row each.</p>
+      <div class="blankacts">
+        <button class="btn primary" onclick={() => go("/extensions")}>Add a repository</button>
+      </div>
+    </div>
   {:else}
-    <div class="sources">
-      {#each library.sources as source (source.id)}
-        <button class="chip" class:on={source.id === sourceId} onclick={() => pick(source.id)}>
-          {source.name}
-          <!-- A multi-source APK exposes dozens of sources with the same name; the language is
-               the only thing that tells them apart, so it belongs in the chip. -->
-          {#if source.lang}<span class="lang">{source.lang}</span>{/if}
-          {#if source.nsfw}<span class="nsfw">18+</span>{/if}
-        </button>
-      {/each}
-    </div>
-  {/if}
+    <input class="field search" type="search" placeholder="Find a source" bind:value={query} aria-label="Find a source" />
 
-  {#if sourceId}
-    <div class="modes">
-      <button class="chip" class:on={mode === "POPULAR"} onclick={() => { mode = "POPULAR"; void run(1); }}>Popular</button>
-      <button class="chip" class:on={mode === "LATEST"} onclick={() => { mode = "LATEST"; void run(1); }}>Latest</button>
-      <form class="search" onsubmit={(e) => { e.preventDefault(); mode = "SEARCH"; void run(1); }}>
-        <input bind:value={query} placeholder="Search this source" />
-        <button class="ghost" type="submit">Search</button>
-      </form>
-    </div>
+    {#each byProvider as group (group.provider)}
+      <section class="group">
+        <h2>{group.provider}<span>{group.rows.length}</span></h2>
+        <div class="rows">
+          {#each group.rows as source (source.id)}
+            <button class="row" class:current={current === source.id} onclick={() => go(pathTo("source", source.id))}>
+              <span class="name">{source.name}</span>
+              {#if source.lang}<span class="lang">{source.lang}</span>{/if}
+              {#if source.nsfw}<span class="nsfw">18+</span>{/if}
+              <span class="chev" aria-hidden="true">›</span>
+            </button>
+          {/each}
+        </div>
+      </section>
+    {/each}
 
-    {#if error}<p class="banner">{error}</p>{/if}
-    {#if busy && items.length === 0}<p class="empty">Loading…</p>{/if}
-
-    <SeriesGrid series={items} empty="This source returned nothing." />
-    {#if hasNext}
-      <button class="ghost more" disabled={busy} onclick={() => run(page + 1)}>More</button>
+    {#if sources.length === 0}
+      <p class="empty">No source matches “{query}”.</p>
     {/if}
   {/if}
 </section>
 
 <style>
-  .head {
+  .view {
+    padding: var(--s4) var(--s4) var(--s7);
+    max-width: 900px;
+  }
+
+  .top {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 12px;
-    margin-bottom: 16px;
+    gap: var(--s3);
+    padding-top: var(--safe-t);
+    margin-bottom: var(--s4);
   }
+
   h1 {
-    font-size: 22px;
-    font-weight: 600;
-    margin: 0;
+    font-size: var(--t-2xl);
+    font-weight: 650;
   }
-  /* The file input is the browser's own control; keep it out of the way and style the label. */
-  
-  
-  
-  
-  .note {
-    color: #8fd6a8;
-    font-size: 13px;
-    margin: 0 0 12px;
-  }
-  .note.warn {
-    color: #e0b06b;
-  }
-  .sources,
-  .modes {
+
+  .acts {
     display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    margin-bottom: 16px;
-    align-items: center;
+    gap: var(--s2);
   }
-  .chip {
+
+  .search {
+    width: 100%;
+    min-height: 38px;
+    margin-bottom: var(--s4);
+  }
+
+  .group {
+    margin-bottom: var(--s4);
+  }
+
+  .group h2 {
+    display: flex;
+    align-items: baseline;
+    gap: var(--s2);
+    font-size: var(--t-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-3);
+    margin-bottom: var(--s1);
+  }
+
+  .group h2 span {
+    font-weight: 400;
+    letter-spacing: 0;
+  }
+
+  .rows {
+    display: grid;
+  }
+
+  .row {
     all: unset;
     cursor: pointer;
-    padding: 6px 12px;
-    border-radius: 999px;
-    background: #1c1c22;
-    color: #c9c9d4;
-    font-size: 13px;
+    display: flex;
+    align-items: center;
+    gap: var(--s2);
+    padding: var(--s3) var(--s2);
+    border-radius: var(--r1);
+    min-height: 44px;
+    box-sizing: border-box;
+    border-bottom: 1px solid var(--line);
   }
-  .chip.on {
-    background: #2c2c38;
-    color: #fff;
+
+  .row:hover {
+    background: var(--surface-2);
   }
+
+  .row.current {
+    background: var(--surface-2);
+  }
+
+  .name {
+    flex: 1;
+    font-size: var(--t-md);
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
   .lang {
-    margin-left: 5px;
-    font-size: 10.5px;
+    font-size: var(--t-xs);
     letter-spacing: 0.04em;
     text-transform: uppercase;
-    color: #7d7d8c;
+    color: var(--text-3);
   }
+
   .nsfw {
-    font-size: 10px;
-    color: #e0796b;
-    margin-left: 6px;
+    font-size: var(--t-xs);
+    color: var(--danger);
   }
-  .search {
-    display: flex;
-    gap: 8px;
-    flex: 1;
-    min-width: 220px;
+
+  .chev {
+    color: var(--text-3);
+    font-size: var(--t-lg);
   }
-  .search input {
-    flex: 1;
-    background: #16161c;
-    border: 1px solid #2a2a34;
-    border-radius: 8px;
-    padding: 7px 10px;
-    color: #e6e6ee;
-    font: inherit;
-    font-size: 13px;
+
+  .blank {
+    display: grid;
+    gap: var(--s2);
+    padding-top: var(--s6);
+    max-width: 48ch;
   }
-  .inline {
-    padding: 0;
-    border: 0;
-    color: #b9b9c6;
-    text-decoration: underline;
-    text-underline-offset: 2px;
+
+  .blankline {
+    margin: 0;
+    font-size: var(--t-lg);
   }
-  .empty {
-    color: #8a8a96;
-    font-size: 14px;
+
+  .blanksub {
+    margin: 0;
+    font-size: var(--t-sm);
+    line-height: 1.6;
+    color: var(--text-2);
   }
-  .more {
-    margin-top: 18px;
+
+  .blankacts {
+    margin-top: var(--s2);
   }
 </style>

@@ -403,6 +403,7 @@ export function createDalvikProvider(options: DalvikProviderOptions): SourceProv
       number,
       pageCount: 0,
       read: false,
+      ...(typeof chapter.date_upload === "number" && chapter.date_upload > 0 ? { uploadedAt: chapter.date_upload } : {}),
     };
   }
 
@@ -509,7 +510,12 @@ export function createDalvikProvider(options: DalvikProviderOptions): SourceProv
         if (address === undefined) {
           throw new DalvikError(`page ${index} came back without an image address`, 0);
         }
-        return { index: typeof page.index === "number" ? page.index : index, url: address };
+        const headers = page.headers !== null && typeof page.headers === "object" ? page.headers : undefined;
+        return {
+          index: typeof page.index === "number" ? page.index : index,
+          url: address,
+          ...(headers === undefined || Object.keys(headers).length === 0 ? {} : { headers }),
+        };
       });
     },
 

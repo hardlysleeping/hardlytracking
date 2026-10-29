@@ -1,311 +1,396 @@
 <script lang="ts">
   /**
-   * Extensions: repositories in, APKs installed out.
+   * Extensions: repositories, what is installed, and what can be installed.
    *
-   * This is the screen Mihon users expect — paste a repository URL, see what it publishes,
-   * install an extension — and it is the only way extensions get installed here. The APK is
-   * downloaded by the app from the index's own URL and handed to the host as bytes, because
-   * the host has no install route and no repository support of its own.
+   * Three sections in the order they are used — a repository is where extensions come from, an
+   * installed extension is what the runtime is actually running, and "available" is the index
+   * narrowed by a search. The runtime's internals (a JVM, an APK handle) stay out of the way: the
+   * user installed an extension, not a virtual machine.
    */
   import { library } from "../state/library.svelte";
-  import { RepositoryError, describeEntry, matches, type Repository } from "../lib/extensions/repository";
   import { updateState, type ExtensionEntry } from "../lib/extensions/index";
+  import { RepositoryError, type Repository } from "../lib/extensions/repository";
 
-  let url = $state("");
-  let query = $state("");
-  let busy = $state<string | null>(null);
+  let section = $state<"installed" | "available" | "repositories">("installed");
+
+  let repoUrl = $state("");
+  let adding = $state(false);
   let error = $state<string | null>(null);
-  let note = $state<string | null>(null);
-  let entries = $state<Array<{ repoUrl: string; entry: ExtensionEntry }>>([]);
-  let loaded = $state(false);
+  let notice = $state<string | null>(null);
 
-  /** Installed by package name: an extension is its package, not the repository it came from. */
-  const installed = $derived(new Map(library.extensions.map((row) => [row.packageId, row])));
+  let entries = $state<ExtensionEntry[]>([]);
+  let loading = $state(false);
+  let search = $state("");
+  let activeRepo = $state<string | null>(null);
+  let installing = $state<string | null>(null);
 
-  $effect(() => {
-    if (library.profile === null || loaded) return;
-    void readAll();
+  const installed = $derived(library.extensions);
+
+  /** package id -> installed row, so an entry knows whether it is new, current or old. */
+  const byPackage = $derived(new Map(installed.map((row) => [row.packageId, row])));
+
+  const matched = $derived.by(() => {
+    const needle = search.trim().toLowerCase();
+    if (needle === "") return entries;
+    return entries.filter((entry) =>
+      `${entry.name} ${entry.pkg} ${entry.sources.map((source) => source.lang).join(" ")}`.toLowerCase().includes(needle),
+    );
   });
 
-  async function readAll(): Promise<void> {
-    if (library.profile === null) return;
-    loaded = true;
-    const rows = [...library.repos];
-    if (rows.length === 0) {
-      entries = [];
-      return;
-    }
-    const collected: Array<{ repoUrl: string; entry: ExtensionEntry }> = [];
-    for (const repo of rows) {
-      try {
-        for (const entry of await library.repoEntries(repo.url)) collected.push({ repoUrl: repo.url, entry });
-      } catch (e) {
-        error = `${repo.name}: ${e instanceof Error ? e.message : String(e)}`;
-      }
-    }
-    entries = collected.sort((a, b) => a.entry.name.localeCompare(b.entry.name));
-  }
+  /** A live repository publishes over a thousand entries; drawing them all is a stall. */
+  const shown = $derived(matched.slice(0, 120));
 
-  async function add(event: Event): Promise<void> {
-    event.preventDefault();
-    const target = url.trim();
-    if (target === "") return;
-    busy = "repo";
+  async function addRepository(): Promise<void> {
+    const url = repoUrl.trim();
+    if (url === "") return;
+    adding = true;
     error = null;
-    note = null;
+    notice = null;
     try {
-      const repository: Repository = await library.addRepository(target);
-      url = "";
-      note = `${repository.name} — ${repository.extensions.length} extensions`;
-      await readAll();
+      const repository: Repository = await library.addRepository(url);
+      repoUrl = "";
+      notice = `${repository.name} — ${repository.extensions.length} extensions`;
+      section = "available";
+      await openRepository(repository.url);
     } catch (e) {
-      // A repository URL is guesswork on the user's side; the error has to name what was tried.
+      // A repository URL is the user's guess; the error has to say what was tried.
       error = e instanceof RepositoryError && e.tried.length > 0 ? `${e.message} — tried ${e.tried.join(", ")}` : e instanceof Error ? e.message : String(e);
     } finally {
-      busy = null;
+      adding = false;
     }
   }
 
-  async function install(entry: ExtensionEntry, repoUrl: string): Promise<void> {
-    busy = entry.pkg;
+  async function openRepository(url: string): Promise<void> {
+    activeRepo = url;
+    loading = true;
     error = null;
-    note = null;
     try {
-      const row = await library.installEntry(entry, repoUrl);
-      note = `${entry.name} ${entry.version} installed — ${row.sources.length} sources`;
+      entries = await library.repoEntries(url);
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e);
+      entries = [];
+    } finally {
+      loading = false;
+    }
+  }
+
+  async function install(entry: ExtensionEntry): Promise<void> {
+    if (activeRepo === null) return;
+    installing = entry.pkg;
+    error = null;
+    notice = null;
+    try {
+      const row = await library.installEntry(entry, activeRepo);
+      notice = `${entry.name} ${entry.version} installed — ${row.sources.length} sources`;
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
     } finally {
-      busy = null;
+      installing = null;
     }
   }
 
-  async function remove(repoUrl: string): Promise<void> {
-    await library.removeRepository(repoUrl);
-    await readAll();
+  async function remove(url: string): Promise<void> {
+    await library.removeRepository(url);
+    if (activeRepo === url) {
+      activeRepo = null;
+      entries = [];
+    }
   }
 
-  /**
-   * A live repository publishes over a thousand entries; drawing them all is a stall, not a
-   * feature. The search box is how you narrow, and the count says what is being shown.
-   */
-  const visible = $derived(entries.filter((row) => matches(row.entry, query)).slice(0, 120));
+  function stateOf(entry: ExtensionEntry): string {
+    const row = byPackage.get(entry.pkg);
+    return updateState(row === undefined || row.versionCode === undefined ? undefined : { versionCode: row.versionCode }, entry);
+  }
+
+  function languages(entry: ExtensionEntry): string {
+    const langs = entry.sources.map((source) => source.lang).filter((lang, index, all) => all.indexOf(lang) === index);
+    return langs.join(", ") || "—";
+  }
 </script>
 
-<section>
-  <header class="head">
+<section class="view">
+  <header class="top">
     <h1>Extensions</h1>
-    <span class="count">{installed.size} installed</span>
+    <span class="count">{installed.length} installed</span>
   </header>
 
-  <form class="add" onsubmit={add}>
-    <input
-      bind:value={url}
-      placeholder="https://raw.githubusercontent.com/keiyoushi/extensions/repo"
-      aria-label="Repository URL"
-      spellcheck="false"
-    />
-    <button class="primary" type="submit" disabled={busy === "repo"}>
-      {busy === "repo" ? "Reading…" : "Add repository"}
-    </button>
-  </form>
+  <div class="tabs" role="tablist" aria-label="Extension sections">
+    <button class="chip" class:on={section === "installed"} role="tab" aria-selected={section === "installed"} onclick={() => (section = "installed")}>Installed</button>
+    <button class="chip" class:on={section === "available"} role="tab" aria-selected={section === "available"} onclick={() => (section = "available")}>Available</button>
+    <button class="chip" class:on={section === "repositories"} role="tab" aria-selected={section === "repositories"} onclick={() => (section = "repositories")}>Repositories</button>
+  </div>
 
   {#if error}<p class="banner">{error}</p>{/if}
-  {#if note}<p class="note">{note}</p>{/if}
+  {#if notice}<p class="note">{notice}</p>{/if}
 
-  {#if library.repos.length === 0}
-    <p class="empty">
-      No repositories yet. A repository is one URL that lists extensions — add one above and its
-      extensions appear here, ready to install.
-    </p>
+  {#if section === "installed"}
+    {#if installed.length === 0}
+      <div class="blank">
+        <p class="blankline">Nothing installed yet.</p>
+        <p class="blanksub">Add a repository, then install an extension from its index. Its sources appear under Browse.</p>
+        <button class="btn primary" onclick={() => (section = "repositories")}>Add a repository</button>
+      </div>
+    {:else}
+      <ul class="rows">
+        {#each installed as row (row.extensionId)}
+          <li class="card">
+            <div class="info">
+              <span class="name">{row.packageId}</span>
+              <span class="sub">
+                {row.versionName ?? "unknown version"} · {row.sources.length} source{row.sources.length === 1 ? "" : "s"}
+              </span>
+            </div>
+            <div class="srcs">
+              {#each row.sources.slice(0, 6) as source (source.id)}
+                <span class="chip small">{source.name}{#if source.lang} <span class="lang">{source.lang}</span>{/if}</span>
+              {/each}
+              {#if row.sources.length > 6}<span class="chip small">+{row.sources.length - 6}</span>{/if}
+            </div>
+          </li>
+        {/each}
+      </ul>
+    {/if}
+  {:else if section === "available"}
+    {#if library.repos.length === 0}
+      <div class="blank">
+        <p class="blankline">No repositories yet.</p>
+        <p class="blanksub">A repository is one URL that lists extensions. Add it once and every extension in it is one tap away.</p>
+        <button class="btn primary" onclick={() => (section = "repositories")}>Add a repository</button>
+      </div>
+    {:else}
+      <div class="repo-bar">
+        {#each library.repos as repo (repo.url)}
+          <button class="chip" class:on={activeRepo === repo.url} onclick={() => void openRepository(repo.url)}>{repo.name}</button>
+        {/each}
+      </div>
+
+      <input class="field search" type="search" placeholder="Search extensions, packages or languages" bind:value={search} aria-label="Search extensions" />
+
+      {#if loading}
+        <p class="empty">Reading the index…</p>
+      {:else if entries.length === 0}
+        <p class="empty">Pick a repository above to read its index.</p>
+      {:else}
+        <p class="summary">
+          {matched.length === 0 ? "No match" : `${matched.length} extension${matched.length === 1 ? "" : "s"}`}{matched.length > shown.length ? ` · showing ${shown.length}` : ""}
+        </p>
+        <ul class="rows">
+          {#each shown as entry (entry.pkg)}
+            {@const state = stateOf(entry)}
+            <li class="card">
+              <div class="info">
+                <span class="name">{entry.name}</span>
+                <span class="sub">
+                  {languages(entry)} · v{entry.version}
+                  {#if entry.contentWarning !== "SAFE" && entry.contentWarning !== "UNKNOWN"}<span class="warn"> · {entry.contentWarning}</span>{/if}
+                </span>
+                <span class="pkg">{entry.pkg}</span>
+              </div>
+              <button
+                class="btn"
+                class:primary={state === "new" || state === "update"}
+                disabled={installing === entry.pkg || state === "up-to-date"}
+                onclick={() => void install(entry)}
+              >
+                {installing === entry.pkg ? "Installing…" : state === "new" ? "Install" : state === "update" ? "Update" : state === "downgrade" ? "Reinstall" : "Installed"}
+              </button>
+            </li>
+          {/each}
+        </ul>
+      {/if}
+    {/if}
   {:else}
-    <ul class="repos">
-      {#each library.repos as repo (repo.url)}
-        <li>
-          <span class="rname">{repo.name}</span>
-          <span class="rurl">{repo.url}</span>
-          <button class="ghost small" onclick={() => remove(repo.url)}>Remove</button>
-        </li>
-      {/each}
-    </ul>
+    <form
+      class="add"
+      onsubmit={(event) => {
+        event.preventDefault();
+        void addRepository();
+      }}
+    >
+      <input class="field" type="url" placeholder="https://raw.githubusercontent.com/keiyoushi/extensions/repo" bind:value={repoUrl} aria-label="Repository URL" spellcheck="false" />
+      <button class="btn primary" type="submit" disabled={adding}>{adding ? "Reading…" : "Add repository"}</button>
+    </form>
 
-    <div class="filter">
-      <input bind:value={query} placeholder="Search extensions, packages or languages" aria-label="Search extensions" />
-      <span class="count">{visible.length} of {entries.length}{visible.length === 120 ? " shown" : ""}</span>
-    </div>
-
-    <ul class="entries">
-      {#each visible as { repoUrl, entry } (entry.pkg + repoUrl)}
-        {@const row = installed.get(entry.pkg)}
-        {@const state = updateState(row === undefined ? undefined : { versionCode: row.versionCode ?? 0 }, entry)}
-        <li>
-          <div class="meta">
-            <span class="ename">{entry.name}</span>
-            <span class="edesc">{describeEntry(entry)}</span>
-            <span class="epkg">{entry.pkg}</span>
-          </div>
-          {#if state === "up-to-date"}
-            <span class="done">Installed</span>
-          {:else}
-            <button
-              class="ghost"
-              disabled={busy === entry.pkg}
-              onclick={() => install(entry, repoUrl)}
-            >
-              {busy === entry.pkg ? "Installing…" : state === "update" ? `Update to ${entry.version}` : "Install"}
-            </button>
-          {/if}
-        </li>
-      {/each}
-    </ul>
+    {#if library.repos.length === 0}
+      <p class="empty">No repositories yet. A Keiyoushi-compatible URL is the usual starting point.</p>
+    {:else}
+      <ul class="rows">
+        {#each library.repos as repo (repo.url)}
+          <li class="card">
+            <div class="info">
+              <span class="name">{repo.name}</span>
+              <span class="sub">{repo.url}</span>
+            </div>
+            <div class="rowacts">
+              <button class="btn ghost" onclick={() => { section = "available"; void openRepository(repo.url); }}>Browse</button>
+              <button class="btn danger" onclick={() => void remove(repo.url)}>Remove</button>
+            </div>
+          </li>
+        {/each}
+      </ul>
+    {/if}
   {/if}
 </section>
 
 <style>
-  .head {
+  .view {
+    padding: var(--s4) var(--s4) var(--s7);
+    max-width: 900px;
+  }
+
+  .top {
     display: flex;
     align-items: baseline;
     justify-content: space-between;
-    margin-bottom: 18px;
+    gap: var(--s3);
+    padding-top: var(--safe-t);
+    margin-bottom: var(--s3);
   }
+
   h1 {
-    font-size: 22px;
-    font-weight: 600;
-    margin: 0;
+    font-size: var(--t-2xl);
+    font-weight: 650;
   }
+
   .count {
-    font-size: 12px;
-    color: var(--muted);
+    font-size: var(--t-sm);
+    color: var(--text-3);
   }
+
+  .tabs {
+    display: flex;
+    gap: var(--s2);
+    margin-bottom: var(--s4);
+    overflow-x: auto;
+  }
+
   .add {
     display: flex;
-    gap: 8px;
-    margin-bottom: 14px;
+    gap: var(--s2);
+    margin-bottom: var(--s4);
   }
-  .add input,
-  .filter input {
+
+  .add .field {
     flex: 1;
-    min-width: 0;
-    background: #16161c;
-    border: 1px solid var(--line);
-    border-radius: 9px;
-    padding: 9px 12px;
-    color: var(--fg);
-    font: inherit;
-    font-size: 13px;
+    min-height: 40px;
   }
-  .add input:focus,
-  .filter input:focus {
-    outline: none;
-    border-color: #3f3f50;
-  }
-  .primary {
-    all: unset;
-    cursor: pointer;
-    padding: 9px 16px;
-    border-radius: 9px;
-    background: #e6e6ee;
-    color: #12121a;
-    font-size: 13px;
-    font-weight: 600;
-    white-space: nowrap;
-  }
-  .primary:disabled {
-    opacity: 0.6;
-    cursor: progress;
-  }
-  .note {
-    color: #8fd6a8;
-    font-size: 13px;
-    margin: 0 0 14px;
-  }
-  .empty {
-    color: var(--muted);
-    font-size: 13.5px;
-    line-height: 1.6;
-    max-width: 52ch;
-  }
-  .repos {
-    list-style: none;
-    margin: 0 0 18px;
-    padding: 0;
-    display: grid;
-    gap: 6px;
-  }
-  .repos li {
+
+  .repo-bar {
     display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 8px 11px;
-    border: 1px solid var(--line);
-    border-radius: 9px;
-    background: #14141a;
+    gap: var(--s2);
+    overflow-x: auto;
+    margin-bottom: var(--s3);
   }
-  .rname {
-    font-size: 13px;
-    color: #dcdce6;
+
+  .search {
+    width: 100%;
+    min-height: 38px;
+    margin-bottom: var(--s3);
   }
-  .rurl {
-    flex: 1;
-    min-width: 0;
-    font-size: 11.5px;
-    color: #6f6f7c;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+
+  .summary {
+    margin: 0 0 var(--s2);
+    font-size: var(--t-xs);
+    color: var(--text-3);
   }
-  .filter {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    margin-bottom: 10px;
-  }
-  .entries {
+
+  .rows {
     list-style: none;
     margin: 0;
     padding: 0;
     display: grid;
-    gap: 4px;
+    gap: var(--s2);
   }
-  .entries li {
+
+  .card {
     display: flex;
     align-items: center;
-    gap: 12px;
-    padding: 9px 11px;
-    border-radius: 9px;
-    border: 1px solid transparent;
+    gap: var(--s3);
+    padding: var(--s3);
+    border: 1px solid var(--line);
+    border-radius: var(--r2);
+    background: var(--surface);
   }
-  .entries li:hover {
-    background: #15151b;
-    border-color: var(--line);
-  }
-  .meta {
-    flex: 1;
-    min-width: 0;
+
+  .info {
     display: grid;
     gap: 1px;
+    min-width: 0;
+    flex: 1;
   }
-  .ename {
-    font-size: 13px;
-    color: #e6e6ee;
-  }
-  .edesc {
-    font-size: 11.5px;
-    color: #8a8a96;
-  }
-  .epkg {
-    font-size: 10.5px;
-    color: #5f5f6c;
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    white-space: nowrap;
+
+  .name {
+    font-size: var(--t-md);
     overflow: hidden;
     text-overflow: ellipsis;
+    white-space: nowrap;
   }
-  .done {
-    font-size: 12px;
-    color: #7fbf95;
+
+  .sub,
+  .pkg {
+    font-size: var(--t-xs);
+    color: var(--text-3);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
-  .small {
-    font-size: 12px;
+
+  .pkg {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    color: var(--text-3);
+    opacity: 0.75;
+  }
+
+  .warn {
+    color: var(--warning);
+  }
+
+  .lang {
+    text-transform: uppercase;
+    font-size: 10px;
+    color: var(--text-3);
+  }
+
+  .chip.small {
+    padding: 2px var(--s2);
+    font-size: var(--t-xs);
+  }
+
+  .srcs {
+    display: none;
+    gap: var(--s1);
+    flex-wrap: wrap;
+  }
+
+  @media (min-width: 760px) {
+    .srcs {
+      display: flex;
+      max-width: 260px;
+    }
+  }
+
+  .rowacts {
+    display: flex;
+    gap: var(--s1);
+  }
+
+  .blank {
+    display: grid;
+    gap: var(--s2);
+    padding-top: var(--s5);
+    max-width: 48ch;
+    justify-items: start;
+  }
+
+  .blankline {
+    margin: 0;
+    font-size: var(--t-lg);
+  }
+
+  .blanksub {
+    margin: 0;
+    font-size: var(--t-sm);
+    line-height: 1.6;
+    color: var(--text-2);
   }
 </style>

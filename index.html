@@ -8,6 +8,23 @@
   </head>
   <body>
     <div id="app"></div>
+    <pre id="boot-error" style="display:none;white-space:pre-wrap;color:#f88;font:12px/1.5 ui-monospace,monospace;padding:16px"></pre>
+    <script>
+      // A mount that throws leaves an empty page and no clue. This puts the message on screen
+      // instead, which is the difference between "blank" and "the bug is on line N".
+      addEventListener("error", (event) => {
+        const box = document.getElementById("boot-error");
+        if (!box) return;
+        box.style.display = "block";
+        box.textContent += `${event.message}\n${event.filename}:${event.lineno}:${event.colno}\n${event.error?.stack ?? ""}\n`;
+      });
+      addEventListener("unhandledrejection", (event) => {
+        const box = document.getElementById("boot-error");
+        if (!box) return;
+        box.style.display = "block";
+        box.textContent += `unhandled: ${event.reason?.stack ?? event.reason}\n`;
+      });
+    </script>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

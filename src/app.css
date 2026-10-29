@@ -1,12 +1,124 @@
+/*
+ * Design tokens, in one place.
+ *
+ * Two rules the components must obey:
+ *
+ * 1. **Semantic, not literal.** A component asks for `--surface` or `--text-2`, never `#16161c`.
+ *    That is what makes light / dark / OLED a token swap instead of a component rewrite.
+ * 2. **Scale, not ad-hoc numbers.** Spacing is 4px-based (`--s1`…`--s8`), radii are three sizes,
+ *    the type scale has six steps. A component that invents `13.5px` is the bug.
+ *
+ * Theme is set with `data-theme` on `<html>`: `system` follows the OS, `light`, `dark`, `oled`.
+ * The pin's tone is kept from HardlyReader so the two apps read the same way.
+ */
 :root {
   color-scheme: dark;
-  --bg: #101014;
-  --fg: #e6e6ee;
-  --muted: #8a8a96;
-  --line: #23232c;
-  /* The pin's tone, the same blue HardlyReader uses for a pinned row. */
+
+  --bg: #0e0e12;
+  --surface: #15151b;
+  --surface-2: #1b1b23;
+  --elevated: #20202a;
+  --line: #262630;
+  --line-strong: #3a3a48;
+
+  --text-1: #e8e8f0;
+  --text-2: #a8a8b8;
+  --text-3: #6f6f7e;
+
+  --accent: #7aa2ff;
+  --accent-ink: #0b1020;
+  --success: #7fbf95;
+  --warning: #e0b06b;
+  --danger: #e08b8b;
   --tone-pinned: #0078e0;
-  --accent-soft: #23232e;
+
+  /* 4px spacing scale */
+  --s1: 4px;
+  --s2: 8px;
+  --s3: 12px;
+  --s4: 16px;
+  --s5: 24px;
+  --s6: 32px;
+  --s7: 48px;
+  --s8: 64px;
+
+  --r1: 6px;
+  --r2: 10px;
+  --r3: 16px;
+  --r-pill: 999px;
+
+  --t-xs: 11px;
+  --t-sm: 12.5px;
+  --t-md: 14px;
+  --t-lg: 17px;
+  --t-xl: 22px;
+  --t-2xl: 28px;
+
+  --nav-h: 56px;
+  --rail-w: 76px;
+  --sidebar-w: 224px;
+  --safe-b: env(safe-area-inset-bottom, 0px);
+  --safe-t: env(safe-area-inset-top, 0px);
+  --safe-l: env(safe-area-inset-left, 0px);
+  --safe-r: env(safe-area-inset-right, 0px);
+  --shadow-1: 0 1px 2px rgb(0 0 0 / 40%);
+  --shadow-2: 0 12px 32px rgb(0 0 0 / 55%);
+  --dur: 160ms;
+
+  /* Old names, kept so a view I have not rewritten yet still renders. */
+  --fg: var(--text-1);
+  --muted: var(--text-2);
+  --accent-soft: var(--surface-2);
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f6f6f8;
+  --surface: #ffffff;
+  --surface-2: #f0f0f4;
+  --elevated: #ffffff;
+  --line: #e2e2e8;
+  --line-strong: #c8c8d2;
+  --text-1: #14141a;
+  --text-2: #55555f;
+  --text-3: #8a8a96;
+  --accent: #2f6bff;
+  --accent-ink: #ffffff;
+  --success: #2f7a4a;
+  --warning: #9a6b12;
+  --danger: #b23a3a;
+  --shadow-1: 0 1px 2px rgb(16 16 26 / 10%);
+  --shadow-2: 0 12px 32px rgb(16 16 26 / 16%);
+}
+
+:root[data-theme="oled"] {
+  color-scheme: dark;
+  --bg: #000000;
+  --surface: #0a0a0c;
+  --surface-2: #101014;
+  --elevated: #16161c;
+  --line: #1d1d24;
+  --line-strong: #33333e;
+}
+
+@media (prefers-color-scheme: light) {
+  :root[data-theme="system"] {
+    color-scheme: light;
+    --bg: #f6f6f8;
+    --surface: #ffffff;
+    --surface-2: #f0f0f4;
+    --elevated: #ffffff;
+    --line: #e2e2e8;
+    --line-strong: #c8c8d2;
+    --text-1: #14141a;
+    --text-2: #55555f;
+    --text-3: #8a8a96;
+    --accent: #2f6bff;
+    --accent-ink: #ffffff;
+    --success: #2f7a4a;
+    --warning: #9a6b12;
+    --danger: #b23a3a;
+  }
 }
 
 * {
@@ -18,37 +130,187 @@ body {
   margin: 0;
   min-height: 100%;
   background: var(--bg);
-  color: var(--fg);
+  color: var(--text-1);
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: var(--t-md);
+  line-height: 1.45;
   -webkit-font-smoothing: antialiased;
+  text-size-adjust: 100%;
 }
 
+h1,
+h2,
+h3 {
+  margin: 0;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+button {
+  font: inherit;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--r1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition-duration: 1ms !important;
+    animation-duration: 1ms !important;
+  }
+}
+
+/* Shared controls: the three that appear on every screen and must look identical. */
+.btn {
+  all: unset;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s2);
+  min-height: 36px;
+  padding: 0 var(--s4);
+  border-radius: var(--r2);
+  border: 1px solid var(--line);
+  color: var(--text-1);
+  font-size: var(--t-sm);
+  white-space: nowrap;
+  transition: background var(--dur), border-color var(--dur), color var(--dur);
+}
+
+.btn:hover {
+  border-color: var(--line-strong);
+  background: var(--surface-2);
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.btn.primary {
+  background: var(--text-1);
+  color: var(--bg);
+  border-color: transparent;
+  font-weight: 600;
+}
+
+.btn.primary:hover {
+  filter: brightness(1.08);
+}
+
+.btn.ghost {
+  border-color: transparent;
+  color: var(--text-2);
+}
+
+.btn.ghost:hover {
+  color: var(--text-1);
+  background: var(--surface-2);
+}
+
+.btn.danger {
+  color: var(--danger);
+  border-color: transparent;
+}
+
+.btn.icon {
+  padding: 0;
+  width: 36px;
+  min-width: 36px;
+}
+
+.chip {
+  all: unset;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px var(--s3);
+  border-radius: var(--r-pill);
+  border: 1px solid var(--line);
+  color: var(--text-2);
+  font-size: var(--t-sm);
+  white-space: nowrap;
+}
+
+.chip:hover {
+  border-color: var(--line-strong);
+  color: var(--text-1);
+}
+
+.chip.on {
+  background: var(--surface-2);
+  border-color: var(--line-strong);
+  color: var(--text-1);
+}
+
+.field {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r2);
+  padding: 8px var(--s3);
+  color: var(--text-1);
+  font: inherit;
+  font-size: var(--t-sm);
+  min-width: 0;
+}
+
+.field:focus {
+  outline: none;
+  border-color: var(--line-strong);
+}
+
+.banner {
+  margin: 0 0 var(--s4);
+  padding: var(--s3);
+  border-radius: var(--r2);
+  background: color-mix(in srgb, var(--danger) 14%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent);
+  color: var(--danger);
+  font-size: var(--t-sm);
+}
+
+.note {
+  margin: 0 0 var(--s4);
+  color: var(--success);
+  font-size: var(--t-sm);
+}
+
+.muted {
+  color: var(--text-2);
+}
+
+.empty {
+  color: var(--text-2);
+  font-size: var(--t-sm);
+  line-height: 1.6;
+}
+
+/* Old markup still says `button.ghost`; point it at the same look rather than fork it. */
 button.ghost {
   all: unset;
   cursor: pointer;
-  font-size: 13px;
-  color: #c9c9d4;
-  padding: 6px 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 36px;
+  padding: 0 var(--s4);
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--r2);
+  color: var(--text-1);
+  font-size: var(--t-sm);
 }
 
 button.ghost:hover {
-  border-color: #3a3a46;
-  color: #fff;
+  border-color: var(--line-strong);
+  background: var(--surface-2);
 }
 
 button.ghost:disabled {
   opacity: 0.5;
   cursor: default;
-}
-
-.banner {
-  margin: 0 0 16px;
-  padding: 9px 12px;
-  border-radius: 8px;
-  background: #2a1c1c;
-  border: 1px solid #4a2a2a;
-  color: #e0a79b;
-  font-size: 13px;
 }

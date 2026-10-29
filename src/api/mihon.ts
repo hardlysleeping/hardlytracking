@@ -78,6 +78,7 @@ export interface RawChapter {
   chapterNumber: number;
   pageCount: number;
   isRead: boolean;
+  uploadDate?: string | null;
 }
 
 // ---- pure mapping (unit-tested without a network) ---------------------------
@@ -110,6 +111,7 @@ export function mapChapter(raw: RawChapter, seriesId: string): Chapter {
     number: raw.chapterNumber,
     pageCount: raw.pageCount,
     read: raw.isRead,
+    ...(raw.uploadDate ? { uploadedAt: Date.parse(raw.uploadDate) || undefined } : {}),
   };
 }
 
@@ -134,7 +136,7 @@ const Q_MANGA = `query Manga($id: Int!) {
 
 const Q_CHAPTERS = `query Chapters($mangaId: Int!, $limit: Int!) {
   chapters(condition: { mangaId: $mangaId }, first: $limit) {
-    nodes { id name chapterNumber pageCount isRead }
+    nodes { id name chapterNumber pageCount isRead uploadDate }
   }
 }`;
 

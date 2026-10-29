@@ -1,84 +1,103 @@
 <script lang="ts">
+  /**
+   * The router and the one place the app starts.
+   *
+   * One screen at a time — the iPhone-first decision. A series page and a source are pushed on top
+   * of the destination they came from, the shell keeps saying which destination that is, and the
+   * reader leaves the shell entirely so nothing competes with the page.
+   */
   import { onMount } from "svelte";
+  import AppShell from "./components/AppShell.svelte";
   import Library from "./views/Library.svelte";
+  import Updates from "./views/Updates.svelte";
   import Browse from "./views/Browse.svelte";
+  import History from "./views/History.svelte";
+  import More from "./views/More.svelte";
   import Series from "./views/Series.svelte";
+  import Source from "./views/Source.svelte";
+  import Search from "./views/Search.svelte";
   import Reader from "./views/Reader.svelte";
   import Extensions from "./views/Extensions.svelte";
+  import Settings from "./views/Settings.svelte";
+  import Downloads from "./views/Downloads.svelte";
+  import Backup from "./views/Backup.svelte";
+
   import { library } from "./state/library.svelte";
   import { categories } from "./state/categories.svelte";
-  import { go, parseRoute } from "./lib/nav";
+  import { settings } from "./state/settings.svelte";
+  import { downloads } from "./state/downloads.svelte";
+  import { appearance } from "./lib/theme.svelte";
+  import { viewport } from "./lib/layout.svelte";
+  import { destinationOf } from "./lib/destinations";
+  import { parseRoute } from "./lib/nav";
 
   let route = $state(parseRoute(location.hash));
 
+  const active = $derived(destinationOf(route));
+
   onMount(() => {
+    appearance.start();
+    const stopViewport = viewport.start();
     const onHash = () => (route = parseRoute(location.hash));
     addEventListener("hashchange", onHash);
-    // The rail and the series-page chips both read the categories, and a deep link can
-    // land on either, so they are loaded with the library rather than by a view.
+    // Categories and preferences are read once, with the library: a series deep link and the
+    // reader both need them before a view mounts, so no view owns this.
     void (async () => {
       await library.open();
-      const profile = library.profile;
-      if (profile !== null) await categories.load(profile.store);
+      const store = library.profile?.store;
+      if (store === undefined) return;
+      await Promise.all([categories.load(store), settings.load(store), downloads.load()]);
     })();
-    return () => removeEventListener("hashchange", onHash);
+    return () => {
+      removeEventListener("hashchange", onHash);
+      stopViewport();
+    };
   });
 </script>
 
-<div class="shell">
-  <nav>
-    <button class="brand" onclick={() => go("/library")}>HardlyTracking</button>
-    <button class="tab" class:on={route.name === "library"} onclick={() => go("/library")}>Library</button>
-    <button class="tab" class:on={route.name === "browse"} onclick={() => go("/browse")}>Browse</button>
-    <button class="tab" class:on={route.name === "extensions"} onclick={() => go("/extensions")}>Extensions</button>
-  </nav>
-
-  <main>
-    {#if route.name === "browse"}
+{#if route.name === "read" && route.id !== null && route.chapterId !== null}
+  <Reader seriesId={route.id} chapterId={route.chapterId} />
+{:else}
+  <AppShell {active}>
+    {#if !library.ready && library.openError === null}
+      <p class="boot">Opening the library…</p>
+    {:else if library.openError !== null}
+      <div class="boot">
+        <p class="banner">{library.openError}</p>
+        <p class="muted">The library could not be opened. Reload once the extension host is running.</p>
+      </div>
+    {:else if route.name === "updates"}
+      <Updates />
+    {:else if route.name === "browse"}
       <Browse />
+    {:else if route.name === "history"}
+      <History />
+    {:else if route.name === "more"}
+      <More />
     {:else if route.name === "extensions"}
       <Extensions />
+    {:else if route.name === "settings"}
+      <Settings />
+    {:else if route.name === "downloads"}
+      <Downloads />
+    {:else if route.name === "backup"}
+      <Backup />
+    {:else if route.name === "search"}
+      <Search initial={route.id} />
+    {:else if route.name === "source" && route.id !== null}
+      <Source sourceId={route.id} />
     {:else if route.name === "series" && route.id !== null}
       <Series seriesId={route.id} />
-    {:else if route.name === "read" && route.id !== null && route.chapterId !== null}
-      <Reader seriesId={route.id} chapterId={route.chapterId} />
     {:else}
       <Library />
     {/if}
-  </main>
-</div>
+  </AppShell>
+{/if}
 
 <style>
-  .shell {
-    max-width: 1100px;
-    margin: 0 auto;
-    padding: 18px 20px 60px;
+  .boot {
+    padding: var(--s5) var(--s4);
+    color: var(--text-2);
+    font-size: var(--t-sm);
   }
-  nav {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    margin-bottom: 26px;
-  }
-  .brand {
-    all: unset;
-    cursor: pointer;
-    font-weight: 600;
-    font-size: 14px;
-    letter-spacing: 0.01em;
-    margin-right: 14px;
-  }
-  .tab {
-    all: unset;
-    cursor: pointer;
-    font-size: 13px;
-    color: #8a8a96;
-    padding: 5px 10px;
-    border-radius: 999px;
-  }
-  .tab.on {
-    color: #e6e6ee;
-    background: #1c1c22;
-  }
-
 </style>

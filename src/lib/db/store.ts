@@ -38,6 +38,15 @@ export interface RepoRow {
   at: number;
 }
 
+export interface DownloadRow {
+  chapterId: string;
+  seriesId: string;
+  chapterName: string;
+  pages: number;
+  bytes: number;
+  at: number;
+}
+
 export interface SourceMappingRow {
   seriesId: string;
   provider: string;
@@ -54,6 +63,8 @@ interface ChapterRow extends Chapter {
 interface PagesRow {
   chapterId: string;
   urls: string[];
+  /** Parallel to `urls`; `null` where a page needs no headers. */
+  headers?: Array<Record<string, string> | null>;
 }
 
 export class LibraryStore {
@@ -92,14 +103,31 @@ export class LibraryStore {
       .map(({ ...chapter }) => chapter);
   }
 
+  /**
+   * Every mirrored chapter, in one read.
+   *
+   * The library needs unread counts for every row on the shelf; asking per series would be one
+   * IndexedDB round-trip per title, so it is one pass here and the caller groups it.
+   */
+  async listAllChapters(): Promise<Chapter[]> {
+    return this.db.all<ChapterRow>("chapters");
+  }
+
   async putPages(chapterId: string, pages: Page[]): Promise<void> {
-    const row: PagesRow = { chapterId, urls: pages.map((p) => p.url) };
+    const row: PagesRow = {
+      chapterId,
+      urls: pages.map((p) => p.url),
+      headers: pages.map((p) => p.headers ?? null),
+    };
     await this.db.put("pages", row as unknown as Record<string, unknown>);
   }
 
   async getPages(chapterId: string): Promise<Page[]> {
     const row = await this.db.get<PagesRow>("pages", chapterId);
-    return (row?.urls ?? []).map((url, index) => ({ index, url }));
+    return (row?.urls ?? []).map((url, index) => {
+      const headers = row?.headers?.[index] ?? undefined;
+      return { index, url, ...(headers === null || headers === undefined ? {} : { headers }) };
+    });
   }
 
   /** Every position row, for export and sync (the document carries the whole set). */
@@ -221,6 +249,37 @@ export class LibraryStore {
 
   async removeRepo(url: string): Promise<void> {
     await this.db.remove("repos", url);
+  }
+
+  // ---- downloads: pages that live on this device ---------------------------
+  //
+  // Two stores: one row per downloaded chapter (what the Downloads screen lists) and one row
+  // per page (the blob itself). They are separate because deleting a chapter has to remove its
+  // pages, and because a half-finished download must never look like a finished one.
+
+  async listDownloads(): Promise<DownloadRow[]> {
+    const rows = await this.db.all<DownloadRow>("downloads");
+    return rows.sort((a, b) => b.at - a.at);
+  }
+
+  async putDownload(row: DownloadRow): Promise<void> {
+    await this.db.put("downloads", { ...row } as unknown as Record<string, unknown>);
+  }
+
+  async removeDownload(chapterId: string): Promise<void> {
+    await this.db.remove("downloads", chapterId);
+    for (const page of await this.listDownloadPages(chapterId)) {
+      await this.db.remove("downloadPages", `${chapterId}#${page.index}`);
+    }
+  }
+
+  async listDownloadPages(chapterId: string): Promise<Array<{ index: number; blob: Blob }>> {
+    const rows = await this.db.all<{ id: string; chapterId: string; index: number; blob: Blob }>("downloadPages");
+    return rows.filter((row) => row.chapterId === chapterId).map(({ index, blob }) => ({ index, blob }));
+  }
+
+  async putDownloadPage(row: { id: string; chapterId: string; index: number; blob: Blob }): Promise<void> {
+    await this.db.put("downloadPages", { ...row } as unknown as Record<string, unknown>);
   }
 
   // ---- categories: hidden + pinned -----------------------------------------

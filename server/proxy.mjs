@@ -146,6 +146,107 @@ async function serveRepo(request, response) {
   response.end(bytes);
 }
 
+/**
+ * Page images that need headers.
+ *
+ * Mihon extensions hand back a page as a URL *plus* the headers its source demands —
+ * `Referer: https://mangafire.to/` and so on. An `<img>` cannot send those, and the CDN answers 403
+ * without them, so the page has to be fetched by something that can. That something is this route:
+ * `?url=` is the image, `?h=` is the base64url JSON header set the extension asked for.
+ *
+ * It is a fetch-anything endpoint, so it is deliberately narrow: http(s) only, no loopback or
+ * private address, image content types only, a size cap, and a timeout. That keeps it from becoming
+ * a proxy for the whole LAN.
+ */
+const IMAGE_MAX_BYTES = 32 * 1024 * 1024;
+const HEADER_ALLOW = new Set(["user-agent", "referer", "origin", "accept", "accept-language", "cookie"]);
+
+function privateHost(hostname) {
+  const host = hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  if (host === "localhost" || host.endsWith(".local") || host.endsWith(".internal")) return true;
+  if (/^127\./.test(host) || host === "::1" || host === "0.0.0.0") return true;
+  if (/^10\./.test(host) || /^192\.168\./.test(host)) return true;
+  if (/^172\.(1[6-9]|2\d|3[01])\./.test(host)) return true;
+  if (/^169\.254\./.test(host) || /^fc|^fd|^fe80/i.test(host)) return true;
+  return false;
+}
+
+async function serveImage(request, response) {
+  const incoming = new URL(request.url ?? "/", "http://localhost");
+  const target = incoming.searchParams.get("url");
+  const encoded = incoming.searchParams.get("h");
+  if (target === null) {
+    response.writeHead(400, { "Content-Type": "text/plain" });
+    response.end("missing url");
+    return;
+  }
+  let parsed;
+  try {
+    parsed = new URL(target);
+  } catch {
+    response.writeHead(400, { "Content-Type": "text/plain" });
+    response.end("bad url");
+    return;
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    response.writeHead(400, { "Content-Type": "text/plain" });
+    response.end("only http(s)");
+    return;
+  }
+  if (privateHost(parsed.hostname)) {
+    response.writeHead(403, { "Content-Type": "text/plain" });
+    response.end("private address refused");
+    return;
+  }
+
+  const headers = {};
+  if (encoded !== null) {
+    try {
+      const asked = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8"));
+      for (const [name, value] of Object.entries(asked)) {
+        if (HEADER_ALLOW.has(name.toLowerCase()) && typeof value === "string") headers[name] = value;
+      }
+    } catch {
+      // A malformed header set is not a reason to fail the image; fetch it without them.
+    }
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 30_000);
+  try {
+    const upstream = await fetch(parsed, { headers, signal: controller.signal, redirect: "follow" });
+    if (!upstream.ok) {
+      response.writeHead(upstream.status, { "Content-Type": "text/plain" });
+      response.end(`upstream ${upstream.status}`);
+      return;
+    }
+    const type = upstream.headers.get("content-type") ?? "";
+    if (!type.startsWith("image/")) {
+      response.writeHead(415, { "Content-Type": "text/plain" });
+      response.end("not an image");
+      return;
+    }
+    const bytes = Buffer.from(await upstream.arrayBuffer());
+    if (bytes.length > IMAGE_MAX_BYTES) {
+      response.writeHead(413, { "Content-Type": "text/plain" });
+      response.end("too large");
+      return;
+    }
+    response.writeHead(200, {
+      "Content-Type": type,
+      "Content-Length": String(bytes.length),
+      // A page image never changes: the same URL is the same picture.
+      "Cache-Control": "public, max-age=86400",
+    });
+    response.end(bytes);
+  } catch (error) {
+    response.writeHead(504, { "Content-Type": "text/plain" });
+    response.end(`fetch failed: ${String(error)}`);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function serveStatic(request, response) {
   const incoming = new URL(request.url ?? "/", "http://localhost");
   const relative = normalize(decodeURIComponent(incoming.pathname)).replace(/^(\.\.[/\\])+/, "");
@@ -165,6 +266,8 @@ const server = createServer((request, response) => {
   const path = new URL(request.url ?? "/", "http://localhost").pathname;
   const handler = path === "/api/repo"
     ? serveRepo
+    : path === "/api/img"
+    ? serveImage
     : path.startsWith("/api/dalvik/")
     ? (req, res) => proxy(req, res, DALVIK, /^\/api\/dalvik/)
     : path.startsWith("/api/mihon/")

@@ -12,10 +12,21 @@ import type { ExtensionEntry } from "../lib/extensions/index";
 import type { RepoRow } from "../lib/db/store";
 import type { Chapter, Page, Series, Source } from "../api/source";
 
+/** One row of the Updates list: a chapter, and the title it belongs to. */
+export interface UpdateRow {
+  seriesId: string;
+  title: string;
+  cover?: string;
+  chapter: Chapter;
+}
+
 class LibraryState {
   profile = $state<LibraryProfile | null>(null);
   ready = $state(false);
+  /** A provider that did not answer. A warning, not a failure: the library is still ours. */
   error = $state<string | null>(null);
+  /** The library itself could not be opened. This one is fatal, and the shell says so. */
+  openError = $state<string | null>(null);
   sources = $state<Source[]>([]);
   library = $state<Series[]>([]);
   /** The APKs installed on the extension host, newest install last. */
@@ -35,7 +46,7 @@ class LibraryState {
       this.ready = true;
       void this.loadSources();
     } catch (error) {
-      this.error = message(error);
+      this.openError = message(error);
     }
   }
 
@@ -214,6 +225,35 @@ class LibraryState {
       ...(packageId === undefined ? {} : { packageId }),
       at: Date.now(),
     });
+  }
+
+  /**
+   * Ask every saved title for its chapters, and return the newest of them.
+   *
+   * Updates is not a separate feed the server pushes: it is the library's own chapter lists, read
+   * again. Four titles at a time, because a phone asking sixty extensions at once is a stall, and a
+   * title that fails is skipped rather than failing the refresh.
+   */
+  async refreshUpdates(limit = 150): Promise<UpdateRow[]> {
+    if (this.profile === null) return [];
+    const queue = this.library.slice(0, limit);
+    const rows: UpdateRow[] = [];
+    const worker = async (): Promise<void> => {
+      for (;;) {
+        const series = queue.shift();
+        if (series === undefined) return;
+        try {
+          for (const chapter of await this.chapters(series.id)) {
+            if (chapter.uploadedAt === undefined) continue;
+            rows.push({ seriesId: series.id, title: series.title, cover: series.cover, chapter });
+          }
+        } catch {
+          // One source down is one title missing from the list, not an empty screen.
+        }
+      }
+    };
+    await Promise.all([worker(), worker(), worker(), worker()]);
+    return rows.sort((a, b) => (b.chapter.uploadedAt ?? 0) - (a.chapter.uploadedAt ?? 0));
   }
 
   /** True when this chapter's position is ours to write. */
