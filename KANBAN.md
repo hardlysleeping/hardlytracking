@@ -33,7 +33,7 @@ Repo: `~/apps/hardlytracking` · branch `master` · remote `github.com/hardlysle
 | T3 `t_8a225c2a` | 11 | authority tests + browser IndexedDB read-back |
 | T4 `t_ce5c97eb` | 12 | browser at `:8460`: 5 source chips, 1 chapter, reader `2 / 4` resuming from the stored page |
 | T5 `t_6abb03ac` | 13 | `/api/mihon/graphql` → sources JSON; thumbnail 200 `image/jpeg`; `/series/mihon:12` → 200 |
-| T21 `t_19f3c2b0` | 3 | dalvik host wired in: registry probe, APK install from file, `dalvik` provider kind | live: real APK installed in the UI (61 sources) → popular → Ch.1 34 pages → page 2 rendered via `/api/dalvik/image/`; reload keeps it |
+| T21 `t_19f3c2b0` | 3 | dalvik host wired in: registry probe, APK install from file, `dalvik` provider kind | live: real MangaDex APK installed in the UI (61 sources, sha256 `12fde776…`) → popular (20) → series → Ch.1, 17 pages, all 17 loaded via `/api/dalvik/image/`; hard reload keeps the 61 sources with no reinstall; read mark goes to our DB and draws back on the list |
 | T14 `t_7eb8c34d` | 4 | history, position, source mappings + continue strip | live: read to 3/21 → library 'page 3' → resumed at 3/21 |
 | T11 `t_1da228de` | 3 | `/dalvik` bridge proven on Linux: MExtensionServer v1.0.9 + real MangaDex APK — 61 sources, 20 popular (hasNext), details, 3 chapters, 21 pages, search 4, 2.1 s; 130/130 tests |
 | T20 `t_b3da9c53` | 4 | **Hidden + pinned categories in HardlyReader's look**: eye cycles Hidden → Revealed → Only, pin cycles Active → Only → Hidden, pinned rows ring + underlight + tone, per-row eye/pin, rail selection, `categories` store (DB v2). 37/37 tests, `tsc` clean, `svelte-check` 0/0, browser: all three eye states, all three pin states, per-row marks, reload persistence |

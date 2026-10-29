@@ -24,9 +24,9 @@ Svelte 5 UI  →  SourceProvider  →  MihonProvider  →  /api/mihon  →  Miho
   `mihon:ch:1`), so a row from the runtime and a row from the device database can never collide.
 - **`MihonProvider`** (`src/api/mihon.ts`) talks to a Mihon extension host over GraphQL. The
   extensions are real, unmodified Mihon APKs; only *where the JVM runs* changes between platforms.
-- **`LocalProvider`** (`src/api/local.ts`) is the library on this device, and the only provider that
-  owns reading progress. `ownsProgress` decides the writer per provider — the server keeps its own
-  state, our database keeps ours, and never both.
+- **`LocalProvider`** (`src/api/local.ts`) is the library on this device. `ownsProgress` decides the
+  writer per provider — the server keeps its own state, our database keeps ours, and never both. Two
+  providers own it here: `local` and `dalvik` (a `/dalvik` host has no read-state API at all).
 - **Continue reading** — the reader writes position, history and progress in one call, so the
   library's continue strip always resumes at the page you stopped on.
 - **Hidden and pinned categories** (`src/lib/categories.ts`, `CategoryRail.svelte`) in HardlyReader's
