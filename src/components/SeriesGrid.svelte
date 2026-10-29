@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { Series } from "../api/source";
   import Cover from "./Cover.svelte";
-  import { go } from "../lib/nav";
+  import { go, pathTo } from "../lib/nav";
 
   interface Props {
     series: Series[];
@@ -16,7 +16,7 @@
 {:else}
   <div class="grid">
     {#each series as item (item.id)}
-      <button class="tile" onclick={() => go(`/series/${item.id}`)}>
+      <button class="tile" onclick={() => go(pathTo("series", item.id))}>
         <Cover series={item} />
         <span class="title">{item.title}</span>
       </button>

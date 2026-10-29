@@ -15,7 +15,13 @@
  *    something plausible: a wrong "read" mark is worse than a visible failure.
  */
 
-export type ProviderKind = "mihon" | "komga" | "local";
+/**
+ * `mihon` is the Suwayomi runtime and `dalvik` a M-Extension-Server host. They run the
+ * same extension format but they are two different servers with two different id spaces,
+ * so they get two kinds: sharing `mihon` would make `providerFor` hand a dalvik id to
+ * Suwayomi (first match wins) and every lookup would land on the wrong host.
+ */
+export type ProviderKind = "mihon" | "dalvik" | "komga" | "local";
 
 export interface Source {
   /** Namespaced: `mihon:src:0`. */
@@ -82,7 +88,7 @@ export interface SourceProvider {
   setRead(chapterId: string, read: boolean): Promise<void>;
 }
 
-const KINDS: ProviderKind[] = ["mihon", "komga", "local"];
+const KINDS: ProviderKind[] = ["mihon", "dalvik", "komga", "local"];
 
 export function joinId(provider: ProviderKind, native: string | number): string {
   return `${provider}:${native}`;

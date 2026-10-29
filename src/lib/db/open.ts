@@ -9,8 +9,30 @@
  * desktop card (T6) and must land here, not in a second store.
  */
 
-export const STORES = ["series", "chapters", "progress", "prefs", "pages", "categories"] as const;
+export const STORES = ["series", "chapters", "progress", "prefs", "pages", "categories", "extensions"] as const;
 export type StoreName = (typeof STORES)[number];
+
+/**
+ * The primary key of each store, in one place.
+ *
+ * Two engines read this map — IndexedDB's `createObjectStore` and the in-memory double — and
+ * they used to keep their own copies of the same ternary. They drifted, and the symptom was
+ * invisible in tests (the double happily keyed every row "undefined") while the browser threw
+ * `DataError: key path did not yield a value`. One map, both engines.
+ */
+const KEY_PATH: Record<StoreName, string> = {
+  series: "id",
+  chapters: "id",
+  progress: "chapterId",
+  prefs: "key",
+  pages: "chapterId",
+  categories: "id",
+  extensions: "extensionId",
+};
+
+export function keyPathOf(store: StoreName): string {
+  return KEY_PATH[store];
+}
 
 export interface Database {
   get<T>(store: StoreName, key: string): Promise<T | undefined>;
@@ -20,7 +42,7 @@ export interface Database {
 }
 
 const DB_NAME = "hardlytracking";
-const DB_VERSION = 2;
+const DB_VERSION = 4;
 
 function wrap<T>(request: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -42,8 +64,17 @@ function openIndexedDb(): Promise<Database> {
     request.onupgradeneeded = () => {
       const db = request.result;
       for (const name of STORES) {
-        if (db.objectStoreNames.contains(name)) continue;
-        db.createObjectStore(name, { keyPath: name === "progress" ? "chapterId" : name === "pages" ? "chapterId" : name === "prefs" ? "key" : "id" });
+        const keyPath = KEY_PATH[name];
+        if (db.objectStoreNames.contains(name)) {
+          // A store whose key path changed cannot be keyed correctly, so it is rebuilt rather
+          // than left to fail on the first write (that is what `DataError: key path did not
+          // yield a value` meant for `extensions`). The row shape changed with the key, so the
+          // old rows are unreadable anyway.
+          const existing = request.transaction?.objectStore(name).keyPath;
+          if (existing === keyPath) continue;
+          db.deleteObjectStore(name);
+        }
+        db.createObjectStore(name, { keyPath });
       }
     };
     request.onsuccess = () => resolve(request.result);
@@ -73,8 +104,13 @@ export function memoryDatabase(): Database {
     return t;
   };
   const keyOf = (store: StoreName, value: Record<string, unknown>): string => {
-    const field = store === "progress" || store === "pages" ? "chapterId" : store === "prefs" ? "key" : "id";
-    return String(value[field]);
+    const key = value[KEY_PATH[store]];
+    // The browser refuses a row whose key path is empty; the double must refuse it too, or a
+    // test passes on rows the real database would have rejected.
+    if (key === undefined || key === null || key === "") {
+      throw new Error(`${store} row has no ${KEY_PATH[store]}`);
+    }
+    return String(key);
   };
   return {
     async get<T,>(store: StoreName, key: string) {

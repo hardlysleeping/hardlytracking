@@ -3,13 +3,36 @@ export function go(path: string): void {
   location.hash = path.startsWith("#") ? path : `#${path}`;
 }
 
+/**
+ * A route path built from ids.
+ *
+ * Ids are not path-safe: a dalvik series id is `dalvik:<sourceId>:/manga/<uuid>`, and its own
+ * slashes used to split the route, so `#/series/dalvik:1:/manga/x` arrived as id
+ * `dalvik:1:` with the rest silently dropped (the series page then asked the host for an empty
+ * url). Every segment is escaped here, and `parseRoute` unescapes it — one place, so no call
+ * site has to remember.
+ */
+export function pathTo(name: string, ...ids: Array<string | null | undefined>): string {
+  return [name, ...ids.filter((id): id is string => typeof id === "string")].map(encodeURIComponent).join("/");
+}
+
 export interface Route {
   name: string;
   id: string | null;
   chapterId: string | null;
 }
 
+function decode(part: string | undefined): string | null {
+  if (part === undefined || part === "") return null;
+  try {
+    return decodeURIComponent(part);
+  } catch {
+    // A hand-written hash can hold a stray `%`; a broken escape is not worth a blank page.
+    return part;
+  }
+}
+
 export function parseRoute(hash: string): Route {
   const parts = hash.replace(/^#\/?/, "").split("/").filter(Boolean);
-  return { name: parts[0] ?? "library", id: parts[1] ?? null, chapterId: parts[2] ?? null };
+  return { name: parts[0] ?? "library", id: decode(parts[1]), chapterId: decode(parts[2]) };
 }

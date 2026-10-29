@@ -7,6 +7,7 @@
  * decided per provider (`SourceProvider.ownsProgress`), never here.
  */
 import type { Chapter, Page, Series } from "../../api/source";
+import type { InstalledExtension } from "../../api/dalvik";
 import { normaliseCategories, type Category } from "../categories";
 import type { Database } from "./open";
 
@@ -108,6 +109,26 @@ export class LibraryStore {
 
   async setPref<T>(key: string, value: T): Promise<void> {
     await this.db.put("prefs", { key, value });
+  }
+
+  // ---- extensions: the APKs this device installed --------------------------
+  //
+  // The runtime keeps the extension in memory and hands back an id (the sha256 of the
+  // APK bytes); it keeps no list of its own and no install route. So the record of what
+  // was installed is ours: `extensionId` is the key every later `/dalvik` call names,
+  // `packageId` is what the user installed, and `sources` is what that APK exposes —
+  // which is why sources can appear on the next launch without resending megabytes.
+
+  async listExtensions(): Promise<InstalledExtension[]> {
+    return this.db.all<InstalledExtension>("extensions");
+  }
+
+  async putExtension(extension: InstalledExtension): Promise<void> {
+    await this.db.put("extensions", { ...extension } as unknown as Record<string, unknown>);
+  }
+
+  async removeExtension(extensionId: string): Promise<void> {
+    await this.db.remove("extensions", extensionId);
   }
 
   // ---- categories: hidden + pinned -----------------------------------------

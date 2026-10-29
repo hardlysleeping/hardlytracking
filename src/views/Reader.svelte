@@ -2,7 +2,7 @@
   import { library } from "../state/library.svelte";
   import { providerFor } from "../api/registry";
   import type { Page } from "../api/source";
-  import { go } from "../lib/nav";
+  import { go, pathTo } from "../lib/nav";
 
   interface Props {
     seriesId: string;
@@ -81,7 +81,7 @@
 
 <section class="reader">
   <header>
-    <button class="ghost" onclick={() => go(`/series/${seriesId}`)}>Back</button>
+    <button class="ghost" onclick={() => go(pathTo("series", seriesId))}>Back</button>
     <span class="pos">{pages.length > 0 ? `${index + 1} / ${pages.length}` : "no pages"}</span>
     <button class="ghost" onclick={toggleRead}>{read ? "Read" : "Mark read"}</button>
     <button class="ghost" onclick={() => (strip = !strip)}>{strip ? "Single" : "Strip"}</button>

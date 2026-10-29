@@ -6,10 +6,17 @@
  *
  *   GET  /api/mihon/v1/manga/12/thumbnail  ->  runtime /api/v1/manga/12/thumbnail
  *   POST /api/mihon/graphql                ->  runtime /api/graphql
+ *   POST /api/dalvik/dalvik                ->  extension host /dalvik
+ *   GET  /api/dalvik/image/<uuid>          ->  extension host /image/<uuid>
  *
  * The rule is a prefix swap and nothing else, which is why `stripApiPrefix` in
  * src/api/mihon.ts mirrors it. `RUNTIME_URL` is the only thing that changes when the
  * runtime is Suwayomi today or an in-house extension host later.
+ *
+ * `/api/dalvik` is the M-Extension-Server host: it speaks `/dalvik`, `/capabilities` and
+ * its own `/image/` proxy, all under one origin on a loopback port. Proxying it keeps the
+ * page on a single origin, which is also why `DalvikClient.asset()` re-points the absolute
+ * `http://127.0.0.1:<port>/image/…` addresses it mints.
  */
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
@@ -18,6 +25,7 @@ import { fileURLToPath } from "node:url";
 
 const PORT = Number(process.env.PORT ?? 8460);
 const RUNTIME = (process.env.RUNTIME_URL ?? "http://127.0.0.1:4567").replace(/\/+$/, "");
+const DALVIK = (process.env.DALVIK_URL ?? "http://127.0.0.1:8792").replace(/\/+$/, "");
 const DIST = process.env.DIST ?? fileURLToPath(new URL("../dist/", import.meta.url));
 
 const MIME = {
@@ -35,6 +43,16 @@ const MIME = {
 
 const HOP_BY_HOP = new Set(["connection", "keep-alive", "transfer-encoding", "upgrade", "host", "content-length"]);
 
+/**
+ * `content-encoding` is dropped because Node's `fetch` decodes gzip/deflate/br for us: the
+ * bytes we forward are already plain, so passing the header on makes the browser try to
+ * gunzip plain text — a 200 whose body cannot be read ("TypeError: Failed to fetch"), which
+ * is what the dalvik host's gzipped `/capabilities` did. We also ask upstream for identity,
+ * so there is nothing to decode in the first place.
+ */
+const RESPONSE_DROP = new Set([...HOP_BY_HOP, "content-encoding"]);
+
+
 async function body(request) {
   if (request.method === "GET" || request.method === "HEAD") return undefined;
   const chunks = [];
@@ -42,26 +60,27 @@ async function body(request) {
   return Buffer.concat(chunks);
 }
 
-async function proxy(request, response) {
+async function proxy(request, response, upstreamBase, prefix) {
   const incoming = new URL(request.url ?? "/", "http://localhost");
-  const target = `${RUNTIME}${incoming.pathname.replace(/^\/api\/mihon/, "/api")}${incoming.search}`;
+  const target = `${upstreamBase}${incoming.pathname.replace(prefix, "")}${incoming.search}`;
   const headers = {};
   for (const [key, value] of Object.entries(request.headers)) {
     if (!HOP_BY_HOP.has(key) && typeof value === "string") headers[key] = value;
   }
+  headers["accept-encoding"] = "identity";
 
   let upstream;
   try {
     upstream = await fetch(target, { method: request.method, headers, body: await body(request) });
   } catch (error) {
     response.writeHead(502, { "Content-Type": "application/json" });
-    response.end(JSON.stringify({ error: `runtime unreachable at ${RUNTIME}`, detail: String(error) }));
+    response.end(JSON.stringify({ error: `runtime unreachable at ${upstreamBase}`, detail: String(error) }));
     return;
   }
 
   const out = {};
   upstream.headers.forEach((value, key) => {
-    if (!HOP_BY_HOP.has(key)) out[key] = value;
+    if (!RESPONSE_DROP.has(key)) out[key] = value;
   });
   response.writeHead(upstream.status, out);
   if (upstream.body === null) {
@@ -89,7 +108,11 @@ async function serveStatic(request, response) {
 
 const server = createServer((request, response) => {
   const path = new URL(request.url ?? "/", "http://localhost").pathname;
-  const handler = path.startsWith("/api/mihon/") ? proxy : serveStatic;
+  const handler = path.startsWith("/api/dalvik/")
+    ? (req, res) => proxy(req, res, DALVIK, /^\/api\/dalvik/)
+    : path.startsWith("/api/mihon/")
+      ? (req, res) => proxy(req, res, RUNTIME, /^\/api\/mihon/)
+      : serveStatic;
   handler(request, response).catch((error) => {
     response.writeHead(500, { "Content-Type": "text/plain; charset=utf-8" });
     response.end(`proxy error: ${String(error)}`);
@@ -97,5 +120,5 @@ const server = createServer((request, response) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`HardlyTracking on http://127.0.0.1:${PORT} (runtime ${RUNTIME}, dist ${DIST})`);
+  console.log(`HardlyTracking on http://127.0.0.1:${PORT} (runtime ${RUNTIME}, dalvik ${DALVIK}, dist ${DIST})`);
 });

@@ -119,6 +119,15 @@ export interface DalvikResult<T> {
   extensionId: string | null;
 }
 
+/** What `/capabilities` answers. Only the field we rely on is required. */
+export interface DalvikCapabilities {
+  /** The `/dalvik` call surface itself — without it nothing else in this file works. */
+  mangayomiMihonBridge: number;
+  imageProxy?: boolean;
+  extensionHandles?: boolean;
+  [key: string]: unknown;
+}
+
 const EXTENSION_HEADER = "x-mangayomi-extension-id";
 
 export class DalvikClient {
@@ -128,8 +137,42 @@ export class DalvikClient {
 
   constructor(options: DalvikOptions) {
     this.baseUrl = options.baseUrl.replace(/\/+$/, "");
-    this.fetchImpl = options.fetchImpl ?? fetch;
+    // Never keep `window.fetch` itself: Chrome's is a method of `window`, and calling it
+    // through a field throws "Illegal invocation" — in the browser only, so no unit test
+    // catches it. Wrapping it keeps the receiver.
+    this.fetchImpl = options.fetchImpl ?? ((input: RequestInfo | URL, init?: RequestInit) => fetch(input, init));
     this.timeoutMs = options.timeoutMs ?? 120_000;
+  }
+
+  /**
+   * Ask the host what it can do, which is also the honest way to find out whether one is
+   * there. A host that answers 200 with something else, or with a body that does not
+   * advertise the bridge, is not a host we can register.
+   */
+  async capabilities(): Promise<DalvikCapabilities> {
+    const controller = new AbortController();
+    // A boot probe must not hang the app behind a dead port.
+    const timer = setTimeout(() => controller.abort(), 4000);
+    let response: Response;
+    try {
+      response = await this.fetchImpl(`${this.baseUrl}/capabilities`, { signal: controller.signal });
+    } catch (error) {
+      throw new DalvikError(`no extension host at ${this.baseUrl}: ${(error as Error).message}`, 0);
+    } finally {
+      clearTimeout(timer);
+    }
+    const text = await response.text();
+    let body: unknown;
+    try {
+      body = JSON.parse(text);
+    } catch {
+      throw new DalvikError(`${this.baseUrl}/capabilities did not answer with JSON`, response.status);
+    }
+    const capabilities = body as DalvikCapabilities | null;
+    if (!response.ok || capabilities === null || capabilities.mangayomiMihonBridge === undefined) {
+      throw new DalvikError(`${this.baseUrl}/capabilities does not advertise the /dalvik bridge`, response.status);
+    }
+    return capabilities;
   }
 
   /** One call, one body. Errors carry the runtime's own message, never a guess. */
@@ -184,11 +227,47 @@ export class DalvikClient {
     return { extensionId: result.extensionId, sources: Array.isArray(result.body) ? result.body : [] };
   }
 
-  /** `/image/<uuid>` is relative to the host that minted it; make it loadable. */
+  /**
+   * `/image/<uuid>` is relative to the host that minted it; make it loadable.
+   *
+   * Two shapes arrive. A path (`/image/abc`) is joined to the base. A full address is what
+   * this runtime actually mints (`http://127.0.0.1:8792/image/abc`) — and when the app is
+   * served from another origin (the web build, `npm run dev`) that address is the runtime's
+   * loopback, which a browser tab may not reach. So a full address on one of the runtime's
+   * own proxy routes (`/image/`, `/video/`) is re-pointed onto this client's base, which is
+   * the app's own `/api/dalvik` proxy when the base is relative: one origin, no CORS, no
+   * second host in the page. Anything else absolute — a source's own CDN — is left alone,
+   * because rewriting it onto our proxy would turn a working URL into a 404.
+   */
   asset(url: string | null | undefined): string | undefined {
     if (url === null || url === undefined || url === "") return undefined;
-    if (/^https?:\/\//i.test(url)) return url;
+    if (/^https?:\/\//i.test(url)) {
+      const path = pathOf(url);
+      const origin = absoluteOrigin(this.baseUrl);
+      const ownProxy = /^\/(image|video)\//.test(path);
+      if (ownProxy && (origin === null || url.startsWith(`${origin}/`))) return `${this.baseUrl}${path}`;
+      return url;
+    }
     return `${this.baseUrl}${url.startsWith("/") ? "" : "/"}${url}`;
+  }
+}
+
+/** `http://host:port` for an absolute base, `null` when the base is a proxy path. */
+function absoluteOrigin(base: string): string | null {
+  try {
+    return new URL(base).origin;
+  } catch {
+    return null;
+  }
+}
+
+/** `path?query` of an absolute URL, always starting with `/`. */
+function pathOf(url: string): string {
+  try {
+    const parsed = new URL(url);
+    return `${parsed.pathname}${parsed.search}`;
+  } catch {
+    return url.startsWith("/") ? url : `/${url}`;
   }
 }
 
@@ -207,8 +286,23 @@ export interface InstalledExtension {
   sources: DalvikSource[];
 }
 
+/**
+ * The package id to remember an APK under, taken from the file it came from.
+ *
+ * The host cannot tell us: it has no extension-info route, and the only thing it answers
+ * with is the sha256 handle. Repo indexes name every APK by its package id
+ * (`eu.kanade.tachiyomi.extension.all.mangadex.apk`), so the file name is the best identity
+ * available without unzipping the APK — and the sha256 id remains the real key.
+ */
+export function packageIdFromApkName(fileName: string): string {
+  const base = fileName.split(/[/\\]/).pop() ?? fileName;
+  const name = base.replace(/\.apk$/i, "").trim();
+  return name === "" ? base : name;
+}
+
 export interface DalvikProviderOptions {
   client: DalvikClient;
+  /** Read on every call, so an APK installed later needs no rebuilt provider. */
   extensions: InstalledExtension[];
   /** Titles seen this session, so a chapter call can name the manga it is about. */
   titles?: Map<string, string>;
@@ -222,19 +316,35 @@ function splitNative(native: string): { sourceId: string; url: string } {
 }
 
 /**
- * The provider. Ids stay in the app's namespaced form so a row from this host and a row
- * from Suwayomi or the device library can never collide:
+ * The bare source id the runtime expects.
  *
- *   source    mihon:src:<sourceId>
- *   series    mihon:<sourceId>:<manga url>
- *   chapter   mihon:ch:<sourceId>:<chapter url>
+ * The UI hands us what `sources()` returned — `dalvik:src:<sourceId>` — while the runtime and
+ * the extension's own source list use the bare `<sourceId>`. Accepting both is not leniency:
+ * the namespaced form is what every call site in the app has, and the bare form is what the
+ * protocol takes.
+ */
+function bareSourceId(sourceId: string): string {
+  const native = sourceId.startsWith("dalvik:") ? nativeId(sourceId, "dalvik") : sourceId;
+  return native.startsWith("src:") ? native.slice("src:".length) : native;
+}
+
+/**
+ * The provider. Ids stay in the app's namespaced form so a row from this host and a row
+ * from Suwayomi or the device library can never collide — and the kind is `dalvik`, not
+ * `mihon`, because both hosts would otherwise answer to the same prefix and the registry's
+ * lookup would hand a dalvik id to Suwayomi:
+ *
+ *   source    dalvik:src:<sourceId>
+ *   series    dalvik:<sourceId>:<manga url>
+ *   chapter   dalvik:ch:<sourceId>:<chapter url>
  */
 export function createDalvikProvider(options: DalvikProviderOptions): SourceProvider {
   const { client } = options;
   const titles = options.titles ?? new Map<string, string>();
-  const kind: ProviderKind = "mihon";
+  const kind: ProviderKind = "dalvik";
 
-  function extensionFor(sourceId: string): InstalledExtension {
+  function extensionFor(namespaced: string): InstalledExtension {
+    const sourceId = bareSourceId(namespaced);
     const found = options.extensions.find((extension) => extension.sources.some((source) => source.id === sourceId));
     if (found === undefined) {
       throw new Error(`no installed extension exposes source ${sourceId} — install or re-enable it`);
@@ -293,7 +403,8 @@ export function createDalvikProvider(options: DalvikProviderOptions): SourceProv
       );
     },
 
-    async popular(sourceId: string, page: number): Promise<Paged<Series>> {
+    async popular(namespaced: string, page: number): Promise<Paged<Series>> {
+      const sourceId = bareSourceId(namespaced);
       const extension = extensionFor(sourceId);
       const result = await client.call<{ mangas: DalvikManga[]; hasNextPage: boolean }>({
         method: "getPopularManga",
@@ -304,7 +415,8 @@ export function createDalvikProvider(options: DalvikProviderOptions): SourceProv
       return paged((result.body.mangas ?? []).map((manga) => toSeries(sourceId, manga)), result.body.hasNextPage === true);
     },
 
-    async latest(sourceId: string, page: number): Promise<Paged<Series>> {
+    async latest(namespaced: string, page: number): Promise<Paged<Series>> {
+      const sourceId = bareSourceId(namespaced);
       const extension = extensionFor(sourceId);
       const result = await client.call<{ mangas: DalvikManga[]; hasNextPage: boolean }>({
         method: "getLatestManga",
@@ -315,7 +427,8 @@ export function createDalvikProvider(options: DalvikProviderOptions): SourceProv
       return paged((result.body.mangas ?? []).map((manga) => toSeries(sourceId, manga)), result.body.hasNextPage === true);
     },
 
-    async search(sourceId: string, query: string, page: number): Promise<Paged<Series>> {
+    async search(namespaced: string, query: string, page: number): Promise<Paged<Series>> {
+      const sourceId = bareSourceId(namespaced);
       const extension = extensionFor(sourceId);
       const result = await client.call<{ mangas: DalvikManga[]; hasNextPage: boolean }>({
         method: "getSearchManga",

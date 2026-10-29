@@ -6,6 +6,7 @@
  */
 import { openLibraryProfile, progressWriter, type LibraryProfile } from "../api/profile";
 import { providerFor } from "../api/registry";
+import { packageIdFromApkName, type InstalledExtension } from "../api/dalvik";
 import type { Chapter, Page, Series, Source } from "../api/source";
 
 class LibraryState {
@@ -14,17 +15,36 @@ class LibraryState {
   error = $state<string | null>(null);
   sources = $state<Source[]>([]);
   library = $state<Series[]>([]);
+  /** The APKs installed on the extension host, newest install last. */
+  extensions = $state<InstalledExtension[]>([]);
 
   async open(): Promise<void> {
     if (this.profile !== null) return;
     try {
       this.profile = await openLibraryProfile();
       this.library = await this.profile.store.listSeries();
+      this.extensions = await this.profile.store.listExtensions();
       this.ready = true;
       void this.loadSources();
     } catch (error) {
       this.error = message(error);
     }
+  }
+
+  /**
+   * Install an APK the user picked, then let its sources appear.
+   *
+   * Reading the file is the whole "repo index" step: the host never fetches anything, so the
+   * bytes have to come from somewhere the user chose. `installApk` keeps the row; reloading
+   * sources is what turns it into chips on this page.
+   */
+  async installApk(file: File): Promise<InstalledExtension> {
+    if (this.profile === null) throw new Error("the library is not open yet");
+    const apk = new Uint8Array(await file.arrayBuffer());
+    const installed = await this.profile.installApk(apk, packageIdFromApkName(file.name));
+    this.extensions = await this.profile.store.listExtensions();
+    await this.loadSources();
+    return installed;
   }
 
   /** A runtime that is down is a banner, never an empty source list. */

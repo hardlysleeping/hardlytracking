@@ -3,7 +3,7 @@
   import { providerFor } from "../api/registry";
   import type { Chapter, Series } from "../api/source";
   import Cover from "../components/Cover.svelte";
-  import { go } from "../lib/nav";
+  import { go, pathTo } from "../lib/nav";
   import { categories } from "../state/categories.svelte";
 
   interface Props {
@@ -96,7 +96,7 @@
       <ul class="chapters">
         {#each chapters as chapter (chapter.id)}
           <li>
-            <button onclick={() => go(`/read/${seriesId}/${chapter.id}`)}>
+            <button onclick={() => go(pathTo("read", seriesId, chapter.id))}>
               <span class="name">{chapter.name}</span>
               <span class="count">{chapter.pageCount > 0 ? `${chapter.pageCount} pages` : "unfetched"}</span>
               {#if chapter.read}<span class="read">read</span>{/if}
