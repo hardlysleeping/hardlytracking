@@ -29,6 +29,10 @@ Svelte 5 UI  →  SourceProvider  →  MihonProvider  →  /api/mihon  →  Miho
   look: one eye cycling Hidden → Revealed → Only, one pin cycling Active → Only → Hidden, pinned rows
   carrying the pin's ring and underlight, a per-row eye and pin, and a rail selection that narrows the
   library without touching either mark. Both marks are ours — nothing is written to the runtime.
+- **`src/api/dalvik.ts`** is the packaged-app path: the same `SourceProvider` over
+  M-Extension-Server's `/dalvik` bridge, where the APK travels as base64 and comes back as an
+  extension id (its SHA-256). Proven on Linux against the real runtime and a real MangaDex APK;
+  `npm run dalvik:smoke` reproduces it.
 - **`server/proxy.mjs`** serves the built app and proxies `/api/mihon/*` to the runtime, so the
   browser sees one origin and there is no CORS to configure.
 
