@@ -44,7 +44,7 @@ never the library, history, downloads, extensions or sync documents. Manual expo
 
 | Card | Depends on | Work | Gate |
 |---|---|---|---|
-| S1 `t_128d24d5` | T13 (the gate) | Sync document schema + versioning, one format | round-trip through a local file, byte-identical |
+| S1 `t_128d24d5` ✅ | — (credential-free, done alongside the native path) | Sync document schema + versioning, one format | `npm run sync:roundtrip`: 1 526 bytes, identical sha256 written/rewritten |
 | S2 `t_228bc810` | S1 | Change log: tombstones, per-field stamps, merge rules | two-device merge keeps progress, honours deletions |
 | S4 `t_43c26b7c` | S2 | Supabase Auth (Google, Apple, magic link), device list, revoke | two clients, one user; revoke is per-session |
 | S5 `t_a629976c` | S4 | Billing service: `/checkout` monthly\|yearly, portal, webhook, `entitlements` + RLS | test purchase flips `cloud_sync`; client writes refused |
