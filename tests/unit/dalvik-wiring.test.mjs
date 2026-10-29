@@ -98,7 +98,10 @@ test("an APK installed through the profile is kept in our database and its sourc
 
     // Kept, with the three fields the card asks for.
     const [row] = await profile.store.listExtensions();
-    assert.deepEqual(Object.keys(row).sort(), ["extensionId", "packageId", "sources"]);
+    // `enabled` is part of the row now: an installed extension can be switched off without
+    // losing its APK or its sources, so the flag has to be stored with it.
+    assert.deepEqual(Object.keys(row).sort(), ["enabled", "extensionId", "packageId", "sources"]);
+    assert.equal(row.enabled, true);
     assert.equal(row.extensionId, "12fde776sha256");
 
     // …and the sources are live without a reload of the provider.

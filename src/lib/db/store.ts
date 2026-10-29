@@ -31,6 +31,13 @@ export interface PositionRow {
   at: number;
 }
 
+export interface RepoRow {
+  url: string;
+  indexUrl: string;
+  name: string;
+  at: number;
+}
+
 export interface SourceMappingRow {
   seriesId: string;
   provider: string;
@@ -196,6 +203,24 @@ export class LibraryStore {
 
   async listMappings(): Promise<SourceMappingRow[]> {
     return this.db.all<SourceMappingRow>("mappings");
+  }
+
+  // ---- extension repositories ----------------------------------------------
+  //
+  // A repository is remembered by the URL the user pasted, not by its index URL: that is
+  // what they can recognise and remove later, and the index name is only a label.
+
+  async listRepos(): Promise<RepoRow[]> {
+    const rows = await this.db.all<RepoRow>("repos");
+    return rows.sort((a, b) => a.at - b.at);
+  }
+
+  async putRepo(row: RepoRow): Promise<void> {
+    await this.db.put("repos", { ...row } as unknown as Record<string, unknown>);
+  }
+
+  async removeRepo(url: string): Promise<void> {
+    await this.db.remove("repos", url);
   }
 
   // ---- categories: hidden + pinned -----------------------------------------

@@ -7,6 +7,9 @@
 import { openLibraryProfile, progressWriter, type LibraryProfile } from "../api/profile";
 import { providerFor } from "../api/registry";
 import { packageIdFromApkName, type InstalledExtension } from "../api/dalvik";
+import { downloadApk, loadRepository, type Repository } from "../lib/extensions/repository";
+import type { ExtensionEntry } from "../lib/extensions/index";
+import type { RepoRow } from "../lib/db/store";
 import type { Chapter, Page, Series, Source } from "../api/source";
 
 class LibraryState {
@@ -17,6 +20,10 @@ class LibraryState {
   library = $state<Series[]>([]);
   /** The APKs installed on the extension host, newest install last. */
   extensions = $state<InstalledExtension[]>([]);
+  /** Repositories the user added, oldest first. */
+  repos = $state<RepoRow[]>([]);
+  /** Indexes read this session, by repository URL — one fetch per repository per run. */
+  private indexes = new Map<string, ExtensionEntry[]>();
 
   async open(): Promise<void> {
     if (this.profile !== null) return;
@@ -24,6 +31,7 @@ class LibraryState {
       this.profile = await openLibraryProfile();
       this.library = await this.profile.store.listSeries();
       this.extensions = await this.profile.store.listExtensions();
+      this.repos = await this.profile.store.listRepos();
       this.ready = true;
       void this.loadSources();
     } catch (error) {
@@ -42,6 +50,57 @@ class LibraryState {
     if (this.profile === null) throw new Error("the library is not open yet");
     const apk = new Uint8Array(await file.arrayBuffer());
     const installed = await this.profile.installApk(apk, packageIdFromApkName(file.name));
+    this.extensions = await this.profile.store.listExtensions();
+    await this.loadSources();
+    return installed;
+  }
+
+  /**
+   * Add a repository by URL and read its index.
+   *
+   * The index is read here rather than on the browse screen so a bad URL fails at the moment
+   * it is added — with both candidate URLs in the message — instead of leaving a repository
+   * row that never works.
+   */
+  async addRepository(url: string): Promise<Repository> {
+    if (this.profile === null) throw new Error("the library is not open yet");
+    const repository = await loadRepository(url);
+    const row: RepoRow = { url: repository.url, indexUrl: repository.indexUrl, name: repository.name, at: Date.now() };
+    await this.profile.store.putRepo(row);
+    this.repos = await this.profile.store.listRepos();
+    this.indexes.set(repository.url, repository.extensions);
+    return repository;
+  }
+
+  async removeRepository(url: string): Promise<void> {
+    if (this.profile === null) return;
+    await this.profile.store.removeRepo(url);
+    this.indexes.delete(url);
+    this.repos = await this.profile.store.listRepos();
+  }
+
+  /** The entries of a repository, read once and kept for the session. */
+  async repoEntries(url: string): Promise<ExtensionEntry[]> {
+    const cached = this.indexes.get(url);
+    if (cached !== undefined) return cached;
+    const repository = await loadRepository(url);
+    this.indexes.set(repository.url, repository.extensions);
+    return repository.extensions;
+  }
+
+  /**
+   * Install one entry from a repository: the index gave the APK URL, the host turns the bytes
+   * into an installed extension, and the row keeps the version so an update is a comparison
+   * rather than a guess.
+   */
+  async installEntry(entry: ExtensionEntry, repoUrl: string): Promise<InstalledExtension> {
+    if (this.profile === null) throw new Error("the library is not open yet");
+    const apk = await downloadApk(entry);
+    const installed = await this.profile.installApk(apk, entry.pkg, {
+      repoUrl,
+      versionName: entry.version,
+      versionCode: entry.versionCode,
+    });
     this.extensions = await this.profile.store.listExtensions();
     await this.loadSources();
     return installed;

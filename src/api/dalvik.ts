@@ -284,6 +284,12 @@ export interface InstalledExtension {
   extensionId: string;
   packageId: string;
   sources: DalvikSource[];
+  /** Where it came from, so an update can find the same entry again. */
+  repoUrl?: string;
+  versionName?: string;
+  versionCode?: number;
+  /** Disabled extensions keep their APK and their sources but are not offered. */
+  enabled?: boolean;
 }
 
 /**

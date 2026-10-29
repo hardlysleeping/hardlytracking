@@ -30,10 +30,18 @@ export interface LibraryProfile {
    * call carrying base64, and the id it answers with (sha256 of those bytes) is what every
    * later call names. The row lands in our database because the runtime keeps no list.
    */
-  installApk(apk: Uint8Array, packageId: string): Promise<InstalledExtension>;
+  installApk(apk: Uint8Array, packageId: string, meta?: InstallMeta): Promise<InstalledExtension>;
 }
 
 export const LOCAL_PROFILE_SLUG = "device://library";
+
+/** What a repository knows about an APK that the host cannot tell us. */
+export interface InstallMeta {
+  repoUrl?: string;
+  versionName?: string;
+  versionCode?: number;
+  enabled?: boolean;
+}
 
 export interface OpenProfileOptions {
   database?: Database;
@@ -72,12 +80,20 @@ export async function openLibraryProfile(options: OpenProfileOptions = {}): Prom
     providers: registry.providers,
     dalvik,
     warnings: registry.warnings,
-    async installApk(apk: Uint8Array, packageId: string): Promise<InstalledExtension> {
+    async installApk(apk: Uint8Array, packageId: string, meta: InstallMeta = {}): Promise<InstalledExtension> {
       if (dalvik === null) {
         throw new Error("no extension host answered /capabilities, so there is nothing to install onto");
       }
       const installed = await dalvik.client.install(apk);
-      const row: InstalledExtension = { extensionId: installed.extensionId, packageId, sources: installed.sources };
+      const row: InstalledExtension = {
+        extensionId: installed.extensionId,
+        packageId,
+        sources: installed.sources,
+        enabled: meta.enabled ?? true,
+        ...(meta.repoUrl === undefined ? {} : { repoUrl: meta.repoUrl }),
+        ...(meta.versionName === undefined ? {} : { versionName: meta.versionName }),
+        ...(meta.versionCode === undefined ? {} : { versionCode: meta.versionCode }),
+      };
       await store.putExtension(row);
       // The provider reads this same array, so the new sources are live on the next call —
       // and the same APK twice replaces its own row instead of duplicating 61 sources.

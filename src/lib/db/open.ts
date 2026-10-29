@@ -9,7 +9,7 @@
  * desktop card (T6) and must land here, not in a second store.
  */
 
-export const STORES = ["series", "chapters", "progress", "prefs", "pages", "categories", "extensions", "history", "position", "mappings"] as const;
+export const STORES = ["series", "chapters", "progress", "prefs", "pages", "categories", "extensions", "history", "position", "mappings", "repos"] as const;
 export type StoreName = (typeof STORES)[number];
 
 /**
@@ -31,6 +31,7 @@ const KEY_PATH: Record<StoreName, string> = {
   history: "chapterId",
   position: "seriesId",
   mappings: "seriesId",
+  repos: "url",
 };
 
 export function keyPathOf(store: StoreName): string {
@@ -45,7 +46,7 @@ export interface Database {
 }
 
 const DB_NAME = "hardlytracking";
-const DB_VERSION = 5;
+const DB_VERSION = 6;
 
 function wrap<T>(request: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => {

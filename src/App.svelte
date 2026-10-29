@@ -4,6 +4,7 @@
   import Browse from "./views/Browse.svelte";
   import Series from "./views/Series.svelte";
   import Reader from "./views/Reader.svelte";
+  import Extensions from "./views/Extensions.svelte";
   import { library } from "./state/library.svelte";
   import { categories } from "./state/categories.svelte";
   import { go, parseRoute } from "./lib/nav";
@@ -29,13 +30,14 @@
     <button class="brand" onclick={() => go("/library")}>HardlyTracking</button>
     <button class="tab" class:on={route.name === "library"} onclick={() => go("/library")}>Library</button>
     <button class="tab" class:on={route.name === "browse"} onclick={() => go("/browse")}>Browse</button>
-    <span class="spacer"></span>
-    <span class="profile">{library.profile?.label ?? "opening…"}</span>
+    <button class="tab" class:on={route.name === "extensions"} onclick={() => go("/extensions")}>Extensions</button>
   </nav>
 
   <main>
     {#if route.name === "browse"}
       <Browse />
+    {:else if route.name === "extensions"}
+      <Extensions />
     {:else if route.name === "series" && route.id !== null}
       <Series seriesId={route.id} />
     {:else if route.name === "read" && route.id !== null && route.chapterId !== null}
@@ -78,11 +80,5 @@
     color: #e6e6ee;
     background: #1c1c22;
   }
-  .spacer {
-    flex: 1;
-  }
-  .profile {
-    font-size: 12px;
-    color: #6f6f7c;
-  }
+
 </style>

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { library } from "../state/library.svelte";
+  import { go } from "../lib/nav";
   import { providerFor } from "../api/registry";
   import type { Series } from "../api/source";
   import SeriesGrid from "../components/SeriesGrid.svelte";
@@ -12,11 +13,7 @@
   let page = $state(1);
   let busy = $state(false);
   let error = $state<string | null>(null);
-  let installing = $state(false);
-  let installNote = $state<string | null>(null);
-
-  /** No host, no install: the APK has to go somewhere, and `/capabilities` is the answer. */
-  const host = $derived(library.profile?.dalvik ?? null);
+  /** A host that did not answer is worth saying once, here, in words. */
   const hostWarning = $derived(library.profile?.warnings.find((w) => w.startsWith("dalvik:")) ?? null);
 
   async function run(next = 1): Promise<void> {
@@ -48,45 +45,23 @@
     void run(1);
   }
 
-  /**
-   * Install an APK from this device. The bytes are the install — the host has no install
-   * route — and the sources it exposes become chips here as soon as it answers.
-   */
-  async function install(event: Event): Promise<void> {
-    const input = event.currentTarget as HTMLInputElement;
-    const file = input.files?.[0];
-    if (file === undefined) return;
-    installing = true;
-    installNote = null;
-    error = null;
-    try {
-      const installed = await library.installApk(file);
-      installNote = `Installed ${installed.packageId} — ${installed.sources.length} sources`;
-    } catch (e) {
-      error = e instanceof Error ? e.message : String(e);
-    } finally {
-      installing = false;
-      input.value = "";
-    }
-  }
 </script>
 
 <section>
   <header class="head">
     <h1>Browse</h1>
-    {#if host}
-      <label class="install" class:busy={installing}>
-        <input type="file" accept=".apk,application/vnd.android.package-archive" disabled={installing} onchange={install} />
-        <span>{installing ? "Installing…" : "Install extension (.apk)"}</span>
-      </label>
-    {/if}
+    <button class="ghost" onclick={() => go("/extensions")}>Extensions</button>
   </header>
 
-  {#if installNote}<p class="note">{installNote}</p>{/if}
-  {#if hostWarning && library.sources.length === 0}<p class="note warn">{hostWarning}</p>{/if}
+  {#if hostWarning && library.sources.length === 0}
+    <p class="note warn">No extension host answered, so there is nothing to browse yet.</p>
+  {/if}
 
   {#if library.sources.length === 0}
-    <p class="empty">No sources answered. Is the runtime running?</p>
+    <p class="empty">
+      No sources yet. <button class="ghost inline" onclick={() => go("/extensions")}>Add a repository</button> and
+      install an extension — its sources appear here.
+    </p>
   {:else}
     <div class="sources">
       {#each library.sources as source (source.id)}
@@ -135,31 +110,10 @@
     margin: 0;
   }
   /* The file input is the browser's own control; keep it out of the way and style the label. */
-  .install {
-    position: relative;
-    cursor: pointer;
-    padding: 6px 12px;
-    border-radius: 999px;
-    border: 1px dashed #3a3a48;
-    color: #a9a9b8;
-    font-size: 13px;
-    white-space: nowrap;
-  }
-  .install:hover {
-    border-color: #5a5a6e;
-    color: #e6e6ee;
-  }
-  .install.busy {
-    opacity: 0.6;
-    cursor: progress;
-  }
-  .install input {
-    position: absolute;
-    inset: 0;
-    opacity: 0;
-    cursor: inherit;
-    width: 100%;
-  }
+  
+  
+  
+  
   .note {
     color: #8fd6a8;
     font-size: 13px;
@@ -216,6 +170,13 @@
     color: #e6e6ee;
     font: inherit;
     font-size: 13px;
+  }
+  .inline {
+    padding: 0;
+    border: 0;
+    color: #b9b9c6;
+    text-decoration: underline;
+    text-underline-offset: 2px;
   }
   .empty {
     color: #8a8a96;

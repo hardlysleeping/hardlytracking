@@ -46,15 +46,15 @@
     <button class="ghost" onclick={() => go("/browse")}>Browse sources</button>
   </header>
 
-  {#if library.error}
-    <p class="banner">{library.error}</p>
-  {/if}
 
   {#if !library.ready}
     <p class="empty">Opening the library…</p>
   {:else}
     <div class="board">
-      <CategoryRail {selected} onselect={(id) => (selected = id)} />
+      <div class="railwrap">
+        <h2 class="railhead">Categories</h2>
+        <CategoryRail {selected} onselect={(id) => (selected = id)} />
+      </div>
       <div class="main">
         {#if selected !== null}
           <p class="crumb">
@@ -72,7 +72,18 @@
             {/each}
           </div>
         {/if}
-        <SeriesGrid series={rows} empty={emptyMessage} />
+        {#if rows.length === 0 && library.library.length === 0 && selected === null}
+          <div class="blank">
+            <p class="blankline">Your library is empty.</p>
+            <p class="blanksub">Add a repository, install an extension, and the first series you keep will land here.</p>
+            <div class="blankacts">
+              <button class="primary" onclick={() => go("/extensions")}>Add a repository</button>
+              <button class="ghost" onclick={() => go("/browse")}>Browse sources</button>
+            </div>
+          </div>
+        {:else}
+          <SeriesGrid series={rows} empty={emptyMessage} />
+        {/if}
       </div>
     </div>
   {/if}
@@ -90,6 +101,51 @@
     font-weight: 600;
     margin: 0;
   }
+  .railwrap {
+    display: grid;
+    gap: 8px;
+  }
+  .railhead {
+    margin: 0;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #6f6f7c;
+  }
+  /* An empty library is a state, not a sentence in the corner. */
+  .blank {
+    display: grid;
+    gap: 6px;
+    align-content: start;
+    padding: 34px 0 0;
+    max-width: 46ch;
+  }
+  .blankline {
+    margin: 0;
+    font-size: 15px;
+    color: #e6e6ee;
+  }
+  .blanksub {
+    margin: 0 0 8px;
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--muted);
+  }
+  .blankacts {
+    display: flex;
+    gap: 8px;
+  }
+  .primary {
+    all: unset;
+    cursor: pointer;
+    padding: 8px 15px;
+    border-radius: 9px;
+    background: #e6e6ee;
+    color: #12121a;
+    font-size: 13px;
+    font-weight: 600;
+  }
   .board {
     display: grid;
     grid-template-columns: 200px minmax(0, 1fr);
@@ -97,7 +153,52 @@
     align-items: start;
   }
   @media (max-width: 620px) {
-    .board {
+    .railwrap {
+    display: grid;
+    gap: 8px;
+  }
+  .railhead {
+    margin: 0;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #6f6f7c;
+  }
+  /* An empty library is a state, not a sentence in the corner. */
+  .blank {
+    display: grid;
+    gap: 6px;
+    align-content: start;
+    padding: 34px 0 0;
+    max-width: 46ch;
+  }
+  .blankline {
+    margin: 0;
+    font-size: 15px;
+    color: #e6e6ee;
+  }
+  .blanksub {
+    margin: 0 0 8px;
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--muted);
+  }
+  .blankacts {
+    display: flex;
+    gap: 8px;
+  }
+  .primary {
+    all: unset;
+    cursor: pointer;
+    padding: 8px 15px;
+    border-radius: 9px;
+    background: #e6e6ee;
+    color: #12121a;
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .board {
       grid-template-columns: minmax(0, 1fr);
     }
   }

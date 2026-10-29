@@ -8,6 +8,7 @@
  *   POST /api/mihon/graphql                ->  runtime /api/graphql
  *   POST /api/dalvik/dalvik                ->  extension host /dalvik
  *   GET  /api/dalvik/image/<uuid>          ->  extension host /image/<uuid>
+ *   GET  /api/repo?url=<index or apk url>  ->  the URL itself (extension repositories)
  *
  * The rule is a prefix swap and nothing else, which is why `stripApiPrefix` in
  * src/api/mihon.ts mirrors it. `RUNTIME_URL` is the only thing that changes when the
@@ -91,6 +92,60 @@ async function proxy(request, response, upstreamBase, prefix) {
   response.end();
 }
 
+/**
+ * Extension repositories and their APKs, fetched for the page.
+ *
+ * A browser cannot be relied on here: repository indexes live on `raw.githubusercontent.com`
+ * and APKs on release assets that redirect to another host, and a self-hosted build may be
+ * served over http while the asset is https (mixed content). One passthrough keeps every
+ * fetch same-origin, which is also why the page needs no CORS configuration.
+ *
+ * Only GET, only http(s), and only up to a cap — this route exists to read two file types,
+ * not to be an open proxy for the network.
+ */
+const REPO_MAX_BYTES = 80 * 1024 * 1024;
+
+async function serveRepo(request, response) {
+  const incoming = new URL(request.url ?? "/", "http://localhost");
+  const target = incoming.searchParams.get("url");
+  if (target === null || !/^https?:\/\//i.test(target)) {
+    response.writeHead(400, { "Content-Type": "application/json" });
+    response.end(JSON.stringify({ error: "url must be an absolute http(s) URL" }));
+    return;
+  }
+  if (request.method !== "GET") {
+    response.writeHead(405, { "Content-Type": "application/json" });
+    response.end(JSON.stringify({ error: "repositories are read-only" }));
+    return;
+  }
+  let upstream;
+  try {
+    upstream = await fetch(target, { headers: { "accept-encoding": "identity", "user-agent": "HardlyTracking" }, redirect: "follow" });
+  } catch (error) {
+    response.writeHead(502, { "Content-Type": "application/json" });
+    response.end(JSON.stringify({ error: `could not fetch ${target}`, detail: String(error) }));
+    return;
+  }
+  if (!upstream.ok) {
+    response.writeHead(upstream.status, { "Content-Type": "application/json" });
+    response.end(JSON.stringify({ error: `${target} answered ${upstream.status}` }));
+    return;
+  }
+  const length = Number(upstream.headers.get("content-length") ?? "0");
+  if (length > REPO_MAX_BYTES) {
+    response.writeHead(413, { "Content-Type": "application/json" });
+    response.end(JSON.stringify({ error: `that file is ${length} bytes; the cap is ${REPO_MAX_BYTES}` }));
+    return;
+  }
+  const bytes = Buffer.from(await upstream.arrayBuffer());
+  response.writeHead(200, {
+    "Content-Type": upstream.headers.get("content-type") ?? "application/octet-stream",
+    "Content-Length": String(bytes.length),
+    "Cache-Control": "no-store",
+  });
+  response.end(bytes);
+}
+
 async function serveStatic(request, response) {
   const incoming = new URL(request.url ?? "/", "http://localhost");
   const relative = normalize(decodeURIComponent(incoming.pathname)).replace(/^(\.\.[/\\])+/, "");
@@ -108,7 +163,9 @@ async function serveStatic(request, response) {
 
 const server = createServer((request, response) => {
   const path = new URL(request.url ?? "/", "http://localhost").pathname;
-  const handler = path.startsWith("/api/dalvik/")
+  const handler = path === "/api/repo"
+    ? serveRepo
+    : path.startsWith("/api/dalvik/")
     ? (req, res) => proxy(req, res, DALVIK, /^\/api\/dalvik/)
     : path.startsWith("/api/mihon/")
       ? (req, res) => proxy(req, res, RUNTIME, /^\/api\/mihon/)
