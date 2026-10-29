@@ -35,6 +35,24 @@ Repo: `~/apps/hardlytracking` · branch `master` · remote `github.com/hardlysle
 | T5 `t_6abb03ac` | 13 | `/api/mihon/graphql` → sources JSON; thumbnail 200 `image/jpeg`; `/series/mihon:12` → 200 |
 | T20 `t_b3da9c53` | 4 | **Hidden + pinned categories in HardlyReader's look**: eye cycles Hidden → Revealed → Only, pin cycles Active → Only → Hidden, pinned rows ring + underlight + tone, per-row eye/pin, rail selection, `categories` store (DB v2). 37/37 tests, `tsc` clean, `svelte-check` 0/0, browser: all three eye states, all three pin states, per-row marks, reload persistence |
 
+## Priority 6 — paid sync (blocked until the gate passes)
+
+**The reader is free; the subscription pays only for automatic cross-device sync.** $0.99/month or
+$9.99/year, one capability `cloudSync`, all providers under one account. No account for reading,
+downloads, backups or Komga/Suwayomi. Supabase holds identity + entitlement + devices + Stripe mapping —
+never the library, history, downloads, extensions or sync documents. Manual export/import stays free.
+
+| Card | Depends on | Work | Gate |
+|---|---|---|---|
+| S1 `t_128d24d5` | T13 (the gate) | Sync document schema + versioning, one format | round-trip through a local file, byte-identical |
+| S2 `t_228bc810` | S1 | Change log: tombstones, per-field stamps, merge rules | two-device merge keeps progress, honours deletions |
+| S4 `t_43c26b7c` | S2 | Supabase Auth (Google, Apple, magic link), device list, revoke | two clients, one user; revoke is per-session |
+| S5 `t_a629976c` | S4 | Billing service: `/checkout` monthly\|yearly, portal, webhook, `entitlements` + RLS | test purchase flips `cloud_sync`; client writes refused |
+| S6 `t_083bac82` | S1 | First cloud transport behind the document (folder/WebDAV) | two devices converge; Supabase not involved |
+| S7 `t_cb4a2033` | S5 | Entitlement gate, Manage Subscription, expiry behaviour | expiry stops sync and changes nothing else |
+
+Not synced, by design: downloaded images, CBZ, page/cover cache, APK binaries, WebView cookies.
+
 ## The gate in one paragraph
 
 `docs/ios-mvp-test-matrix.md`: the release gate. 25 pinned extensions from the live Keiyoushi index
