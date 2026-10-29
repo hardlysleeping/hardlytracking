@@ -1,24 +1,65 @@
 # The tablet library layout
 
-The rule: **a tablet is not a bigger phone.** Komikku is the familiarity bar on a tablet — categories
-always reachable, a dense grid, unread/download/source visible, filters and sort at hand, bulk actions
-that do not cover the thing being selected, and a resume that is one tap. The layout below keeps all
-of that, and the collection model underneath (`docs/collections.md`) makes it more capable than a
-fixed category list.
+The rule: **a tablet is not a bigger phone, and the phone is not a cut-down tablet.** Komikku is the
+familiarity bar on a tablet — categories at hand, dense grid, badges, filters and sort nearby,
+one-tap resume, bulk selection. The same model collapses to a phone and expands to a desktop with
+only the presentation changing.
 
-Encoded in `src/lib/layout-modes.ts` and tested in `tests/unit/layout-modes.test.mjs` — the numbers
-here and the numbers in the tests are the same numbers.
+Encoded in `src/lib/layout-modes.ts`, tested in `tests/unit/layout-modes.test.mjs` (22 tests). The
+numbers in this document and the numbers in the tests are the same numbers.
 
 ## Device classes
 
 ```
 phone    < 600
-tablet   600 – 1279      (iPad landscape is 1024–1180: not a desktop)
+tablet   600 – 1279      iPad landscape is 1024–1180, so it is not a desktop
 desktop  ≥ 1280
 ```
 
-Width alone is not enough for the split. A tablet splits into grid + detail only when it is at least
-1000 wide **and** 600 tall: a 1100×560 window has no height for a detail pane and stays single.
+Chrome: no rail on a phone, a 76px rail on a tablet, a 224px sidebar on a desktop. The library's own
+decisions are then made on **usable width** — viewport minus chrome minus 32px padding — never on the
+device name.
+
+## Category navigation: tabs, overflow, or a sidebar
+
+The most important choice on a landscape tablet, so all three exist and the default is `Automatic`:
+
+```
+Settings → Library → Category navigation
+  ● Automatic
+  ○ Tabs
+  ○ Sidebar
+```
+
+| Usable width | Automatic | Forced Tabs | Forced Sidebar |
+|---|---|---|---|
+| < 750 (portrait tablet) | tabs, scrolling | tabs | falls back to tabs |
+| 750 – 1050 | tabs | tabs | sidebar only if the grid keeps 420px |
+| > 1050 | sidebar | tabs | sidebar |
+
+- Up to **8 collections**, the bar scrolls horizontally — a Komikku user expects to swipe the bar.
+- Past 8, the bar shows what fits plus a `+N` control; **pinned collections are never behind it**.
+- The sidebar is 20% of usable width, clamped 200–280px, and is only chosen when the grid would still
+  have its 420px minimum. That is the "doesn't meaningfully reduce the manga grid" test.
+- Unread counts optionally sit beside collection names in the sidebar.
+- Manual and smart collections look identical in the bar and the sidebar; only the editor differs.
+
+## Split pane
+
+Decided on usable width **and** height, then checked against what the grid is left with:
+
+```
+< 750 usable           single pane, always
+750 – 1050 usable      split possible, opt-in (optionalSplit = true)
+> 1050 usable          split by default
+height < 600           never splits — a wide short window has no readable detail pane
+grid would drop < 420  no split, even if the width says yes
+```
+
+Default ratio 58 / 42, draggable between 45 / 55 and 75 / 25, remembered per device. Detail pane
+clamped 340–520px. Tapping a second title swaps the pane; the library keeps its scroll and selection.
+The reader always opens full-screen, and Back returns to the same collection, filters, scroll and
+selected title.
 
 ## The four shapes
 
@@ -36,87 +77,166 @@ Continue reading  [ A ][ B ] →
 Selecting a title replaces the grid. Bulk actions float above the bottom bar. Resume lives in the
 long-press menu.
 
-### Tablet portrait — collections as a column, detail still replaces
+### Tablet portrait — collection bar, detail replaces
 
 ```
-┌────────────┬──────────────────────────────┐
-│ Collections│ Library                  🔍 ⋯ │
-│            │ Continue reading [A][B] →    │
-│ All        │ Filter · Sort · Density      │
-│ Reading  ● │ ┌────┐ ┌────┐ ┌────┐ ┌────┐  │
-│ Favorites  │ │cov │ │cov │ │cov │ │cov │  │
-│ Manhwa     │ └────┘ └────┘ └────┘ └────┘  │
-│ Completed  │ title  title  title  title    │
-│ + New      │ 3 unread  Ch.52  ↓   ✓        │
-└────────────┴──────────────────────────────┘
+Library                          🔍 Filter Sort ⋯
+All  Reading  Favorites  Manhwa  +
+Continue reading [A][B][C] →                    ⌄
+┌────┐ ┌────┐ ┌────┐ ┌────┐
+│cov │ │cov │ │cov │ │cov │
+└────┘ └────┘ └────┘ └────┘
+title  title  title  title
+4 ●↓   ✓     12 ↓   Ch.45
 ```
 
 A 768-wide screen cannot hold a collection list, a usable grid and a readable detail pane at once, so
-detail replaces the grid — but the collection column stays, because switching collections is the
-thing that must never take extra steps.
+the collections stay a scrolling bar and detail replaces the grid.
 
-### Tablet landscape — grid + detail
+### Tablet landscape — sidebar + grid + detail
 
 ```
 ┌────────────┬───────────────────────┬──────────────────────┐
 │ Collections│ Library          🔍 ⋯ │ ← Manga title    ⋯   │
 │            │ Continue reading →    │  (cover)  title       │
-│ All        │ Filter · Sort         │           author      │
-│ Reading  ● │ ┌────┐ ┌────┐ ┌────┐  │ [Continue] [+ Library]│
-│ Favorites  │ │cov │ │cov │ │cov │  │ description…          │
-│ Manhwa     │ └────┘ └────┘ └────┘  │ Chapters   filter/sort│
-│            │ ┌────┐ ┌────┐ ┌────┐  │ 120 Chapter 120    ↓  │
-│            │ └────┘ └────┘ └────┘  │ 119 Chapter 119    ✓  │
+│ All    142 │ Filter · Sort         │           author      │
+│ Reading 32 │ ┌────┐ ┌────┐ ┌────┐  │ [Continue] [+ Library]│
+│ Favorites18│ │cov │ │cov │ │cov │  │ description…          │
+│ Manhwa  27 │ └────┘ └────┘ └────┘  │ Chapters   filter/sort│
+│ Completed49│ ┌────┐ ┌────┐ ┌────┐  │ 120 Chapter 120    ↓  │
+│ + Collection│ └────┘ └────┘ └────┘ │ 119 Chapter 119    ✓  │
 └────────────┴───────────────────────┴──────────────────────┘
 ```
 
-The grid keeps its selection, so tapping a second title swaps the pane rather than leaving the shelf.
-The detail pane scrolls on its own.
-
-### Desktop — three panes
+### Desktop — navigation, collections, grid, detail
 
 ```
 ┌──────────┬──────────────┬───────────────────┬────────────────────┐
 │ Library  │ Collections  │ Grid              │ Detail             │
-│ Updates  │ All          │ ┌───┐ ┌───┐ ┌───┐ │ cover  title       │
-│ Browse   │ Reading    ● │ └───┘ └───┘ └───┘ │ chapters           │
-│ History  │ Favorites    │ ┌───┐ ┌───┐ ┌───┐ │                    │
-│ More     │ + New        │ └───┘ └───┘ └───┘ │                    │
+│ Updates  │ All       142│ ┌───┐ ┌───┐ ┌───┐ │ cover  title       │
+│ Browse   │ Reading    32│ └───┘ └───┘ └───┘ │ chapters           │
+│ History  │ Favorites  18│ ┌───┐ ┌───┐ ┌───┐ │                    │
+│ More     │ + Collection │ └───┘ └───┘ └───┘ │                    │
 └──────────┴──────────────┴───────────────────┴────────────────────┘
 ```
 
-## Rules that hold in every shape
+## Grid and density
 
-**Collections are one tap, never a sheet.** Chips on a phone, a persistent column everywhere else.
-The column collapses to a rail of the same rows (not to nothing) when the user wants the width.
+Cover width, not column count, is the setting. Columns are computed from the width and clamped 2–8:
 
-**Density is a number, not a mode.** `comfortable 148 / compact 112 / dense 88`. Tablets and desktops
-default to `compact` (grid min 112); phones to 132. Columns are computed, never fixed: at least two,
-at most eight.
+```
+compact      88px   badges only              8–10 across on a 12–13" tablet
+comfortable 112px   title + badges            6–8 across              ← tablet default
+large       148px   title + badges + source   4–5 across              ← phone default
+```
 
-**Metadata shrinks with the cover.** At `comfortable`: title + unread/download badges + source and
-language. At `compact`: title + badges. At `dense`: badges only, title on hover/long-press. Source
-and language are shown because Komikku shows them and a library with three MangaDex sources needs it.
+Changing the split ratio changes the column count, because the grid is `auto-fill` over the cover
+width. There is no "iPad Pro gets seven columns" branch anywhere.
 
-**Resume without opening the detail page.** Phone: long-press menu → Resume. Tablet: a corner control
-on the tile, always visible. Desktop: on hover, and double-click resumes. Resume opens the reader at
-the exact page; the detail page is for chapters, categories and metadata.
+## Manga card
 
-**Filters and sort are inline, not sheets.** One row above the grid; active filters show as removable
-chips. A sheet is the phone's answer to a small screen, not the tablet's.
+```
+┌────────────┐  4      ← unread
+│   COVER    │  ↓2     ← downloaded
+└────────────┘  ●       ← new chapter
+Manga Title
+MD · EN                ← source + language, comfortable/large only
+```
 
-**Selection is bulk-first.** Long-press enters selection on touch, hover shows a checkbox and
-shift-click selects a range on desktop. The action bar is pinned to the bottom of the grid column on
-tablet and desktop (a floating bar would cover the covers), and floats above the bottom bar on a
-phone. Actions: Download unread, Mark read/unread, Add to collection, Remove from collection, Migrate,
-Remove from library.
+Badges are opt-in per kind. Defaults: **unread, downloaded, new**. Optional: source, language,
+tracker. A compact 88px cover refuses source and language even when enabled — at that size they are a
+smudge, and `badgesFor()` enforces it rather than leaving it to CSS.
 
-**Pane widths are remembered.** Collection 176–264 on a tablet, 200–280 on a desktop; detail 340–460
-and 360–520. Clamped, persisted, and a collapsed column does not lose its width.
+The grid stays the dominant element: Continue Reading and pinned collections are one compact row
+above it, collapsible, and never a dashboard.
 
-**Reader preferences are per device class.** A tablet keeps its own mode (spread, RTL, preload,
-brightness, orientation lock) so a phone's single-page setting never lands on it. `readerProfile()`
-keys the preference set.
+## Selection
+
+- Long press enters selection; a tap then toggles.
+- Range: long-press-and-drag from A to F on touch, shift-click on a pointer, ctrl/cmd-click toggles.
+- Dragging to reorder must not start a selection, so Manual sort owns the drag gesture and selection
+  owns long-press-without-movement.
+- The bar reads **"Select all 42 filtered"** when filters are active, never a silent "select all
+  3 000" (`selectAllLabel`).
+- The bar is pinned to the bottom of the grid column wherever there is a sidebar or a split; it floats
+  above the bottom bar only on a phone, where there is nothing to cover.
+- Direct on the bar: Read, Download, Collection, More (unread, remove downloads, track, migrate,
+  remove from library). The common ones are not buried in an overflow.
+
+## Per-collection state
+
+Each collection remembers its own sort and filters, and the defaults are:
+
+```
+All        → Title
+Reading    → Last read
+Favorites  → Manual (drag to reorder)
+Continue   → Last read
+Recent     → Last updated
+```
+
+Navigating into the reader and back must preserve: collection, filters, sort, grid scroll, selected
+title, split width, and the search query. A tablet library that rebuilds itself on every return is
+the thing this section exists to prevent.
+
+Filters compose with the collection as another dimension (`collection + unread + MangaDex`), and
+active filters stay visible as removable chips with Clear all — never a filter that hides titles
+without saying which one did it.
+
+## Keyboard and pointer
+
+```
+↑ ↓ ← →         move focus in the grid
+Enter           open the focused title (detail pane or page)
+Space           resume, where a resume is available
+Cmd/Ctrl+F      library search
+Shift+click     range select
+Cmd/Ctrl+click  toggle select
+Esc             close selection, then the detail pane
+```
+
+Hover shows the resume control and the checkbox; right-click opens the same context menu as long
+press; drag reorders when the sort is Manual. Every action above also has a touch path.
+
+## Empty and error states
+
+```
+no filter results      "No manga match these filters."        [Clear filters]
+empty collection       "Nothing in Reading yet."              [Browse sources]
+offline, stale covers  "Library is available offline. Some source information could not be refreshed."
+```
+
+Never a blank pane.
+
+## Reader
+
+Full-screen, never inside the pane, and familiar to a Komikku user: RTL / LTR / vertical / webtoon,
+page preload, tap zones that follow the reading direction, background, fit behaviour, brightness,
+orientation lock — with preferences keyed per device class so a tablet spread never lands on a phone.
+
+## Performance targets
+
+5 000 titles, 50 000 chapters: virtualised grid, lazy cover decode, a thumbnail cache, incremental
+filtering, and no full-grid re-render when one read state changes. Komikku's fast-browsing work is
+the signal that this belongs in the design, not in a later optimisation pass.
+
+## First install on a tablet
+
+```
+category navigation   Automatic
+grid density          Comfortable
+Continue Reading      shown, one compact row
+pinned collections    none
+badges                unread + downloaded + new
+sort                  Title (All), Last read (Continue)
+split                 Automatic
+filters               none
+source/language badge off
+multi-select          long press
+reader                full-screen, its own tablet preferences
+```
+
+Simple on first open, power one tap away.
 
 ## What is deliberately not here
 
@@ -125,12 +245,16 @@ keys the preference set.
   and a pointer path.
 - No grid that reflows while images load: covers reserve their 2:3 box, so a density change is the
   only thing that moves the grid.
+- No separate tablet app. Phone, tablet and desktop share `LibraryCollection`, `LibraryQuery`,
+  `LibrarySort`, `LibrarySelection`, `MangaCard` and `MangaDetails`; only presentation changes.
 
 ## Status
 
-Defined and encoded: `layout-modes.ts` (device classes, four shapes, densities, columns, pane widths,
-selection-bar placement, reader profile keying), 13 tests.
+Encoded and tested: device classes, chrome widths, category navigation (three modes with the
+Automatic rule, overflow past eight, pinned always visible), split thresholds on usable width and
+height with a clamped remembered ratio, density presets and per-density badges, computed columns,
+select-all labelling, per-collection default sorts, reader-profile keying.
 
-Not yet wired: the Library view still renders the phone layout at every width. Wiring means replacing
-`viewport.size` checks in `Library.svelte` with `libraryLayout(viewport.width, viewport.height)`, adding
-the collection column and the detail pane, and persisting the density and pane widths in `settings`.
+Not yet wired: `Library.svelte` still draws the phone layout at every width. Wiring means replacing
+its `viewport.size` checks with `libraryLayout(width, height, options)`, adding the collection sidebar
+and the detail pane, and persisting density, split ratio and the navigation preference in `settings`.

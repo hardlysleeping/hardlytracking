@@ -1,149 +1,260 @@
 /**
- * How the library lays itself out, per device class.
+ * The library's shape, per screen — decided here, drawn by the view.
  *
- * The rule the plan settled on: **a tablet is not a bigger phone.** A phone gets one pane and
- * chips; a tablet keeps the collection list on screen at all times and, once there is room, shows
- * the selected title beside the grid instead of replacing it. A desktop gets the third pane.
+ * The rule the plan settled on: **a tablet is not a bigger phone, and the phone is not a cut-down
+ * tablet.** Komikku is the familiarity bar on a tablet (category switching always at hand, dense
+ * grid, badges, filters and sort nearby, one-tap resume, bulk selection), and the same model scales
+ * down to a phone and out to a desktop with only the presentation changing.
  *
- * This module is pure and returns a decision, not a CSS class, so the layout can be tested without
- * a browser and both the view and the tests read the same numbers. Widths are CSS px.
+ * Everything here is pure: pixels and preferences in, a decision out. The view reads the decision;
+ * the tests read the same numbers, so a layout cannot drift from its spec without a failing test.
  */
 
 export type DeviceClass = "phone" | "tablet" | "desktop";
 
-/** Where collections live: a scrolling chip row, or a persistent column. */
-export type CollectionSurface = "chips" | "column";
+/** Where the collection list lives. */
+export type CategoryNav = "tabs" | "overflow" | "sidebar";
 
-/** What selecting a title does to the screen. */
-export type DetailSurface = "replace" | "pane";
+/** What the user asked for in Settings → Library → Category navigation. */
+export type CategoryNavPreference = "automatic" | "tabs" | "sidebar";
 
-export type LibraryMode = "single" | "list-detail" | "three-pane";
+export type Density = "compact" | "comfortable" | "large";
 
-export interface LibraryLayout {
-  mode: LibraryMode;
-  collections: CollectionSurface;
-  detail: DetailSurface;
-  /** Width of the collection column when `collections === "column"`. */
-  collectionWidth: number;
-  /** Width of the detail pane when `detail === "pane"`. */
-  detailWidth: number;
-  /** Minimum cover width for the grid; the column count follows from it. */
-  gridMin: number;
-  /** How a title offers "resume" without opening its detail page. */
-  resume: ResumeAffordance;
-}
-
-/** `always` on a tablet (a corner control), `hover` on a desktop, `menu` on a phone. */
 export type ResumeAffordance = "menu" | "always" | "hover";
 
-/**
- * Phone below 600, tablet to 1279, desktop above.
- *
- * 1279 rather than 1000 because an iPad in landscape is 1024–1180 wide: calling that "desktop"
- * would give it a three-pane layout it does not have the height for.
- */
+export type Badge = "unread" | "downloaded" | "new" | "source" | "language" | "tracker";
+
+export interface CategoryNavPlan {
+  mode: CategoryNav;
+  /** Collections drawn in the bar. Zero when the list is a sidebar. */
+  visible: number;
+  /** Collections behind the `+N` control. */
+  overflow: number;
+  /** Pinned collections are always in `visible`, whatever the overflow count. */
+  pinned: number;
+}
+
+export interface LibraryLayout {
+  device: DeviceClass;
+  /** `single` is one pane; `split` puts the detail beside the grid. */
+  mode: "single" | "split";
+  /** True in the middle band, where a split is possible but not forced. */
+  optionalSplit: boolean;
+  categoryNav: CategoryNavPlan;
+  /** Width of the collection sidebar when `categoryNav.mode === "sidebar"`. */
+  sidebarWidth: number;
+  /** Width of the grid, once the rail, sidebar and detail pane take theirs. */
+  gridWidth: number;
+  detailWidth: number;
+  /** The grid/detail split, 0 when there is no pane. */
+  splitRatio: number;
+  density: Density;
+  resume: ResumeAffordance;
+  selectionBar: "floating" | "pinned";
+}
+
+export interface LayoutOptions {
+  nav?: CategoryNavPreference;
+  collectionCount?: number;
+  pinnedCount?: number;
+  /** A remembered ratio from the user dragging the divider. */
+  splitRatio?: number;
+  /** The user asked for a split in the middle band. */
+  forceSplit?: boolean;
+}
+
+/** Phone below 600, tablet to 1279, desktop above. iPad landscape (1024–1180) is a tablet. */
 export function deviceClass(width: number): DeviceClass {
   if (width < 600) return "phone";
   if (width < 1280) return "tablet";
   return "desktop";
 }
 
-/**
- * The library's shape.
- *
- * - phone: one pane, collections as chips, detail replaces the grid.
- * - tablet portrait / narrow: collections as a column, detail still replaces the grid — a 768-wide
- *   screen cannot hold a grid, a collection list and a readable detail pane at once.
- * - tablet landscape (≥1000 wide, ≥600 tall): grid + detail side by side.
- * - desktop: collections, grid, detail — three panes.
- */
-export function libraryLayout(width: number, height: number): LibraryLayout {
-  const device = deviceClass(width);
-  if (device === "phone") {
-    return {
-      mode: "single",
-      collections: "chips",
-      detail: "replace",
-      collectionWidth: 0,
-      detailWidth: 0,
-      gridMin: 132,
-      resume: "menu",
-    };
-  }
-  if (device === "tablet") {
-    const split = width >= 1000 && height >= 600;
-    return {
-      mode: split ? "list-detail" : "single",
-      collections: "column",
-      detail: split ? "pane" : "replace",
-      collectionWidth: clamp(width * 0.22, 176, 264),
-      detailWidth: split ? clamp(width * 0.34, 340, 460) : 0,
-      // Denser than a phone on purpose: a tablet is for browsing a large library.
-      gridMin: 112,
-      resume: "always",
-    };
-  }
-  return {
-    mode: "three-pane",
-    collections: "column",
-    detail: "pane",
-    collectionWidth: clamp(width * 0.16, 200, 280),
-    detailWidth: clamp(width * 0.26, 360, 520),
-    gridMin: 112,
-    resume: "hover",
-  };
+/** Navigation chrome outside the library column. */
+export function railWidth(device: DeviceClass): number {
+  if (device === "desktop") return 224;
+  if (device === "tablet") return 76;
+  return 0;
 }
+
+export const PAGE_PADDING = 32;
+export const MIN_GRID_WIDTH = 420;
+export const MIN_DETAIL_WIDTH = 340;
+export const MAX_DETAIL_WIDTH = 520;
+export const MIN_SIDEBAR_WIDTH = 200;
+export const MAX_SIDEBAR_WIDTH = 280;
+
+/** Cover widths. `comfortable` is the tablet default; `compact` is for very large libraries. */
+export const DENSITIES: Record<Density, number> = { compact: 88, comfortable: 112, large: 148 };
+
+/**
+ * The split is a question about *usable* width, not device width.
+ *
+ *   < 750    single pane, always
+ *   750–1050 a split is possible but the user opts in
+ *   > 1050   split by default
+ *
+ * And it needs height: a 1100×520 window has no room for a detail pane that can be read.
+ */
+export const SPLIT_OPTIONAL_AT = 750;
+export const SPLIT_DEFAULT_AT = 1050;
+export const MIN_SPLIT_HEIGHT = 600;
+
+/**
+ * Past this many collections the bar gets a `+N` control.
+ *
+ * Below it the chips scroll, which is what a Komikku user expects; above it a scrolling bar becomes a
+ * memory test, so the pinned few stay and the rest move behind one control.
+ */
+export const OVERFLOW_AT = 8;
 
 export function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
 }
 
 /**
- * Cover densities.
+ * How many collection chips fit in a bar of `usable` px.
  *
- * Komikku's "fast browsing" idea, expressed as three numbers rather than a mode: the smaller the
- * cover, the more of the library is on screen, and the less each tile can say.
+ * 150 px each is measured, not guessed: "Completed" plus its padding and the gap is about that. The
+ * `+N` control itself takes a slot when it is needed.
  */
-export const DENSITIES = { comfortable: 148, compact: 112, dense: 88 } as const;
-export type Density = keyof typeof DENSITIES;
+export function chipCapacity(usable: number): number {
+  return Math.max(Math.floor(usable / 150), 1);
+}
 
-/** What a tile can show at a given density. A 88px cover has no room for a second line. */
+/**
+ * Where collections go.
+ *
+ * - `tabs`: everything fits, so the bar is the list.
+ * - `overflow`: the bar shows what fits and the rest go behind `+N` — never a 30-item scroller.
+ * - `sidebar`: a column, only when there is width that does not come out of the grid's minimum.
+ *
+ * Pinned collections are always visible, which is the point of pinning them.
+ */
+export function categoryNavPlan(
+  usable: number,
+  preference: CategoryNavPreference,
+  collectionCount: number,
+  pinnedCount = 0,
+): CategoryNavPlan {
+  const count = Math.max(collectionCount, 0);
+  const pinned = clamp(pinnedCount, 0, count);
+  const capacity = chipCapacity(usable);
+
+  // A sidebar is only worth its width if the grid still has a usable minimum beside it.
+  const sidebarFits = usable - sidebarWidth(usable) >= MIN_GRID_WIDTH;
+  const wantsSidebar = preference === "sidebar" || (preference === "automatic" && usable >= SPLIT_DEFAULT_AT);
+
+  if (wantsSidebar && sidebarFits) {
+    return { mode: "sidebar", visible: 0, overflow: 0, pinned };
+  }
+  // Up to eight, the bar scrolls. Past that, a `+N` control is easier to aim at than a scroller.
+  if (count <= OVERFLOW_AT) {
+    return { mode: "tabs", visible: count, overflow: 0, pinned };
+  }
+  const visible = Math.max(capacity, Math.min(pinned, capacity));
+  return { mode: "overflow", visible, overflow: Math.max(count - visible, 0), pinned };
+}
+
+/** The sidebar's width: a fifth of the space, clamped so it stays a list and not a wall. */
+export function sidebarWidth(usable: number): number {
+  return clamp(usable * 0.2, MIN_SIDEBAR_WIDTH, MAX_SIDEBAR_WIDTH);
+}
+
+/** Columns for a grid of `available` px at a cover width, clamped 2–8. */
+export function columns(available: number, min: number, gap = 12): number {
+  if (available <= 0 || min <= 0) return 2;
+  return clamp(Math.floor((available + gap) / (min + gap)), 2, 8);
+}
+
+/** What a tile can say at a given density. */
 export function tileMeta(density: Density): "badges" | "title+badges" | "title+badges+source" {
-  if (density === "dense") return "badges";
-  if (density === "compact") return "title+badges";
+  if (density === "compact") return "badges";
+  if (density === "comfortable") return "title+badges";
   return "title+badges+source";
 }
 
-/**
- * Columns for a grid of `available` px with `min` cover width.
- *
- * At least two, because a one-column library is a list with extra steps, and at most eight, because
- * past that the covers stop being recognisable.
- */
-export function columns(available: number, min: number, gap = 12): number {
-  if (available <= 0 || min <= 0) return 2;
-  const fit = Math.floor((available + gap) / (min + gap));
-  return clamp(fit, 2, 8);
-}
+/** Badges are opt-in per kind; these three are the default because they answer "what now?". */
+export const DEFAULT_BADGES: Badge[] = ["unread", "downloaded", "new"];
 
-/** The width the grid actually has, once the collection column and detail pane take theirs. */
-export function gridWidth(total: number, layout: LibraryLayout, railWidth = 0): number {
-  const used = railWidth + layout.collectionWidth + layout.detailWidth;
-  return Math.max(total - used - 32, 0);
+/** Everything a card can show, in the order it appears. */
+export const BADGE_OPTIONS: Badge[] = ["unread", "downloaded", "new", "source", "language", "tracker"];
+
+/**
+ * The badges a card draws, filtered to what the density has room for.
+ *
+ * A compact cover shows counts only: a source icon on an 88px cover is a smudge.
+ */
+export function badgesFor(density: Density, enabled: Badge[] = DEFAULT_BADGES): Badge[] {
+  const allowed = tileMeta(density) === "badges" ? ["unread", "downloaded", "new"] : BADGE_OPTIONS;
+  return enabled.filter((badge) => allowed.includes(badge));
 }
 
 /**
- * Whether bulk actions live in a floating bar (phone) or a bar pinned to the grid column.
+ * The library's shape for a viewport.
  *
- * The test is the collection surface, not the pane count: a tablet in portrait is also one pane, but
- * it has a real column beside the grid and a floating bar would sit on top of the covers being
- * selected.
+ * The device class decides the chrome (rail or not); the *usable* width decides the split and the
+ * collection navigation. That separation is what stops "iPad Pro gets seven columns" logic appearing.
  */
-export function selectionBar(layout: LibraryLayout): "floating" | "pinned" {
-  return layout.collections === "chips" ? "floating" : "pinned";
+export function libraryLayout(width: number, height: number, options: LayoutOptions = {}): LibraryLayout {
+  const device = deviceClass(width);
+  const usable = Math.max(width - railWidth(device) - PAGE_PADDING, 0);
+  const preference = options.nav ?? "automatic";
+  const collectionCount = options.collectionCount ?? 0;
+  const pinnedCount = options.pinnedCount ?? 0;
+
+  const nav = categoryNavPlan(usable, preference, collectionCount, pinnedCount);
+  const sidebar = nav.mode === "sidebar" ? sidebarWidth(usable) : 0;
+  const gridSpace = Math.max(usable - sidebar, 0);
+
+  // The split is decided on the space the window has, then checked against the space the grid would
+  // actually be left with. A sidebar is worth its width only if the grid still gets its minimum.
+  const tallEnough = height >= MIN_SPLIT_HEIGHT;
+  const canSplit = usable >= SPLIT_OPTIONAL_AT && tallEnough;
+  const splitByDefault = usable > SPLIT_DEFAULT_AT && tallEnough;
+  const ratio = clamp(options.splitRatio ?? 0.58, 0.45, 0.75);
+  const wanted = splitByDefault || (canSplit && options.forceSplit === true);
+  const detailWidth = wanted ? clamp(gridSpace * (1 - ratio), MIN_DETAIL_WIDTH, MAX_DETAIL_WIDTH) : 0;
+  const split = wanted && gridSpace - detailWidth >= MIN_GRID_WIDTH;
+
+  return {
+    device,
+    mode: split ? "split" : "single",
+    optionalSplit: canSplit && !splitByDefault,
+    categoryNav: nav,
+    sidebarWidth: sidebar,
+    gridWidth: Math.max(gridSpace - detailWidth, 0),
+    detailWidth: split ? detailWidth : 0,
+    splitRatio: split ? ratio : 0,
+    density: device === "phone" ? "large" : "comfortable",
+    resume: device === "phone" ? "menu" : device === "tablet" ? "always" : "hover",
+    selectionBar: nav.mode === "sidebar" || split ? "pinned" : "floating",
+  };
 }
 
-/** Reader preferences are per device class: a tablet spread is wrong on a phone. */
+/**
+ * The selection bar's label for "select all".
+ *
+ * With filters active, "all" means the results on screen — not the 3 000 titles behind them. Saying
+ * which is the difference between a bulk action and a mistake.
+ */
+export function selectAllLabel(visible: number, total: number): string {
+  if (visible === total) return `Select all ${total}`;
+  return `Select all ${visible} filtered`;
+}
+
+/**
+ * Each collection remembers its own sort; these are the defaults a first install uses.
+ *
+ * Continue Reading is a resume list, so it sorts by last read whatever the rest of the library does.
+ */
+export function defaultSort(collectionId: string): "title" | "lastRead" | "lastUpdated" | "dateAdded" {
+  if (collectionId === "s:continue") return "lastRead";
+  if (collectionId === "s:recent") return "lastUpdated";
+  return "title";
+}
+
+/** Reader preferences are keyed per device class: a tablet spread is wrong on a phone. */
 export function readerProfile(device: DeviceClass): "phone" | "tablet" | "desktop" {
   return device;
 }
