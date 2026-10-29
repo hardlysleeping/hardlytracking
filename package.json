@@ -1,0 +1,30 @@
+{
+  "name": "hardlytracking",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "check": "tsc --noEmit",
+    "test": "node --experimental-strip-types --import ./tests/unit/register-ts.mjs --test tests/unit/*.test.mjs",
+    "smoke": "node --experimental-strip-types --import ./tests/unit/register-ts.mjs scripts/smoke.mjs",
+    "serve": "node server/proxy.mjs"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^7.1.2",
+    "@types/node": "^26.6.6",
+    "svelte": "^5.56.3",
+    "svelte-check": "^4.6.0",
+    "typescript": "~6.0.3",
+    "vite": "^8.0.16"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.12.4",
+    "@tauri-apps/plugin-http": "^2.8.3"
+  }
+}

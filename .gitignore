@@ -1,0 +1,9 @@
+node_modules/
+dist/
+dist.orphan-*/
+.DS_Store
+*.log
+.vite/
+
+# working notes: private, never published (same rule as HardlyReader)
+BACKLOG.md

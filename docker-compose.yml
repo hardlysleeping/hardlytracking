@@ -1,0 +1,39 @@
+# HardlyTracking — one origin for the app and the Mihon runtime.
+#
+#   docker compose up -d
+#   open http://<host>:8460
+#
+# `web` serves the built Svelte app and proxies /api/mihon/* to `runtime`.
+# `runtime` is a Mihon extension host (Suwayomi today). Its library and read state
+# are its own volume; the app keeps its library in the browser/packaged database.
+services:
+  web:
+    image: node:22-alpine
+    working_dir: /app
+    command: ["node", "server/proxy.mjs"]
+    environment:
+      PORT: "8460"
+      RUNTIME_URL: "http://runtime:4567"
+    volumes:
+      - ./dist:/app/dist:ro
+      - ./server:/app/server:ro
+    ports:
+      - "8460:8460"
+    depends_on:
+      - runtime
+    restart: unless-stopped
+
+  runtime:
+    image: ghcr.io/suwayomi/suwayomi-server:v2.4.2366
+    environment:
+      - TZ=America/Los_Angeles
+      # The JVM sizes max heap at 25% of the HOST without this; a download queue
+      # then fills it and the server sits in permanent GC.
+      - JAVA_TOOL_OPTIONS=-Xmx2g
+    volumes:
+      - suwayomi-data:/home/suwayomi/.local/share/Tachidesk
+    cpus: 2
+    restart: unless-stopped
+
+volumes:
+  suwayomi-data:

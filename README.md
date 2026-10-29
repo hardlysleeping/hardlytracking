@@ -1,0 +1,59 @@
+# HardlyTracking
+
+A cross-platform manga reader with a Mihon/Komikku source layer, built on the
+architecture of HardlyReader: one Svelte 5 app, one `SourceProvider` seam, and the
+same UI on web/PWA and (later) packaged apps.
+
+**Status: web MVP.** Browse → series → chapters → pages works against a real Mihon
+extension host. Packaged apps, Komga and backups are on the board, not in the code.
+
+## What runs today
+
+```
+Svelte 5 UI  →  SourceProvider  →  MihonProvider  →  /api/mihon  →  Mihon runtime (Suwayomi :4567)
+                               →  LocalProvider  →  app database (IndexedDB)
+```
+
+- **`SourceProvider`** (`src/api/source.ts`) is the seam. Ids are namespaced (`mihon:12`,
+  `mihon:ch:1`), so a row from the runtime and a row from the device database can never collide.
+- **`MihonProvider`** (`src/api/mihon.ts`) talks to a Mihon extension host over GraphQL. The
+  extensions are real, unmodified Mihon APKs; only *where the JVM runs* changes between platforms.
+- **`LocalProvider`** (`src/api/local.ts`) is the library on this device, and the only provider that
+  owns reading progress. `ownsProgress` decides the writer per provider — the server keeps its own
+  state, our database keeps ours, and never both.
+- **`server/proxy.mjs`** serves the built app and proxies `/api/mihon/*` to the runtime, so the
+  browser sees one origin and there is no CORS to configure.
+
+## Run it
+
+```bash
+npm install
+npm run dev            # http://localhost:5199, /api/mihon proxied to 127.0.0.1:4567
+```
+
+Production, one origin:
+
+```bash
+npm run build
+npm run serve          # http://127.0.0.1:8460 (PORT / RUNTIME_URL override)
+```
+
+Or the whole stack: `docker compose up -d` (app on :8460, runtime behind it).
+
+The runtime must be a Mihon extension host on `:4567`. Suwayomi is the one this was built
+against: `ghcr.io/suwayomi/suwayomi-server:v2.4.2366`.
+
+## Gates
+
+```bash
+npm test      # node --test, no network
+npx tsc --noEmit
+npm run build
+npm run smoke # live, needs the runtime on :4567
+```
+
+## Not built yet
+
+Tauri desktop and packaged apps, the embedded runtime, the iOS embedded-JVM plugin, the
+Komga provider (needs credentials), Mihon/Komikku backup import, downloads and sync.
+See `BACKLOG.md` and `KANBAN.md`.
