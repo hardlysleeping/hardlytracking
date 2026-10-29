@@ -4,7 +4,9 @@ A cross-platform manga reader with a Mihon/Komikku source layer, built on the
 architecture of HardlyReader: one Svelte 5 app, one `SourceProvider` seam, and the
 same UI on web/PWA and (later) packaged apps.
 
-**Status: web MVP.** Browse → series → chapters → pages works against a real Mihon extension host.
+**Status: web MVP, and it reads.** Install a real Mihon extension APK from the app, browse a
+source, open a series, read a chapter — all through a real extension host. The library remembers
+where you were and offers it back.
 
 **Next milestone is the standalone iPhone build** (priority 1, owner's order): the same app with an
 embedded OpenJDK Zero runtime behind a Tauri plugin, so Mihon APK extensions run on-device with no
@@ -25,6 +27,8 @@ Svelte 5 UI  →  SourceProvider  →  MihonProvider  →  /api/mihon  →  Miho
 - **`LocalProvider`** (`src/api/local.ts`) is the library on this device, and the only provider that
   owns reading progress. `ownsProgress` decides the writer per provider — the server keeps its own
   state, our database keeps ours, and never both.
+- **Continue reading** — the reader writes position, history and progress in one call, so the
+  library's continue strip always resumes at the page you stopped on.
 - **Hidden and pinned categories** (`src/lib/categories.ts`, `CategoryRail.svelte`) in HardlyReader's
   look: one eye cycling Hidden → Revealed → Only, one pin cycling Active → Only → Hidden, pinned rows
   carrying the pin's ring and underlight, a per-row eye and pin, and a rail selection that narrows the
