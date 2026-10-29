@@ -173,7 +173,7 @@ export interface SyncTombstone {
   device: string;
 }
 
-export type TombstoneKind = "series" | "category" | "history" | "bookmark" | "extension";
+export type TombstoneKind = "series" | "category" | "history" | "session" | "bookmark" | "extension";
 
 export interface SyncMeta {
   format: string;

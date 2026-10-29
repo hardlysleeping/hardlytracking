@@ -10,7 +10,7 @@ import { packageIdFromApkName, type InstalledExtension } from "../api/dalvik";
 import { downloadApk, loadRepository, type Repository } from "../lib/extensions/repository";
 import type { ExtensionEntry } from "../lib/extensions/index";
 import type { RepoRow, ViewStateRow } from "../lib/db/store";
-import { BACKGROUND_GRACE_MS, pruneSessions as keepSessions, viewStateKey } from "../lib/history";
+import { BACKGROUND_GRACE_MS, viewStateKey } from "../lib/history";
 import { settings } from "./settings.svelte";
 import type { Chapter, Page, Series, Source } from "../api/source";
 
@@ -194,7 +194,7 @@ class LibraryState {
     // turned history off, because Continue Reading is not surveillance.
     await store.setProgress(chapterId, page, total);
     await store.setPosition(seriesId, chapterId, page);
-    if (!settings.recordHistory) return;
+    if (settings.historyPaused) return;
     await store.recordHistory(seriesId, chapterId);
   }
 
@@ -212,7 +212,7 @@ class LibraryState {
    * its own "reading session" in History.
    */
   async beginSession(seriesId: string, chapterId: string, page: number): Promise<string | null> {
-    if (this.profile === null || !settings.recordHistory) return null;
+    if (this.profile === null || settings.historyPaused) return null;
     const store = this.profile.store;
     try {
       const last = await store.lastSessionFor(chapterId);
@@ -235,16 +235,15 @@ class LibraryState {
     }
   }
 
-  /** Drop sessions past the retention window. Runs once per launch, in the background. */
+  /**
+   * Apply the retention preference. Runs at launch and when the setting changes — no background
+   * service, because the app is the only thing that ever needs to be right about this.
+   */
   async pruneSessions(): Promise<void> {
     const store = this.profile?.store;
     if (store === undefined) return;
     try {
-      const kept = keepSessions(await store.listSessions(Number.POSITIVE_INFINITY));
-      const keep = new Set(kept.map((row) => row.id));
-      for (const row of await store.listSessions(Number.POSITIVE_INFINITY)) {
-        if (!keep.has(row.id)) await store.clearSession(row.id);
-      }
+      await store.pruneSessions(settings.historyRetentionDays);
     } catch {
       /* retention is housekeeping */
     }
@@ -261,12 +260,18 @@ class LibraryState {
     await store.setViewState({ ...state, collectionId: viewStateKey(collectionId) });
   }
 
-  /** Forget the reading log, keep every bookmark. */
-  async clearHistory(): Promise<void> {
+  /**
+   * Forget the reading log, keep every bookmark. An optional range clears only older activity.
+   *
+   * This is deliberately *not* "reset progress": progress, positions and read marks survive, so a
+   * cleared history never changes where a chapter resumes or what is marked read.
+   */
+  async clearHistory(range: { since?: number; until?: number } = {}): Promise<{ sessions: number; history: number }> {
     const store = this.profile?.store;
-    if (store === undefined) return;
-    await store.clearHistory();
+    if (store === undefined) return { sessions: 0, history: 0 };
+    const removed = await store.clearHistory(range);
     this.historyClearedAt = Date.now();
+    return removed;
   }
 
   /** The library's continue strip: newest positions, with the titles we already know. */

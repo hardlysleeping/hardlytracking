@@ -59,6 +59,7 @@ const TOMBSTONE_KIND: Partial<Record<Collection, TombstoneKind>> = {
   series: "series",
   categories: "category",
   history: "history",
+  sessions: "session",
   bookmarks: "bookmark",
   extensions: "extension",
 };

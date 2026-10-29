@@ -105,6 +105,48 @@ test("a backward re-read counts its pages and never goes negative", async () => 
   assert.equal((await s.listSessions())[0].pagesRead, 6);
 });
 
+test("retention prunes only old closed sessions, never open ones", async () => {
+  const s = store();
+  const now = 10_000 * 86_400_000;
+  const old = await s.beginSession({ seriesId: "s", chapterId: "old", startPage: 0 }, now - 100 * 86_400_000);
+  await s.endSession(old, { endPage: 3, at: now - 100 * 86_400_000 + 60_000 });
+  const fresh = await s.beginSession({ seriesId: "s", chapterId: "fresh", startPage: 0 }, now - 86_400_000);
+  await s.endSession(fresh, { endPage: 3, at: now - 86_400_000 + 60_000 });
+  await s.beginSession({ seriesId: "s", chapterId: "open", startPage: 0 }, now - 200 * 86_400_000);
+
+  const removed = await s.pruneSessions(90, now);
+  assert.equal(removed, 1);
+  const left = (await s.listSessions()).map((row) => row.chapterId).sort();
+  assert.deepEqual(left, ["fresh", "open"], "an open session is not history yet");
+  assert.equal((await s.listTombstones()).filter((row) => row.kind === "session").length, 1);
+});
+
+test("retention of zero keeps everything", async () => {
+  const s = store();
+  const id = await s.beginSession({ seriesId: "s", chapterId: "ch", startPage: 0 }, 0);
+  await s.endSession(id, { endPage: 1, at: 1000 });
+  assert.equal(await s.pruneSessions(0), 0);
+  assert.equal((await s.listSessions()).length, 1);
+});
+
+test("a range clear deletes only that window and leaves a tombstone per row", async () => {
+  const s = store();
+  const day = 86_400_000;
+  const now = 10_000 * day;
+  for (const [chapterId, startedAt] of [["old", now - 40 * day], ["recent", now - 2 * day]]) {
+    const id = await s.beginSession({ seriesId: "s", chapterId, startPage: 0 }, startedAt);
+    await s.endSession(id, { endPage: 4, at: startedAt + 60_000 });
+    await s.recordHistory("s", chapterId, startedAt);
+  }
+  // "Last 30 days" means the records inside that window — the older ones are left alone.
+  const removed = await s.clearHistory({ since: now - 30 * day });
+  assert.deepEqual(removed, { sessions: 1, history: 1 });
+  assert.deepEqual((await s.listSessions()).map((row) => row.chapterId), ["old"]);
+  assert.deepEqual((await s.listHistory()).map((row) => row.chapterId), ["old"]);
+  const kinds = (await s.listTombstones()).map((row) => row.kind).sort();
+  assert.deepEqual(kinds, ["history", "session"]);
+});
+
 test("clearing history keeps progress, position and read marks", async () => {
   const s = store();
   await s.setProgress("ch:1", 7, 20);

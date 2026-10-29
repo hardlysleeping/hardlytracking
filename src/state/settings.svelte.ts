@@ -32,8 +32,10 @@ export interface Prefs {
   pageGap: number;
   keepAwake: boolean;
   tapZones: boolean;
-  /** Privacy: record what was read and when. Progress survives either way. */
-  recordHistory: boolean;
+  /** Pause reading history: no sessions, no timeline. Progress and read marks continue. */
+  historyPaused: boolean;
+  /** Days a session is kept; 0 is forever. Applies to sessions only, never to progress. */
+  historyRetentionDays: number;
 }
 
 class Settings {
@@ -54,7 +56,8 @@ class Settings {
   keepAwake = $state(true);
   /** Tap zones: left/right thirds turn pages, the middle shows the controls. */
   tapZones = $state(true);
-  recordHistory = $state(true);
+  historyPaused = $state(false);
+  historyRetentionDays = $state(0);
 
   private store: LibraryStore | null = null;
 
@@ -76,7 +79,8 @@ class Settings {
     this.pageGap = await read("pageGap", this.pageGap);
     this.keepAwake = await read("keepAwake", this.keepAwake);
     this.tapZones = await read("tapZones", this.tapZones);
-    this.recordHistory = await read("recordHistory", this.recordHistory);
+    this.historyPaused = await read("historyPaused", this.historyPaused);
+    this.historyRetentionDays = await read("historyRetentionDays", this.historyRetentionDays);
     this.ready = true;
   }
 

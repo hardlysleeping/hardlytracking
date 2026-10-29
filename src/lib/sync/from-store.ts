@@ -25,12 +25,13 @@ export async function documentFromStore(store: LibraryStore, options: BuildOptio
   const doc = emptyDocument(options.device, at);
   const stamp = { at, device: options.device };
 
-  const [series, categories, progress, prefs, sessions] = await Promise.all([
+  const [series, categories, progress, prefs, sessions, tombstones] = await Promise.all([
     store.listSeries(),
     store.listCategories(),
     store.listProgress(),
     store.listPrefs(),
     store.listSessions(Number.POSITIVE_INFINITY),
+    store.listTombstones(),
   ]);
 
   doc.series = series.map((row) => ({
@@ -89,6 +90,10 @@ export async function documentFromStore(store: LibraryStore, options: BuildOptio
     at: row.endedAt ?? row.startedAt,
     device: options.device,
   }));
+
+  // A cleared history has to travel as a deletion, or the other device's copy would be merged
+  // straight back in. The tombstone is the only fact that can win against a row.
+  doc.tombstones = tombstones.map((row) => ({ kind: row.kind, id: row.id, ...stamp }));
 
   doc.readState = prefs
     .filter((row) => isReadKey(row.key))

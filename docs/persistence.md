@@ -6,7 +6,7 @@ so every store below is written once and runs on both. Nothing important lives i
 `localStorage` or `sessionStorage` — the theme is the only exception, because it has to be applied
 before the database is open.
 
-Schema version **8**.
+Schema version **9**.
 
 ## The tables, and what the spec called them
 
@@ -89,18 +89,46 @@ Library → Reading, sort Last read, filter Unread, scrolled halfway
 → reopen: same collection, same sort, same filter, same scroll, Continue Reading at 54/17
 ```
 
-## Privacy
+## Privacy and history controls
 
-Settings → Privacy has two controls, and they mean what they say:
+`Settings → History` (schema v9 adds a `tombstones` store):
 
-- **Record reading history** — off means no `history` row and no `sessions` row. `progress` and
-  `position` are still written: a bookmark is not a log, and turning history off must not cost you
-  Continue Reading.
-- **Clear reading history** — deletes `history` and `sessions`, keeps every bookmark, read mark and
-  position. Two-step confirm, because it is destructive.
+**Pause reading history** — incognito reading. No new `sessions` rows, no new `history` entries, no
+reading-time statistics. Everything else keeps working exactly as before: `progress` and `position`
+still save, read/unread still updates, Continue Reading still resumes, downloads and the library are
+untouched. Existing history is left alone, not hidden.
 
-Retention: sessions older than **365 days** are pruned at launch (`pruneSessions`). Open sessions are
-never pruned — they are the read in progress, not history.
+**Keep reading history** — `Forever` (default), 30 days, 90 days, 6 months, 1 year, or a custom
+number of days. Retention applies **only to closed `reading_sessions`**. It never touches
+`progress`, read marks, library membership, categories, bookmarks, downloads or Continue Reading. An
+open session is the read in progress, so it is never pruned. Cleanup runs at launch and whenever the
+setting changes — no background service.
+
+**Clear reading history** — deletes `sessions` and `history`, and nothing else. The confirmation
+says what survives:
+
+> Delete all recorded reading sessions and reading-history entries? Your current chapter, page
+> progress, read/unread state, library, and downloads will not be changed.
+
+**Clear history by date…** — Today, Last 7 days, Last 30 days, or All time. "Last 7 days" deletes
+the records *inside* that window and leaves the older ones; the same rule, historical rows only.
+
+```
+Clear History ≠ Reset Reading Progress
+```
+
+A future "Reset Reading Progress" must be its own, separately destructive action. Nothing here is
+ever deleted automatically unless the user changes retention.
+
+### Deletion travels
+
+Every row removed by a clear or a retention prune leaves a tombstone (`kind: session` or
+`kind: history`) in the `tombstones` store, and the sync document carries them. That is what stops
+the other device's copy from being merged back in. `applyDocument` still ignores tombstones on
+manual import — an import is "bring this in", not "make this device match that one" — so a restore
+can only add. Pausing history and the retention setting are ordinary preferences and therefore sync
+with everything else; a future "This device only" scope would need its own field, not a silent
+exception.
 
 ## Backups and paid sync
 

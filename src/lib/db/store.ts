@@ -44,6 +44,14 @@ export interface SessionRow {
   completedChapter: boolean;
 }
 
+/** A deletion, kept as a fact so another device cannot resurrect the row. */
+export interface TombstoneRow {
+  key: string;
+  kind: "session" | "history" | "series" | "category" | "bookmark" | "extension";
+  id: string;
+  at: number;
+}
+
 /** What a collection looked like when it was left: the state a tablet must not rebuild. */
 export interface ViewStateRow {
   key: string;
@@ -443,11 +451,61 @@ export class LibraryStore {
    * Forget what was read, keep where you are.
    *
    * Privacy means the log, not the bookmark: clearing history must not turn a half-read chapter
-   * into an unread one or drop Continue Reading back to the start.
+   * into an unread one or drop Continue Reading back to the start. `progress`, `position`, read
+   * marks, library rows, categories and downloads are not touched — that separation is the whole
+   * point of `reading_sessions` being its own table.
+   *
+   * A range clear (`since`/`until`) keeps the rest; a full clear passes neither. Every deleted row
+   * leaves a tombstone, so a sync merge cannot bring it back from another device.
    */
-  async clearHistory(): Promise<void> {
-    for (const row of await this.db.all<HistoryRow>("history")) await this.db.remove("history", row.chapterId);
-    for (const row of await this.db.all<SessionRow>("sessions")) await this.db.remove("sessions", row.id);
+  async clearHistory(range: { since?: number; until?: number } = {}): Promise<{ sessions: number; history: number }> {
+    const inRange = (at: number): boolean =>
+      (range.since === undefined || at >= range.since) && (range.until === undefined || at < range.until);
+    const at = Date.now();
+    let sessions = 0;
+    let history = 0;
+    for (const row of await this.db.all<SessionRow>("sessions")) {
+      if (!inRange(row.startedAt)) continue;
+      await this.db.remove("sessions", row.id);
+      await this.recordTombstone("session", row.id, at);
+      sessions += 1;
+    }
+    for (const row of await this.db.all<HistoryRow>("history")) {
+      if (!inRange(row.at)) continue;
+      await this.db.remove("history", row.chapterId);
+      await this.recordTombstone("history", row.chapterId, at);
+      history += 1;
+    }
+    return { sessions, history };
+  }
+
+  /**
+   * Delete sessions past the retention window. `days <= 0` keeps everything.
+   *
+   * Only sessions age out. Progress, read marks, positions, library rows, categories and downloads
+   * have no retention: they are state, not a log.
+   */
+  async pruneSessions(days: number, now = Date.now()): Promise<number> {
+    if (days <= 0) return 0;
+    const cutoff = now - days * 86_400_000;
+    let removed = 0;
+    for (const row of await this.db.all<SessionRow>("sessions")) {
+      // An open session is the read in progress, not history yet.
+      if (row.endedAt === undefined || row.startedAt >= cutoff) continue;
+      await this.db.remove("sessions", row.id);
+      await this.recordTombstone("session", row.id, now);
+      removed += 1;
+    }
+    return removed;
+  }
+
+  async recordTombstone(kind: TombstoneRow["kind"], id: string, at = Date.now()): Promise<void> {
+    const key = `${kind}:${id}`;
+    await this.db.put("tombstones", { key, kind, id, at } as unknown as Record<string, unknown>);
+  }
+
+  async listTombstones(): Promise<TombstoneRow[]> {
+    return this.db.all<TombstoneRow>("tombstones");
   }
 
   async listCategories(): Promise<Category[]> {
