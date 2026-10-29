@@ -25,11 +25,12 @@ export async function documentFromStore(store: LibraryStore, options: BuildOptio
   const doc = emptyDocument(options.device, at);
   const stamp = { at, device: options.device };
 
-  const [series, categories, progress, prefs] = await Promise.all([
+  const [series, categories, progress, prefs, sessions] = await Promise.all([
     store.listSeries(),
     store.listCategories(),
     store.listProgress(),
     store.listPrefs(),
+    store.listSessions(Number.POSITIVE_INFINITY),
   ]);
 
   doc.series = series.map((row) => ({
@@ -68,6 +69,24 @@ export async function documentFromStore(store: LibraryStore, options: BuildOptio
     page: row.page,
     total: row.total,
     at: row.at,
+    device: options.device,
+  }));
+
+  // The reading log travels because it is small metadata, not comic files: without it, History and
+  // Stats would be a second device's guess at what happened here.
+  doc.sessions = sessions.map((row) => ({
+    id: row.id,
+    seriesId: row.seriesId,
+    sourceId: row.sourceId,
+    chapterId: row.chapterId,
+    startedAt: row.startedAt,
+    ...(row.endedAt === undefined ? {} : { endedAt: row.endedAt }),
+    startPage: row.startPage,
+    endPage: row.endPage,
+    pagesRead: row.pagesRead,
+    ...(row.durationSeconds === undefined ? {} : { durationSeconds: row.durationSeconds }),
+    completedChapter: row.completedChapter,
+    at: row.endedAt ?? row.startedAt,
     device: options.device,
   }));
 

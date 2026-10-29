@@ -5,6 +5,7 @@
  * an export and survives a reload. Fields are declared rather than a loose bag: a typo in a key
  * becomes a compile error instead of a setting that silently never saves.
  */
+import type { CategoryNavPreference, DensityPreference } from "../lib/layout-modes";
 import type { LibraryStore } from "../lib/db/store";
 
 export type LibraryView = "grid" | "compact" | "list";
@@ -18,6 +19,12 @@ const KEY = "settings.";
 export interface Prefs {
   libraryView: LibraryView;
   coverSize: number;
+  /** Auto follows the device class; Custom is the cover-size slider. */
+  libraryDensity: DensityPreference;
+  /** Settings → Library → Category navigation. */
+  categoryNav: CategoryNavPreference;
+  /** The grid/detail split, remembered after the divider is dragged. */
+  splitRatio: number;
   librarySort: Sort;
   showContinue: boolean;
   readerMode: ReaderMode;
@@ -25,6 +32,8 @@ export interface Prefs {
   pageGap: number;
   keepAwake: boolean;
   tapZones: boolean;
+  /** Privacy: record what was read and when. Progress survives either way. */
+  recordHistory: boolean;
 }
 
 class Settings {
@@ -32,6 +41,9 @@ class Settings {
 
   libraryView = $state<LibraryView>("grid");
   coverSize = $state(132);
+  libraryDensity = $state<DensityPreference>("auto");
+  categoryNav = $state<CategoryNavPreference>("automatic");
+  splitRatio = $state(0.58);
   librarySort = $state<Sort>("title");
   showContinue = $state(true);
 
@@ -42,6 +54,7 @@ class Settings {
   keepAwake = $state(true);
   /** Tap zones: left/right thirds turn pages, the middle shows the controls. */
   tapZones = $state(true);
+  recordHistory = $state(true);
 
   private store: LibraryStore | null = null;
 
@@ -53,6 +66,9 @@ class Settings {
     };
     this.libraryView = await read("libraryView", this.libraryView);
     this.coverSize = await read("coverSize", this.coverSize);
+    this.libraryDensity = await read("libraryDensity", this.libraryDensity);
+    this.categoryNav = await read("categoryNav", this.categoryNav);
+    this.splitRatio = await read("splitRatio", this.splitRatio);
     this.librarySort = await read("librarySort", this.librarySort);
     this.showContinue = await read("showContinue", this.showContinue);
     this.readerMode = await read("readerMode", this.readerMode);
@@ -60,6 +76,7 @@ class Settings {
     this.pageGap = await read("pageGap", this.pageGap);
     this.keepAwake = await read("keepAwake", this.keepAwake);
     this.tapZones = await read("tapZones", this.tapZones);
+    this.recordHistory = await read("recordHistory", this.recordHistory);
     this.ready = true;
   }
 

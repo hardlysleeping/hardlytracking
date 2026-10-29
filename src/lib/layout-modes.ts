@@ -88,6 +88,51 @@ export const MAX_SIDEBAR_WIDTH = 280;
 export const DENSITIES: Record<Density, number> = { compact: 88, comfortable: 112, large: 148 };
 
 /**
+ * What the user chose in Settings → Library → Density.
+ *
+ * `auto` is the device class's own default (so a tablet is comfortable without anyone picking),
+ * `manual` is the cover-size slider, and a named preset wins over both.
+ */
+export type DensityPreference = Density | "auto" | "manual";
+
+export const DENSITY_OPTIONS: Array<{ id: DensityPreference; label: string }> = [
+  { id: "auto", label: "Auto" },
+  { id: "compact", label: "Compact" },
+  { id: "comfortable", label: "Comfortable" },
+  { id: "large", label: "Large" },
+  { id: "manual", label: "Custom" },
+];
+
+/** A phone reads large covers; a tablet starts comfortable, which is the denser grid. */
+export function defaultDensity(device: DeviceClass): Density {
+  return device === "phone" ? "large" : "comfortable";
+}
+
+/** The cover width a library draws, from the preference and the slider. */
+export function coverWidth(preference: DensityPreference, device: DeviceClass, coverSize: number): number {
+  if (preference === "manual") return coverSize;
+  if (preference === "auto") return DENSITIES[defaultDensity(device)];
+  return DENSITIES[preference];
+}
+
+/**
+ * Which collections the bar draws, and which go behind the `+N` control.
+ *
+ * Pinned collections are lifted to the front and are never behind the control — that is what
+ * pinning is for. The rest keep the user's own order, and a sidebar has no bar at all.
+ */
+export function collectionBar<T extends { pinned: boolean }>(
+  items: T[],
+  plan: CategoryNavPlan,
+): { shown: T[]; overflow: T[] } {
+  if (plan.mode === "sidebar") return { shown: [], overflow: [] };
+  const ordered = [...items.filter((item) => item.pinned), ...items.filter((item) => !item.pinned)];
+  if (plan.mode === "tabs") return { shown: ordered, overflow: [] };
+  const take = Math.max(plan.visible, 0);
+  return { shown: ordered.slice(0, take), overflow: ordered.slice(take) };
+}
+
+/**
  * The split is a question about *usable* width, not device width.
  *
  *   < 750    single pane, always
@@ -226,7 +271,7 @@ export function libraryLayout(width: number, height: number, options: LayoutOpti
     gridWidth: Math.max(gridSpace - detailWidth, 0),
     detailWidth: split ? detailWidth : 0,
     splitRatio: split ? ratio : 0,
-    density: device === "phone" ? "large" : "comfortable",
+    density: defaultDensity(device),
     resume: device === "phone" ? "menu" : device === "tablet" ? "always" : "hover",
     selectionBar: nav.mode === "sidebar" || split ? "pinned" : "floating",
   };

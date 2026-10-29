@@ -9,15 +9,20 @@
   import type { Snippet } from "svelte";
   import { DESTINATIONS } from "../lib/destinations";
   import { viewport } from "../lib/layout.svelte";
+  import { deviceClass } from "../lib/layout-modes";
   import { go } from "../lib/nav";
 
   let { active, children }: { active: string; children: Snippet } = $props();
 
-  const size = $derived(viewport.size);
+  /**
+   * The chrome is the library's device class, from the same module the library's own layout comes
+   * from — a rail the shell draws is a width the library may not use for a grid.
+   */
+  const device = $derived(deviceClass(viewport.width));
 </script>
 
-<div class="app" class:compact={size === "compact"} class:medium={size === "medium"} class:large={size === "large"}>
-  {#if size === "large"}
+<div class="app" class:compact={device === "phone"} class:medium={device === "tablet"} class:large={device === "desktop"}>
+  {#if device === "desktop"}
     <aside class="sidebar">
       <div class="brand">HardlyTracking</div>
       <nav aria-label="Main">
@@ -34,7 +39,7 @@
         {/each}
       </nav>
     </aside>
-  {:else if size === "medium"}
+  {:else if device === "tablet"}
     <nav class="rail" aria-label="Main">
       {#each DESTINATIONS as destination (destination.id)}
         <button
@@ -55,7 +60,7 @@
     {@render children()}
   </main>
 
-  {#if size === "compact"}
+  {#if device === "phone"}
     <nav class="bar" aria-label="Main">
       {#each DESTINATIONS as destination (destination.id)}
         <button

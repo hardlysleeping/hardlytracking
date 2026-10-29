@@ -18,7 +18,14 @@
 import type { ProviderKind } from "../../api/source";
 
 export const SYNC_FORMAT = "hardlytracking.sync";
-export const SYNC_VERSION = 1;
+/**
+ * 2 adds `sessions` — the reading log.
+ *
+ * Bumped rather than optional because a v1 document has no session list, and "missing list" is
+ * refused here on purpose: an absent list is not an empty one. Nothing has shipped, so no v1
+ * document exists outside tests.
+ */
+export const SYNC_VERSION = 2;
 
 /** One row of the library, as it travels. `addedAt` is local bookkeeping and stays home. */
 export interface SyncSeries {
@@ -67,6 +74,29 @@ export interface SyncReadState {
 export interface SyncHistory {
   seriesId: string;
   chapterId: string;
+  at: number;
+  device: string;
+}
+
+/**
+ * A reading session, as it travels.
+ *
+ * Small metadata, never content: which chapter, from which page to which, for how long, finished or
+ * not. It is the difference between History that says "you read this" and History that says how.
+ */
+export interface SyncSession {
+  id: string;
+  seriesId: string;
+  sourceId: string;
+  chapterId: string;
+  startedAt: number;
+  endedAt?: number;
+  startPage: number;
+  endPage: number;
+  pagesRead: number;
+  durationSeconds?: number;
+  completedChapter: boolean;
+  /** The merge stamp: when this session finished, or when it started if it never did. */
   at: number;
   device: string;
 }
@@ -163,6 +193,7 @@ export interface SyncDocument {
   progress: SyncProgress[];
   readState: SyncReadState[];
   history: SyncHistory[];
+  sessions: SyncSession[];
   bookmarks: SyncBookmark[];
   sourceMappings: SyncSourceMapping[];
   extensions: SyncExtension[];
@@ -178,6 +209,7 @@ export const COLLECTIONS = [
   "progress",
   "readState",
   "history",
+  "sessions",
   "bookmarks",
   "sourceMappings",
   "extensions",
@@ -218,6 +250,8 @@ function keyOf(collection: Collection, row: Record<string, unknown>): string {
       return text("chapterId");
     case "readState":
       return text("chapterId");
+    case "sessions":
+      return text("id");
     case "history":
     case "bookmarks":
       return `${text("seriesId")}\u0000${text("chapterId")}`;
@@ -289,6 +323,7 @@ export function emptyDocument(device: string, at: number = Date.now()): SyncDocu
     progress: [],
     readState: [],
     history: [],
+    sessions: [],
     bookmarks: [],
     sourceMappings: [],
     extensions: [],
@@ -423,6 +458,27 @@ function normaliseRow(collection: Collection, raw: unknown, index: number): Reco
       return { chapterId: need("chapterId"), read: bool("read"), ...stamp };
     case "history":
       return { seriesId: need("seriesId"), chapterId: need("chapterId"), ...stamp };
+    case "sessions": {
+      const endedAt = typeof row.endedAt === "number" && Number.isFinite(row.endedAt) ? row.endedAt : undefined;
+      const durationSeconds =
+        typeof row.durationSeconds === "number" && Number.isFinite(row.durationSeconds)
+          ? Math.max(row.durationSeconds, 0)
+          : undefined;
+      return {
+        id: need("id"),
+        seriesId: need("seriesId"),
+        sourceId: str(row.sourceId) ?? "",
+        chapterId: need("chapterId"),
+        startedAt: num("startedAt"),
+        ...(endedAt === undefined ? {} : { endedAt }),
+        startPage: num("startPage"),
+        endPage: num("endPage"),
+        pagesRead: num("pagesRead", Math.abs(num("endPage") - num("startPage")) + 1),
+        ...(durationSeconds === undefined ? {} : { durationSeconds }),
+        completedChapter: bool("completedChapter"),
+        ...stamp,
+      };
+    }
     case "bookmarks":
       return { seriesId: need("seriesId"), chapterId: need("chapterId"), ...stamp };
     case "sourceMappings":

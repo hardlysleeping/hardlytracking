@@ -4,11 +4,15 @@ import {
   BADGE_OPTIONS,
   DEFAULT_BADGES,
   DENSITIES,
+  DENSITY_OPTIONS,
   badgesFor,
   categoryNavPlan,
   chipCapacity,
   clamp,
+  collectionBar,
   columns,
+  coverWidth,
+  defaultDensity,
   defaultSort,
   deviceClass,
   libraryLayout,
@@ -182,4 +186,53 @@ test("clamp keeps a width inside its bounds", () => {
   assert.equal(clamp(10, 20, 30), 20);
   assert.equal(clamp(40, 20, 30), 30);
   assert.equal(clamp(25, 20, 30), 25);
+});
+
+test("density: auto is the device class's own default, and Custom is the slider", () => {
+  assert.equal(defaultDensity("phone"), "large");
+  assert.equal(defaultDensity("tablet"), "comfortable");
+  assert.equal(defaultDensity("desktop"), "comfortable");
+
+  assert.equal(coverWidth("auto", "phone", 132), DENSITIES.large);
+  assert.equal(coverWidth("auto", "tablet", 132), DENSITIES.comfortable);
+  assert.equal(coverWidth("comfortable", "desktop", 132), DENSITIES.comfortable);
+  assert.equal(coverWidth("compact", "tablet", 132), DENSITIES.compact);
+  // Custom is the slider, verbatim — the value need not be a preset.
+  assert.equal(coverWidth("manual", "tablet", 132), 132);
+  assert.equal(coverWidth("manual", "phone", 173), 173);
+});
+
+test("every density choice has exactly one option, and Auto is first", () => {
+  assert.deepEqual(
+    DENSITY_OPTIONS.map((option) => option.id),
+    ["auto", "compact", "comfortable", "large", "manual"],
+  );
+  for (const density of ["compact", "comfortable", "large"]) {
+    assert.equal(DENSITY_OPTIONS.filter((option) => option.id === density).length, 1);
+  }
+});
+
+test("the collection bar: pinned first, and pinned is never behind +N", () => {
+  const items = Array.from({ length: 10 }, (_, index) => ({ id: `c${index}`, pinned: index === 5 }));
+  const plan = categoryNavPlan(400, "tabs", items.length, 1); // capacity 2, past eight → overflow
+  assert.equal(plan.mode, "overflow");
+  const bar = collectionBar(items, plan);
+  assert.equal(bar.shown[0].id, "c5");
+  assert.equal(bar.shown.length, plan.visible);
+  assert.equal(bar.overflow.length, items.length - plan.visible);
+  assert.ok(!bar.overflow.some((item) => item.pinned));
+  assert.equal(new Set([...bar.shown, ...bar.overflow].map((item) => item.id)).size, items.length);
+});
+
+test("the collection bar draws everything when it fits, and nothing beside a sidebar", () => {
+  const items = [
+    { id: "a", pinned: false },
+    { id: "b", pinned: true },
+  ];
+  const tabs = collectionBar(items, categoryNavPlan(800, "tabs", 2, 1));
+  assert.deepEqual(tabs.shown.map((item) => item.id), ["b", "a"]);
+  assert.deepEqual(tabs.overflow, []);
+
+  const sidebar = collectionBar(items, { mode: "sidebar", visible: 0, overflow: 0, pinned: 1 });
+  assert.deepEqual(sidebar, { shown: [], overflow: [] });
 });

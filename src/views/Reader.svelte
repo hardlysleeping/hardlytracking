@@ -21,6 +21,7 @@
   import type { Chapter, Page } from "../api/source";
   import { go, pathTo } from "../lib/nav";
   import { imageSrc } from "../lib/pages";
+  import { INACTIVITY_TIMEOUT_MS, shouldEndForBackground } from "../lib/history";
   import Sheet from "../components/Sheet.svelte";
 
   interface Props {
@@ -46,6 +47,20 @@
   let scroller = $state<HTMLDivElement | null>(null);
   let saveTimer: ReturnType<typeof setTimeout> | null = null;
 
+  /**
+   * The open reading session, and the last page reached in it.
+   *
+   * A session is a data model, not analytics: it starts when the chapter is actually on screen,
+   * ends when the reader closes, the chapter changes, the app has been in the background longer
+   * than the grace period, or the page has not turned for the inactivity timeout. A short glance
+   * at another app continues the same session — the rules live in `lib/history` and are tested
+   * there, so this file only has to notice the moments.
+   */
+  let sessionId: string | null = null;
+  let lastPage = 0;
+  let idleTimer: ReturnType<typeof setTimeout> | null = null;
+  let hiddenAt: number | null = null;
+
   const MODES = [
     { id: "vertical", label: "Vertical" },
     { id: "webtoon", label: "Webtoon" },
@@ -65,6 +80,53 @@
 
   $effect(() => {
     void load(chapterId);
+  });
+
+  /**
+   * Close the open session at the page it reached, with whether the chapter was finished.
+   *
+   * Closing twice is a no-op: the store refuses to rewrite a closed session, so a chapter change
+   * followed by the reader closing cannot double-count the time.
+   */
+  function closeSession(): void {
+    if (idleTimer !== null) clearTimeout(idleTimer);
+    idleTimer = null;
+    const id = sessionId;
+    sessionId = null;
+    if (id === null) return;
+    const finished = pages.length > 0 && lastPage >= pages.length - 1;
+    void library.endSession(id, lastPage, finished);
+  }
+
+  /** Restart the inactivity clock: any page turn is evidence of reading. */
+  function armIdle(): void {
+    if (idleTimer !== null) clearTimeout(idleTimer);
+    if (sessionId === null) return;
+    idleTimer = setTimeout(() => {
+      idleTimer = null;
+      closeSession();
+    }, INACTIVITY_TIMEOUT_MS);
+  }
+
+  $effect(() => {
+    // No reactive reads: this runs once, and its cleanup is the reader closing — by Back, by a
+    // route change, or by the tab going away. A session left open is still visible as unfinished.
+    const onVisibility = (): void => {
+      if (document.visibilityState === "hidden") {
+        hiddenAt = Date.now();
+        return;
+      }
+      const hidden = hiddenAt === null ? 0 : Date.now() - hiddenAt;
+      hiddenAt = null;
+      // A quick glance at another app is the same sitting; a long absence is not.
+      if (shouldEndForBackground(hidden)) closeSession();
+      else armIdle();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      closeSession();
+    };
   });
 
   $effect(() => {
@@ -117,6 +179,12 @@
       chapterName = list.find((row) => row.id === id)?.name ?? "";
       // Opening a chapter is the moment history exists; it is not a read mark.
       await library.remember(seriesId, id, index, pages.length);
+      // One session per chapter opened: the previous one is closed at the page it reached, so a
+      // chapter-to-chapter jump does not leave a session running forever.
+      closeSession();
+      lastPage = index;
+      sessionId = await library.beginSession(seriesId, id, index);
+      armIdle();
       await tick();
       scrollToPage(index, "auto");
     } catch (e) {
@@ -165,6 +233,8 @@
   }
 
   function saveSoon(): void {
+    lastPage = index;
+    armIdle();
     if (saveTimer !== null) clearTimeout(saveTimer);
     saveTimer = setTimeout(() => {
       saveTimer = null;

@@ -49,8 +49,97 @@ test("position and progress are separate rows and neither overwrites the other",
   const s = store();
   await s.setProgress("ch:1", 4, 20);
   await s.setPosition("series:a", "ch:1", 4, 500);
-  assert.deepEqual(await s.getProgress("ch:1"), { chapterId: "ch:1", page: 4, total: 20, at: (await s.getProgress("ch:1")).at });
+  assert.deepEqual(await s.getProgress("ch:1"), {
+    chapterId: "ch:1",
+    page: 4,
+    total: 20,
+    at: (await s.getProgress("ch:1")).at,
+    completed: false,
+  });
   assert.equal((await s.getPosition("series:a")).page, 4);
+});
+
+test("completion sticks: reaching the last page marks it, re-reading does not clear it", async () => {
+  const s = store();
+  await s.setProgress("ch:9", 0, 10);
+  assert.equal((await s.getProgress("ch:9")).completed, false);
+  await s.setProgress("ch:9", 9, 10);
+  assert.equal((await s.getProgress("ch:9")).completed, true);
+  await s.setProgress("ch:9", 2, 10);
+  const row = await s.getProgress("ch:9");
+  assert.equal(row.page, 2, "the bookmark moves back");
+  assert.equal(row.completed, true, "but the chapter stays read");
+});
+
+test("a session records its data model: source, pages read, seconds and completion", async () => {
+  const s = store();
+  const id = await s.beginSession({ seriesId: "series:a", sourceId: "2499283573021220255", chapterId: "ch:1", startPage: 3 }, 1000);
+  const open = (await s.listSessions())[0];
+  assert.equal(open.endedAt, undefined, "an open session has no end");
+  assert.equal(open.sourceId, "2499283573021220255");
+  assert.equal(open.pagesRead, 1);
+  await s.endSession(id, { endPage: 11, completed: true, at: 1000 + 90_000 });
+  const [row] = await s.listSessions();
+  assert.equal(row.endPage, 11);
+  assert.equal(row.pagesRead, 9);
+  assert.equal(row.durationSeconds, 90);
+  assert.equal(row.completedChapter, true);
+  assert.equal((await s.sessionsFor("series:a")).length, 1);
+  assert.equal((await s.sessionsFor("series:b")).length, 0);
+});
+
+test("closing a session twice does not double-count the time", async () => {
+  const s = store();
+  const id = await s.beginSession({ seriesId: "s", chapterId: "ch", startPage: 0 }, 0);
+  await s.endSession(id, { endPage: 4, at: 60_000 });
+  await s.endSession(id, { endPage: 9, at: 600_000 });
+  const [row] = await s.listSessions();
+  assert.equal(row.endPage, 4, "the first close wins");
+  assert.equal(row.durationSeconds, 60);
+});
+
+test("a backward re-read counts its pages and never goes negative", async () => {
+  const s = store();
+  const id = await s.beginSession({ seriesId: "s", chapterId: "ch", startPage: 30 }, 0);
+  await s.endSession(id, { endPage: 25, at: 1000 });
+  assert.equal((await s.listSessions())[0].pagesRead, 6);
+});
+
+test("clearing history keeps progress, position and read marks", async () => {
+  const s = store();
+  await s.setProgress("ch:1", 7, 20);
+  await s.setPosition("series:a", "ch:1", 7);
+  await s.recordHistory("series:a", "ch:1");
+  await s.beginSession("series:a", "ch:1", 7, 1000);
+  await s.clearHistory();
+  assert.equal((await s.listHistory()).length, 0);
+  assert.equal((await s.listSessions()).length, 0);
+  assert.equal((await s.getProgress("ch:1")).page, 7, "the bookmark survives");
+  assert.equal((await s.getPosition("series:a")).page, 7);
+});
+
+test("view state is remembered per collection, and the unfiltered library is its own key", async () => {
+  const s = store();
+  await s.setViewState({ collectionId: "all", sort: "recent", view: "compact", coverSize: 112, onlyUnread: true, scroll: 480 });
+  await s.setViewState({ collectionId: "c:2", sort: "title", onlyUnread: false, scroll: 0 });
+  const all = await s.getViewState("all");
+  const reading = await s.getViewState("c:2");
+  assert.equal(all.sort, "recent");
+  assert.equal(all.onlyUnread, true);
+  assert.equal(all.scroll, 480);
+  assert.equal(reading.sort, "title", "one collection does not inherit another's filters");
+  assert.equal(reading.onlyUnread, false);
+});
+
+test("extension preferences are scoped by extension, and sync metadata is local", async () => {
+  const s = store();
+  await s.setExtensionPref("ext:a", "lang", "en");
+  await s.setExtensionPref("ext:b", "lang", "ja");
+  assert.equal(await s.getExtensionPref("ext:a", "lang"), "en");
+  assert.equal(await s.getExtensionPref("ext:b", "lang"), "ja");
+  assert.equal(await s.getExtensionPref("ext:c", "lang"), undefined);
+  await s.setSyncMeta("lastSyncedAt", 1234);
+  assert.equal(await s.getSyncMeta("lastSyncedAt"), 1234);
 });
 
 test("a source mapping keeps the real source id and the package when known", async () => {

@@ -16,6 +16,47 @@ export interface ProgressRow {
   page: number;
   total: number;
   at: number;
+  /** True once the last page has been reached; a later partial read does not clear it. */
+  completed?: boolean;
+}
+
+/**
+ * One sitting in the reader. Progress says where you are; this says how you got there.
+ *
+ * The fields are the data model, not a convenience: `sourceId` is what lets stats say "time on
+ * MangaDex", `pagesRead` is what survives a backward re-read honestly, and `durationSeconds` is
+ * stored in seconds because that is the unit every later report wants.
+ */
+export interface SessionRow {
+  id: string;
+  /** manga_id: the series this chapter belongs to. */
+  seriesId: string;
+  /** source_id: the extension's own source id, when the mapping is known. */
+  sourceId: string;
+  chapterId: string;
+  startedAt: number;
+  /** Absent while the session is open, so an interrupted read is still visible as unfinished. */
+  endedAt?: number;
+  startPage: number;
+  endPage: number;
+  pagesRead: number;
+  durationSeconds?: number;
+  completedChapter: boolean;
+}
+
+/** What a collection looked like when it was left: the state a tablet must not rebuild. */
+export interface ViewStateRow {
+  key: string;
+  collectionId: string;
+  sort?: string;
+  view?: string;
+  coverSize?: number;
+  onlyUnread?: boolean;
+  onlySource?: string | null;
+  query?: string;
+  scroll?: number;
+  selectedSeriesId?: string | null;
+  at: number;
 }
 
 export interface HistoryRow {
@@ -145,7 +186,9 @@ export class LibraryStore {
   }
 
   async setProgress(chapterId: string, page: number, total: number): Promise<void> {
-    const row: ProgressRow = { chapterId, page, total, at: Date.now() };
+    const previous = await this.getProgress(chapterId);
+    const completed = previous?.completed === true || (total > 0 && page >= total - 1);
+    const row: ProgressRow = { chapterId, page, total, at: Date.now(), completed };
     await this.db.put("progress", row as unknown as Record<string, unknown>);
   }
 
@@ -288,6 +331,124 @@ export class LibraryStore {
   // `feed.priority`. Here the library is ours, so they are rows in our own
   // database: nothing is written to the Mihon runtime, and there is no "Strict"
   // mode to reconcile because there is no second authority.
+
+  // ---- reading sessions, view state, extension preferences, sync bookkeeping ----
+  //
+  // Sessions are history with a clock: they answer "how long, and how much", which a single
+  // progress row cannot. View state is per collection, because the point of a tablet library is
+  // that Reading opens where you left Reading. Extension preferences belong to the extension that
+  // asked for them, never to the app's own settings bag. Sync metadata is local bookkeeping —
+  // when this device last mirrored, and under which device id.
+
+  /** Open a session and return its id. Closed by `endSession`, or left open if the app dies. */
+  async beginSession(
+    input: { seriesId: string; sourceId?: string; chapterId: string; startPage: number },
+    at = Date.now(),
+  ): Promise<string> {
+    const id = `${input.chapterId}@${at}`;
+    const row: SessionRow = {
+      id,
+      seriesId: input.seriesId,
+      sourceId: input.sourceId ?? "",
+      chapterId: input.chapterId,
+      startedAt: at,
+      startPage: input.startPage,
+      endPage: input.startPage,
+      pagesRead: 1,
+      completedChapter: false,
+    };
+    await this.db.put("sessions", row as unknown as Record<string, unknown>);
+    return id;
+  }
+
+  /**
+   * Close a session: end page, wall-clock end, pages read and the time spent.
+   *
+   * `durationSeconds` is measured from the start, which is only honest because a session is closed
+   * when the reader goes away or goes idle — background time inside a session is at most the grace
+   * period, not the whole night.
+   */
+  async endSession(
+    id: string,
+    end: { endPage: number; completed?: boolean; at?: number },
+  ): Promise<void> {
+    const row = await this.db.get<SessionRow>("sessions", id);
+    if (row === undefined || row.endedAt !== undefined) return;
+    const at = end.at ?? Date.now();
+    const closed: SessionRow = {
+      ...row,
+      endPage: end.endPage,
+      pagesRead: Math.abs(end.endPage - row.startPage) + 1,
+      endedAt: at,
+      durationSeconds: Math.max(Math.round((at - row.startedAt) / 1000), 0),
+      completedChapter: end.completed === true,
+    };
+    await this.db.put("sessions", closed as unknown as Record<string, unknown>);
+  }
+
+  /** A session that arrived from a backup or another device, written as it travelled. */
+  async putSession(row: SessionRow): Promise<void> {
+    await this.db.put("sessions", { ...row } as unknown as Record<string, unknown>);
+  }
+
+  async clearSession(id: string): Promise<void> {
+    await this.db.remove("sessions", id);
+  }
+
+  async listSessions(limit = 200): Promise<SessionRow[]> {
+    const rows = await this.db.all<SessionRow>("sessions");
+    return rows.sort((a, b) => b.startedAt - a.startedAt).slice(0, limit);
+  }
+
+  /** The last session for a chapter, so a quick return can continue it instead of adding a row. */
+  async lastSessionFor(chapterId: string): Promise<SessionRow | undefined> {
+    const rows = (await this.listSessions(Number.POSITIVE_INFINITY)).filter((row) => row.chapterId === chapterId);
+    return rows[0];
+  }
+
+  async sessionsFor(seriesId: string): Promise<SessionRow[]> {
+    return (await this.listSessions(Number.POSITIVE_INFINITY)).filter((row) => row.seriesId === seriesId);
+  }
+
+  /** The remembered view of one collection. Keyed `collectionId`; `all` for the unfiltered library. */
+  async getViewState(collectionId: string): Promise<ViewStateRow | undefined> {
+    return this.db.get<ViewStateRow>("viewState", collectionId);
+  }
+
+  async setViewState(state: Omit<ViewStateRow, "key" | "at">): Promise<void> {
+    const row: ViewStateRow = { ...state, key: state.collectionId, at: Date.now() };
+    await this.db.put("viewState", row as unknown as Record<string, unknown>);
+  }
+
+  /** Preferences an extension asked to keep — scoped by extension id, so two cannot collide. */
+  async getExtensionPref<T>(extensionId: string, key: string): Promise<T | undefined> {
+    const row = await this.db.get<{ key: string; value: T }>("extensionPrefs", `${extensionId}:${key}`);
+    return row?.value;
+  }
+
+  async setExtensionPref<T>(extensionId: string, key: string, value: T): Promise<void> {
+    await this.db.put("extensionPrefs", { key: `${extensionId}:${key}`, value });
+  }
+
+  async getSyncMeta<T>(key: string): Promise<T | undefined> {
+    const row = await this.db.get<{ key: string; value: T }>("syncMeta", key);
+    return row?.value;
+  }
+
+  async setSyncMeta<T>(key: string, value: T): Promise<void> {
+    await this.db.put("syncMeta", { key, value });
+  }
+
+  /**
+   * Forget what was read, keep where you are.
+   *
+   * Privacy means the log, not the bookmark: clearing history must not turn a half-read chapter
+   * into an unread one or drop Continue Reading back to the start.
+   */
+  async clearHistory(): Promise<void> {
+    for (const row of await this.db.all<HistoryRow>("history")) await this.db.remove("history", row.chapterId);
+    for (const row of await this.db.all<SessionRow>("sessions")) await this.db.remove("sessions", row.id);
+  }
 
   async listCategories(): Promise<Category[]> {
     return normaliseCategories(await this.db.all<Category>("categories"));

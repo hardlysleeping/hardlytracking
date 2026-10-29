@@ -9,7 +9,9 @@ import { providerFor } from "../api/registry";
 import { packageIdFromApkName, type InstalledExtension } from "../api/dalvik";
 import { downloadApk, loadRepository, type Repository } from "../lib/extensions/repository";
 import type { ExtensionEntry } from "../lib/extensions/index";
-import type { RepoRow } from "../lib/db/store";
+import type { RepoRow, ViewStateRow } from "../lib/db/store";
+import { BACKGROUND_GRACE_MS, pruneSessions as keepSessions, viewStateKey } from "../lib/history";
+import { settings } from "./settings.svelte";
 import type { Chapter, Page, Series, Source } from "../api/source";
 
 /** One row of the Updates list: a chapter, and the title it belongs to. */
@@ -23,6 +25,8 @@ export interface UpdateRow {
 class LibraryState {
   profile = $state<LibraryProfile | null>(null);
   ready = $state(false);
+  /** Set when the user clears the reading log, so a screen showing it can react. */
+  historyClearedAt = $state(0);
   /** A provider that did not answer. A warning, not a failure: the library is still ours. */
   error = $state<string | null>(null);
   /** The library itself could not be opened. This one is fatal, and the shell says so. */
@@ -44,6 +48,7 @@ class LibraryState {
       this.extensions = await this.profile.store.listExtensions();
       this.repos = await this.profile.store.listRepos();
       this.ready = true;
+      void this.pruneSessions();
       void this.loadSources();
     } catch (error) {
       this.openError = message(error);
@@ -185,9 +190,83 @@ class LibraryState {
   async remember(seriesId: string, chapterId: string, page: number, total: number): Promise<void> {
     if (this.profile === null) return;
     const store = this.profile.store;
+    // Progress and position are bookmarks, not a log: they are written even when the user has
+    // turned history off, because Continue Reading is not surveillance.
     await store.setProgress(chapterId, page, total);
     await store.setPosition(seriesId, chapterId, page);
+    if (!settings.recordHistory) return;
     await store.recordHistory(seriesId, chapterId);
+  }
+
+  // ---- reading sessions -----------------------------------------------------
+  //
+  // A session is opened when a chapter opens and closed when the reader goes away. It is what
+  // Stats and History are built from, and the only place "how long" is answerable. When the user
+  // has turned history off, no session is written at all.
+
+  /**
+   * Open a session for a chapter.
+   *
+   * A return to the same chapter within the background grace continues the session that is still
+   * open rather than writing a second row — that is what stops a glance at another app becoming
+   * its own "reading session" in History.
+   */
+  async beginSession(seriesId: string, chapterId: string, page: number): Promise<string | null> {
+    if (this.profile === null || !settings.recordHistory) return null;
+    const store = this.profile.store;
+    try {
+      const last = await store.lastSessionFor(chapterId);
+      if (last !== undefined && last.endedAt === undefined && Date.now() - last.startedAt < BACKGROUND_GRACE_MS) {
+        return last.id;
+      }
+      const mapping = await store.getMapping(seriesId);
+      return await store.beginSession({ seriesId, sourceId: mapping?.sourceId, chapterId, startPage: page });
+    } catch {
+      return null; // a session is a nicety; never let it break opening a chapter
+    }
+  }
+
+  async endSession(id: string | null, endPage: number, completed = false): Promise<void> {
+    if (id === null || this.profile === null) return;
+    try {
+      await this.profile.store.endSession(id, { endPage, completed });
+    } catch {
+      /* ignore */
+    }
+  }
+
+  /** Drop sessions past the retention window. Runs once per launch, in the background. */
+  async pruneSessions(): Promise<void> {
+    const store = this.profile?.store;
+    if (store === undefined) return;
+    try {
+      const kept = keepSessions(await store.listSessions(Number.POSITIVE_INFINITY));
+      const keep = new Set(kept.map((row) => row.id));
+      for (const row of await store.listSessions(Number.POSITIVE_INFINITY)) {
+        if (!keep.has(row.id)) await store.clearSession(row.id);
+      }
+    } catch {
+      /* retention is housekeeping */
+    }
+  }
+
+  /** What one collection looked like when it was left. */
+  async viewState(collectionId: string | null): Promise<ViewStateRow | undefined> {
+    return this.profile?.store.getViewState(viewStateKey(collectionId));
+  }
+
+  async saveViewState(collectionId: string | null, state: Omit<ViewStateRow, "key" | "collectionId" | "at">): Promise<void> {
+    const store = this.profile?.store;
+    if (store === undefined) return;
+    await store.setViewState({ ...state, collectionId: viewStateKey(collectionId) });
+  }
+
+  /** Forget the reading log, keep every bookmark. */
+  async clearHistory(): Promise<void> {
+    const store = this.profile?.store;
+    if (store === undefined) return;
+    await store.clearHistory();
+    this.historyClearedAt = Date.now();
   }
 
   /** The library's continue strip: newest positions, with the titles we already know. */

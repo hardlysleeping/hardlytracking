@@ -13,6 +13,10 @@ import {
   serializeSync,
   validateSyncDocument,
 } from "../../src/lib/sync/document.ts";
+import { memoryDatabase } from "../../src/lib/db/open.ts";
+import { LibraryStore } from "../../src/lib/db/store.ts";
+import { applyDocument } from "../../src/lib/sync/apply.ts";
+import { documentFromStore } from "../../src/lib/sync/from-store.ts";
 
 const stamp = { at: 1_700_000_000_000, device: "dev-a" };
 
@@ -70,6 +74,7 @@ test("key order in the input does not change the bytes", () => {
     progress: [],
     readState: [],
     history: [],
+    sessions: [],
     bookmarks: [],
     sourceMappings: [],
     extensions: [],
@@ -79,6 +84,65 @@ test("key order in the input does not change the bytes", () => {
   const tidy = emptyDocument("dev-a", 1_700_000_000_000);
   tidy.series = [{ id: "mihon:1", provider: "mihon", title: "First", categoryIds: [], ...stamp }];
   assert.equal(serializeSync(validateSyncDocument(shuffled)), serializeSync(tidy));
+});
+
+test("a reading session survives serialise, validate and parse with every field", () => {
+  const doc = emptyDocument("dev-a", 1_700_000_000_000);
+  doc.sessions = [
+    {
+      id: "ch:1@1700000000000",
+      seriesId: "mihon:1",
+      sourceId: "2499283573021220255",
+      chapterId: "ch:1",
+      startedAt: 1_700_000_000_000,
+      endedAt: 1_700_000_540_000,
+      startPage: 3,
+      endPage: 21,
+      pagesRead: 19,
+      durationSeconds: 540,
+      completedChapter: true,
+      at: 1_700_000_540_000,
+      device: "dev-a",
+    },
+  ];
+  const back = parseSync(serializeSync(doc));
+  assert.deepEqual(back.sessions, doc.sessions);
+  // An open session travels too: it is unfinished, not invalid.
+  const open = { ...doc.sessions[0], id: "ch:2@1", chapterId: "ch:2", endedAt: undefined, durationSeconds: undefined, completedChapter: false };
+  const doc2 = emptyDocument("dev-a", 1_700_000_000_000);
+  doc2.sessions = [open];
+  const back2 = parseSync(serializeSync(doc2));
+  assert.equal(back2.sessions[0].endedAt, undefined);
+  assert.equal(back2.sessions[0].durationSeconds, undefined);
+});
+
+test("a backup carries the reading log and an import writes it back", async () => {
+  const store = new LibraryStore(memoryDatabase());
+  const id = await store.beginSession(
+    { seriesId: "local:1", sourceId: "src:7", chapterId: "local:1:ch1", startPage: 2 },
+    1_700_000_000_000,
+  );
+  await store.endSession(id, { endPage: 12, completed: true, at: 1_700_000_000_000 + 300_000 });
+
+  const doc = await documentFromStore(store, { device: "dev-a", at: 1_700_000_100_000 });
+  assert.equal(doc.sessions.length, 1);
+  const session = doc.sessions[0];
+  assert.equal(session.sourceId, "src:7");
+  assert.equal(session.pagesRead, 11);
+  assert.equal(session.durationSeconds, 300);
+  assert.equal(session.completedChapter, true);
+
+  // Serialise, parse and apply into a fresh device: the log arrives intact.
+  const parsed = parseSync(serializeSync(doc));
+  const other = new LibraryStore(memoryDatabase());
+  const summary = await applyDocument(other, parsed);
+  assert.equal(summary.sessions, 1);
+  const [landed] = await other.listSessions();
+  assert.equal(landed.id, session.id);
+  assert.equal(landed.startedAt, 1_700_000_000_000);
+  assert.equal(landed.endedAt, 1_700_000_300_000);
+  assert.equal(landed.durationSeconds, 300);
+  assert.equal(landed.completedChapter, true);
 });
 
 test("duplicate rows collapse to the newest stamp, deterministically", () => {

@@ -7,9 +7,15 @@
    * localStorage, because it has to be right before the database is open.
    */
   import { settings } from "../state/settings.svelte";
+  import { library } from "../state/library.svelte";
   import { downloads } from "../state/downloads.svelte";
   import { appearance, THEME_OPTIONS } from "../lib/theme.svelte";
+  import { DENSITY_OPTIONS, coverWidth, deviceClass } from "../lib/layout-modes";
+  import { viewport } from "../lib/layout.svelte";
   import { go } from "../lib/nav";
+
+  /** The slider shows the cover the library actually draws, not a value a preset overrides. */
+  const cover = $derived(coverWidth(settings.libraryDensity, deviceClass(viewport.width), settings.coverSize));
 
   const bytes = $derived(
     downloads.bytes < 1024 * 1024
@@ -18,6 +24,9 @@
         ? `${(downloads.bytes / 1024 / 1024).toFixed(1)} MB`
         : `${(downloads.bytes / 1024 / 1024 / 1024).toFixed(2)} GB`,
   );
+
+  /** Two-step confirm: clearing the log is destructive and should not be one stray tap. */
+  let clearing = $state(false);
 </script>
 
 <section class="view">
@@ -49,7 +58,35 @@
     </label>
     <label class="row">
       <span>Cover size</span>
-      <input type="range" min="96" max="200" step="4" value={settings.coverSize} oninput={(event) => settings.set("coverSize", Number(event.currentTarget.value))} />
+      <input
+        type="range"
+        min="96"
+        max="200"
+        step="4"
+        value={cover}
+        oninput={(event) => {
+          settings.set("coverSize", Number(event.currentTarget.value));
+          settings.set("libraryDensity", "manual");
+        }}
+      />
+    </label>
+    <div class="row">
+      <span>Density</span>
+      <div class="chips">
+        {#each DENSITY_OPTIONS as option (option.id)}
+          <button class="chip" class:on={settings.libraryDensity === option.id} onclick={() => settings.set("libraryDensity", option.id)}>
+            {option.label}
+          </button>
+        {/each}
+      </div>
+    </div>
+    <label class="row">
+      <span>Category navigation</span>
+      <select class="field" value={settings.categoryNav} onchange={(event) => settings.set("categoryNav", event.currentTarget.value as typeof settings.categoryNav)}>
+        <option value="automatic">Automatic</option>
+        <option value="tabs">Tabs</option>
+        <option value="sidebar">Sidebar</option>
+      </select>
     </label>
     <label class="row">
       <span>Show “Continue reading”</span>
@@ -89,6 +126,33 @@
       <span>Keep the screen awake</span>
       <input type="checkbox" checked={settings.keepAwake} onchange={(event) => settings.set("keepAwake", event.currentTarget.checked)} />
     </label>
+  </section>
+
+  <section class="group">
+    <h2>Privacy</h2>
+    <label class="row">
+      <span>Record reading history<em class="sub">What you read, when, and for how long. Progress and Continue Reading are kept either way.</em></span>
+      <input type="checkbox" checked={settings.recordHistory} onchange={(event) => settings.set("recordHistory", event.currentTarget.checked)} />
+    </label>
+    {#if clearing}
+      <div class="row">
+        <span>Delete the reading log? Bookmarks stay.</span>
+        <span class="acts2">
+          <button class="chip" onclick={() => (clearing = false)}>Cancel</button>
+          <button
+            class="chip danger"
+            onclick={async () => {
+              await library.clearHistory();
+              clearing = false;
+            }}>Clear</button>
+        </span>
+      </div>
+    {:else}
+      <button class="row link" onclick={() => (clearing = true)}>
+        <span>Clear reading history</span>
+        <span class="chev">›</span>
+      </button>
+    {/if}
   </section>
 
   <section class="group">

@@ -81,6 +81,8 @@ export function identityOf(collection: Collection, row: Row): string {
       return text("chapterId");
     case "readState":
       return text("chapterId");
+    case "sessions":
+      return text("id");
     case "history":
     case "bookmarks":
       return `${text("seriesId")}\u0000${text("chapterId")}`;

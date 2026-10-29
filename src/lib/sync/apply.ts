@@ -18,11 +18,12 @@ export interface ApplySummary {
   progress: number;
   read: number;
   history: number;
+  sessions: number;
   mappings: number;
 }
 
 export async function applyDocument(store: LibraryStore, doc: SyncDocument): Promise<ApplySummary> {
-  const summary: ApplySummary = { series: 0, categories: 0, progress: 0, read: 0, history: 0, mappings: 0 };
+  const summary: ApplySummary = { series: 0, categories: 0, progress: 0, read: 0, history: 0, sessions: 0, mappings: 0 };
 
   for (const category of doc.categories) {
     await store.putCategory({
@@ -62,6 +63,23 @@ export async function applyDocument(store: LibraryStore, doc: SyncDocument): Pro
   for (const row of doc.history) {
     await store.recordHistory(row.seriesId, row.chapterId, row.at);
     summary.history += 1;
+  }
+
+  for (const row of doc.sessions) {
+    await store.putSession({
+      id: row.id,
+      seriesId: row.seriesId,
+      sourceId: row.sourceId,
+      chapterId: row.chapterId,
+      startedAt: row.startedAt,
+      ...(row.endedAt === undefined ? {} : { endedAt: row.endedAt }),
+      startPage: row.startPage,
+      endPage: row.endPage,
+      pagesRead: row.pagesRead,
+      ...(row.durationSeconds === undefined ? {} : { durationSeconds: row.durationSeconds }),
+      completedChapter: row.completedChapter,
+    });
+    summary.sessions += 1;
   }
 
   for (const row of doc.sourceMappings) {

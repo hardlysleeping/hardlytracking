@@ -250,11 +250,25 @@ Simple on first open, power one tap away.
 
 ## Status
 
-Encoded and tested: device classes, chrome widths, category navigation (three modes with the
-Automatic rule, overflow past eight, pinned always visible), split thresholds on usable width and
-height with a clamped remembered ratio, density presets and per-density badges, computed columns,
-select-all labelling, per-collection default sorts, reader-profile keying.
+**Wired.** `Library.svelte` asks `libraryLayout(width, height, options)` for the shape and only draws it;
+`AppShell` takes its chrome from the same `deviceClass`, so the rail a screen sees is the width the
+library subtracted.
 
-Not yet wired: `Library.svelte` still draws the phone layout at every width. Wiring means replacing
-its `viewport.size` checks with `libraryLayout(width, height, options)`, adding the collection sidebar
-and the detail pane, and persisting density, split ratio and the navigation preference in `settings`.
+- **Category navigation** — chips up to capacity, then a `+N` sheet (`collectionBar` lifts pinned
+  collections and never puts one behind the control), or the collection column when the Automatic rule
+  picks a sidebar. `Categories…` is in both places, so the rail is one tap away at every width.
+- **Split pane** — `SeriesPage embedded` beside the grid, the picked tile highlighted, and a divider that
+  drags the ratio (clamped 45/55–75/25, remembered in `settings.splitRatio`). In a split a tap swaps the
+  pane instead of pushing a route; everywhere else a tap still opens the series page. Long press still
+  enters selection, and a selection click never swaps the pane.
+- **Density** — `settings.libraryDensity` is `auto` (the device class's own default: 148 phone,
+  112 tablet/desktop), a named preset, or `manual` (the cover-size slider, which the sliders in Settings
+  and the Filter sheet select). `coverWidth()` is the one rule.
+- **Category navigation preference** — `settings.categoryNav`: Automatic / Tabs / Sidebar.
+
+Measured in the browser at 390 / 768 / 1180 / 1440: bar / rail / rail / sidebar chrome; cover 148 / 112 /
+112 / 112; columns 2 / 5 / 3 / 4; detail pane absent / absent / 360 / 398.
+
+Not wired yet: the middle band's opt-in split (`optionalSplit` is decided and tested but nothing flips
+`forceSplit`), and `selectionBar: "pinned"` only moves the floating bar's offset rather than docking it in
+the column.
