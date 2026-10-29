@@ -71,4 +71,18 @@ for (const row of matrix.rows) {
 console.log(
   `\n${matrix.rows.length} rows — missing ${missing}, apk unreachable ${apkBad}, version drift ${drift}, source-id loss ${identityLost}`,
 );
-process.exit(missing === 0 && apkBad === 0 ? 0 : 1);
+
+// Coverage classes (J. Real-extension compatibility gate). A class under its minimum means the
+// matrix cannot certify that capability, however many rows pass.
+const coverage = new Map();
+for (const row of matrix.rows) for (const cls of row.classes ?? []) coverage.set(cls, (coverage.get(cls) ?? 0) + 1);
+let under = 0;
+console.log("\ncoverage:");
+for (const [cls, minimum] of Object.entries(matrix.minimums ?? {})) {
+  const have = coverage.get(cls) ?? 0;
+  const ok = have >= minimum;
+  if (!ok) under += 1;
+  console.log(`  ${cls.padEnd(14)} ${String(have).padStart(2)} / min ${minimum} ${ok ? "ok" : "UNDER"}`);
+}
+
+process.exit(missing === 0 && apkBad === 0 && under === 0 ? 0 : 1);

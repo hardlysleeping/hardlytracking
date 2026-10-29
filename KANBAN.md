@@ -1,7 +1,7 @@
 # KANBAN — HardlyTracking
 
 Board: `hermes kanban --board hardlytracking` · Backlog: `BACKLOG.md` · Plan (Native MVP boundary):
-`~/.hermes/plans/2026-10-29_133058-hardlytracking-mvp.md` · Gate: `docs/native-mvp-test-matrix.md`
+`~/.hermes/plans/2026-10-29_133058-hardlytracking-mvp.md` · Gate: `docs/ios-mvp-test-matrix.md`
 
 **Priority order: standalone iPhone first** (owner, 2026-10-29). **WIP limit: 2** — one card per file
 area; `src/api/` + `src-tauri/` are the bottlenecks.
@@ -19,7 +19,8 @@ Repo: `~/apps/hardlytracking` · branch `master` · remote `github.com/hardlysle
 | T15 `t_d6ae631e` | 6 | Device downloads: download, manage, delete, offline read | a chapter downloads, opens in airplane mode, deletes cleanly |
 | T17 `t_338636c0` | 7 | WebView login + cookie sharing into the runtime | an authenticated source works after a WebView login |
 | T16 `t_1b9bcf7e` | 8 | Backup import (source identity) + export round-trip | a Mihon/Komikku backup restores and reconnects to installed extensions |
-| T13 `t_65a17602` | 1 | The gate: run the 20-extension matrix on a device | matrix + capability + offline + ownership rows recorded, with timings |
+| T13 `t_65a17602` | 1 | The gate: run the iPhone release matrix on a device | matrix + capability + offline + ownership rows recorded, with timings |
+| T19 `t_00d83ba5` | 16 | Controlled fixture extension (headers, cookies, WebView, update, slow/failing endpoints) | installs through the app's own repo flow; deterministic rows behave as specified |
 | T6 `t_f6e28ea6` | 14 | Tauri desktop with the embedded runtime (desktop jar, same bridge) | Linux artefact launches, `/capabilities` answers, a source browses |
 | T8 `t_19227cdc` | 15 | KomgaProvider | blocked on credentials |
 
@@ -35,12 +36,14 @@ Repo: `~/apps/hardlytracking` · branch `master` · remote `github.com/hardlysle
 
 ## The gate in one paragraph
 
-`docs/native-mvp-test-matrix.md`: 20 real extensions from the live Keiyoushi index (1 438 entries) —
-MangaDex (61 sources), Manga Million (108), XCOMIC (77), MangaFire (7), plus HTML, filters, preferences,
-cookies, auth, headers, WebView, Cloudflare/captcha, relative URLs and image headers — then capability
-checks, an airplane-mode matrix (11 steps plus a "must not happen" list), and data-ownership checks.
-`npm run matrix:check` validates every row against the live index today: 20 rows, missing 0, APK
-unreachable 0, version drift 0, source-id loss 0.
+`docs/ios-mvp-test-matrix.md`: the release gate. 25 pinned extensions from the live Keiyoushi index
+(1 438 entries) across all ten required classes — MangaDex (61 sources), Manga Million (108), XCOMIC (77),
+GlobalComix (37), MangaFire (7), plus HTML, JSON, filters, preferences, cookies, auth, headers, WebView,
+Cloudflare/captcha, image headers and non-Latin sources. Then his EXT / SRC / HTTP / WEB / LIB / OFF / BAK /
+UPD / LIFE matrices, the six release gates and the single final acceptance scenario. `npm run matrix:check`
+validates today: 25 rows, missing 0, APK unreachable 0, version drift 0, source-id loss 0, every class at
+or above its minimum. **Hard gates are non-negotiable — nothing starts on Komga, Suwayomi or the PWA while
+one is failing.**
 
 ## Incident recorded on the board
 

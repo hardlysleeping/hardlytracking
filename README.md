@@ -57,9 +57,10 @@ npm run smoke        # live, needs the runtime on :4567
 npm run matrix:check # live: validates the iPhone test matrix against the extension index
 ```
 
-The iPhone MVP is gated by `docs/native-mvp-test-matrix.md` — 20 real extensions, capability checks,
-an airplane-mode matrix and data-ownership checks. Nothing is "done" for the native build until those
-rows are recorded from a device.
+The iPhone MVP is gated by `docs/ios-mvp-test-matrix.md` — 25 pinned extensions across ten required
+classes, then his EXT / SRC / HTTP / WEB / LIB / OFF / BAK / UPD / LIFE matrices, six release gates and one
+final acceptance scenario. Nothing is "done" for the native build until those rows are recorded from a
+physical iPhone, and no Komga/Suwayomi/PWA work starts while a hard gate fails.
 
 ## Not built yet
 
