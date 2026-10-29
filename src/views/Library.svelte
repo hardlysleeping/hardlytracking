@@ -9,12 +9,6 @@
   /** Which category the rail is pointing at; `null` is the whole library. */
   let selected = $state<string | null>(null);
 
-  $effect(() => {
-    const profile = library.profile;
-    if (profile === null) return;
-    void categories.load(profile.store);
-  });
-
   /**
    * The library as the two marks leave it: the eye decides membership, the pin
    * decides both the filter and what floats to the top, and the rail's selection

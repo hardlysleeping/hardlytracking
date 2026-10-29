@@ -5,6 +5,7 @@
   import Series from "./views/Series.svelte";
   import Reader from "./views/Reader.svelte";
   import { library } from "./state/library.svelte";
+  import { categories } from "./state/categories.svelte";
   import { go, parseRoute } from "./lib/nav";
 
   let route = $state(parseRoute(location.hash));
@@ -12,7 +13,13 @@
   onMount(() => {
     const onHash = () => (route = parseRoute(location.hash));
     addEventListener("hashchange", onHash);
-    void library.open();
+    // The rail and the series-page chips both read the categories, and a deep link can
+    // land on either, so they are loaded with the library rather than by a view.
+    void (async () => {
+      await library.open();
+      const profile = library.profile;
+      if (profile !== null) await categories.load(profile.store);
+    })();
     return () => removeEventListener("hashchange", onHash);
   });
 </script>
