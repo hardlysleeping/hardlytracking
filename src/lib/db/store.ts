@@ -73,6 +73,16 @@ export class LibraryStore {
     return (row?.urls ?? []).map((url, index) => ({ index, url }));
   }
 
+  /** Every position row, for export and sync (the document carries the whole set). */
+  async listProgress(): Promise<ProgressRow[]> {
+    return this.db.all<ProgressRow>("progress");
+  }
+
+  /** Every preference row, so export can carry the whole set without guessing keys. */
+  async listPrefs(): Promise<Array<{ key: string; value: unknown }>> {
+    return this.db.all<{ key: string; value: unknown }>("prefs");
+  }
+
   async getProgress(chapterId: string): Promise<ProgressRow | undefined> {
     return this.db.get<ProgressRow>("progress", chapterId);
   }
