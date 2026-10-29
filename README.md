@@ -4,8 +4,12 @@ A cross-platform manga reader with a Mihon/Komikku source layer, built on the
 architecture of HardlyReader: one Svelte 5 app, one `SourceProvider` seam, and the
 same UI on web/PWA and (later) packaged apps.
 
-**Status: web MVP.** Browse → series → chapters → pages works against a real Mihon
-extension host. Packaged apps, Komga and backups are on the board, not in the code.
+**Status: web MVP.** Browse → series → chapters → pages works against a real Mihon extension host.
+
+**Next milestone is the standalone iPhone build** (priority 1, owner's order): the same app with an
+embedded OpenJDK Zero runtime behind a Tauri plugin, so Mihon APK extensions run on-device with no
+server, no Suwayomi and no LAN. The stack is real, not speculative — see `BACKLOG.md` and the native
+MVP boundary in the plan.
 
 ## What runs today
 
