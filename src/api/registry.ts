@@ -65,7 +65,21 @@ export async function createProviders(config: RegistryConfig): Promise<ProviderS
       // Read once at boot so the sources of an APK installed last launch are there
       // before the first paint; the array stays live afterwards.
       const extensions = await config.store.listExtensions();
-      providers.push(createDalvikProvider({ client, extensions }));
+      providers.push(
+        createDalvikProvider({
+          client,
+          extensions,
+          // The host keeps no read state, so the marks are ours: the same store the local
+          // provider writes to, which is what `ownsProgress: true` promises.
+          readState: {
+            read: async (chapterIds) => {
+              const marks = await Promise.all(chapterIds.map(async (id) => ((await config.store.isRead(id)) ? id : null)));
+              return new Set(marks.filter((id): id is string => id !== null));
+            },
+            mark: (chapterId, read) => config.store.setRead(chapterId, read),
+          },
+        }),
+      );
       dalvik = { baseUrl: dalvikBase, client, capabilities, extensions };
     } catch (error) {
       warnings.push(`dalvik: ${error instanceof Error ? error.message : String(error)}`);

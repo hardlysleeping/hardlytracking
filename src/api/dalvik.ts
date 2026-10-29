@@ -306,6 +306,22 @@ export interface DalvikProviderOptions {
   extensions: InstalledExtension[];
   /** Titles seen this session, so a chapter call can name the manga it is about. */
   titles?: Map<string, string>;
+  /**
+   * Where a read mark lives for this host.
+   *
+   * The runtime has no read-state API at all, so `ownsProgress` is true and the mark is ours:
+   * the provider asks this for the marks it draws and writes through it when the reader says
+   * so. Without it the provider still refuses `setRead` by name rather than pretending —
+   * a provider built on its own (a test, a build with no database) has nowhere to write.
+   */
+  readState?: DalvikReadState;
+}
+
+/** The device's own read marks, as the provider needs them. */
+export interface DalvikReadState {
+  /** Which of these chapter ids this device has marked read. */
+  read(chapterIds: string[]): Promise<Set<string>>;
+  mark(chapterId: string, read: boolean): Promise<void>;
 }
 
 /** `<sourceId>:<url>` — the native half of a series or chapter id. */
@@ -461,10 +477,15 @@ export function createDalvikProvider(options: DalvikProviderOptions): SourceProv
         sourceId,
         mangaData: mangaDataFor(seriesId),
       });
-      return (Array.isArray(result.body) ? result.body : []).map((chapter) => ({
+      const rows = (Array.isArray(result.body) ? result.body : []).map((chapter) => ({
         ...toChapter(sourceId, chapter),
         seriesId,
       }));
+      // The runtime answers with no read state (it has none), so the marks we draw are the
+      // ones this device wrote. One bulk read, because a long series is hundreds of ids.
+      if (options.readState === undefined) return rows;
+      const read = await options.readState.read(rows.map((row) => row.id));
+      return rows.map((row) => (read.has(row.id) ? { ...row, read: true } : row));
     },
 
     async pages(chapterId: string): Promise<Page[]> {
@@ -487,9 +508,15 @@ export function createDalvikProvider(options: DalvikProviderOptions): SourceProv
     },
 
     async setRead(chapterId: string, read: boolean): Promise<void> {
-      throw new Error(
-        `this host has no read-state API, so it cannot set ${chapterId} to read=${String(read)}; read marks live in our database`,
-      );
+      // The runtime has no read-state API: there is nothing on the host to write to. The
+      // mark goes in our database through `readState` when one was supplied, and a provider
+      // with nowhere to write says so by name instead of resolving as if it had.
+      if (options.readState === undefined) {
+        throw new Error(
+          `this host has no read-state API, so it cannot set ${chapterId} to read=${String(read)}; read marks live in our database`,
+        );
+      }
+      await options.readState.mark(chapterId, read);
     },
   };
 }

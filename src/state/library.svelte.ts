@@ -76,6 +76,7 @@ class LibraryState {
     await this.profile.store.addSeries(series);
     // Mirror what we already fetched, so the series page opens instantly next time.
     if (chapters.length > 0) await this.profile.store.putChapters(series.id, chapters);
+    await this.recordMapping(series.id);
     await this.refreshLibrary();
   }
 
@@ -102,6 +103,58 @@ class LibraryState {
     const pages = await provider.pages(chapterId);
     await this.profile.store.putPages(chapterId, pages);
     return pages;
+  }
+
+  /**
+   * One call for "I am here".
+   *
+   * Position, history and progress are three questions about the same moment, so they are
+   * written together: a reader that remembered the page but not the chapter would offer
+   * "continue" at the wrong place, and one that remembered neither would offer nothing.
+   */
+  async remember(seriesId: string, chapterId: string, page: number, total: number): Promise<void> {
+    if (this.profile === null) return;
+    const store = this.profile.store;
+    await store.setProgress(chapterId, page, total);
+    await store.setPosition(seriesId, chapterId, page);
+    await store.recordHistory(seriesId, chapterId);
+  }
+
+  /** The library's continue strip: newest positions, with the titles we already know. */
+  async continueReading(limit = 5): Promise<Array<{ seriesId: string; title: string; chapterId: string; page: number }>> {
+    if (this.profile === null) return [];
+    const [positions, series] = await Promise.all([this.profile.store.listPositions(), this.profile.store.listSeries()]);
+    const titles = new Map(series.map((row) => [row.id, row.title]));
+    return positions.slice(0, limit).map((row) => ({
+      seriesId: row.seriesId,
+      chapterId: row.chapterId,
+      page: row.page,
+      title: titles.get(row.seriesId) ?? row.seriesId,
+    }));
+  }
+
+  /**
+   * Remember where a series came from, at the moment it is added.
+   *
+   * The id already carries the provider and, for a Mihon host, the source id and the
+   * manga's own url — so the mapping is derived from the id rather than guessed, and a
+   * source we cannot name is left out instead of being invented.
+   */
+  async recordMapping(seriesId: string, packageId?: string): Promise<void> {
+    if (this.profile === null) return;
+    const [provider, ...rest] = seriesId.split(":");
+    const native = rest.join(":");
+    if (provider === undefined || native === "") return;
+    // `dalvik:<sourceId>:<url>` — the source id is the first segment after the kind.
+    const sourceId = provider === "dalvik" ? native.split(":")[0] : provider === "mihon" ? "" : native;
+    if (sourceId === undefined || sourceId === "") return;
+    await this.profile.store.putMapping({
+      seriesId,
+      provider,
+      sourceId,
+      ...(packageId === undefined ? {} : { packageId }),
+      at: Date.now(),
+    });
   }
 
   /** True when this chapter's position is ours to write. */

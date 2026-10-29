@@ -29,6 +29,12 @@
       pages = await library.pages(id);
       const progress = await library.profile.store.getProgress(id);
       index = Math.min(progress?.page ?? 0, Math.max(pages.length - 1, 0));
+      // A provider whose read marks are the device's (local, dalvik) keeps them in our store,
+      // so the button has to start from the mark we wrote — otherwise it says "Mark read" for
+      // a chapter already marked and the first click writes the opposite of what it reads.
+      read = library.ownsProgress(id) ? await library.profile.store.isRead(id) : false;
+      // Opening a chapter is the moment history exists; it is not a read mark.
+      await library.remember(seriesId, id, index, pages.length);
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
     } finally {
@@ -56,7 +62,7 @@
 
   async function remember(): Promise<void> {
     if (library.profile === null || pages.length === 0) return;
-    await library.profile.store.setProgress(chapterId, index, pages.length);
+    await library.remember(seriesId, chapterId, index, pages.length);
   }
 
   function step(delta: number): void {

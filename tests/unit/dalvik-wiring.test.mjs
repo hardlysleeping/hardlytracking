@@ -28,6 +28,11 @@ async function stubHost({ bridge = true } = {}) {
     req.on("end", () => {
       const body = JSON.parse(raw);
       seen.push({ url: req.url, body });
+      if (body.method === "getChapterList") {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify([{ url: "/chapter/abc", name: "Ch.1", chapter_number: 1 }]));
+        return;
+      }
       if (body.method !== "sourcesManga") {
         res.writeHead(500, { "content-type": "application/json" });
         res.end(JSON.stringify({ error: `Unknown method: ${body.method}`, code: 500 }));
@@ -139,4 +144,36 @@ test("a row without its key is refused, never stored under 'undefined'", async (
   await assert.rejects(db.put("extensions", { packageId: "mangadex", sources: [] }), /extensions row has no extensionId/);
   await db.put("extensions", { extensionId: "abc", packageId: "mangadex", sources: [] });
   assert.equal((await db.all("extensions")).length, 1);
+});
+
+test("a read mark goes to our database, and the chapter list draws it back", async () => {
+  // The runtime has no read-state API, so `ownsProgress: true` has to mean the store writes.
+  // A provider built without a store still refuses by name (dalvik.test.mjs); this is the
+  // wired case: mark through the provider, read it back through the same provider's list.
+  const host = await stubHost();
+  try {
+    const database = memoryDatabase();
+    const profile = await openLibraryProfile({ database, mihonBase: null, dalvikBase: host.baseUrl });
+    await profile.installApk(apk, "mangadex");
+    const provider = providerFor(profile.providers, "dalvik:src:2499283573021220255");
+    assert.equal(provider.ownsProgress, true, "the host cannot own a mark it cannot store");
+    const callsAfterInstall = host.seen.length;
+
+    const chapterId = "dalvik:ch:2499283573021220255:/chapter/abc";
+    await provider.setRead(chapterId, true);
+    assert.equal(await profile.store.isRead(chapterId), true);
+
+    // Nothing was sent to the host to write a mark: a read mark is never a /dalvik call.
+    assert.equal(host.seen.length, callsAfterInstall, "no call was made to write a mark");
+
+    // …and the same provider draws it back on the list, which the runtime cannot answer.
+    const chapters = await provider.chapters("dalvik:2499283573021220255:/manga/x");
+    assert.deepEqual(chapters.map((c) => [c.id, c.read]), [[chapterId, true]]);
+
+    await provider.setRead(chapterId, false);
+    assert.equal(await profile.store.isRead(chapterId), false);
+    assert.deepEqual((await provider.chapters("dalvik:2499283573021220255:/manga/x")).map((c) => c.read), [false]);
+  } finally {
+    await host.close();
+  }
 });

@@ -18,6 +18,27 @@ export interface ProgressRow {
   at: number;
 }
 
+export interface HistoryRow {
+  chapterId: string;
+  seriesId: string;
+  at: number;
+}
+
+export interface PositionRow {
+  seriesId: string;
+  chapterId: string;
+  page: number;
+  at: number;
+}
+
+export interface SourceMappingRow {
+  seriesId: string;
+  provider: string;
+  sourceId: string;
+  packageId?: string;
+  at: number;
+}
+
 interface ChapterRow extends Chapter {
   /** Present so `all("chapters")` can be filtered without an index. */
   id: string;
@@ -93,7 +114,7 @@ export class LibraryStore {
     await this.db.put("progress", row as unknown as Record<string, unknown>);
   }
 
-  /** Local read marks. The only provider that owns these is `local`. */
+  /** Local read marks. The providers that own these are `local` and `dalvik`. */
   async setRead(chapterId: string, read: boolean): Promise<void> {
     await this.setPref(`read:${chapterId}`, read);
   }
@@ -129,6 +150,52 @@ export class LibraryStore {
 
   async removeExtension(extensionId: string): Promise<void> {
     await this.db.remove("extensions", extensionId);
+  }
+
+  // ---- history, position, source mappings -----------------------------------
+  //
+  // Three answers the library could not give before: what I opened and when, where I was in
+  // a series (so "continue" is one row, not a scan), and which source a series came from
+  // (so a backup import or a reinstall can find it again).
+
+  async recordHistory(seriesId: string, chapterId: string, at = Date.now()): Promise<void> {
+    await this.db.put("history", { chapterId, seriesId, at } as unknown as Record<string, unknown>);
+  }
+
+  /** Newest first, one row per chapter — reopening a chapter moves it up, never duplicates. */
+  async listHistory(limit = 50): Promise<HistoryRow[]> {
+    const rows = await this.db.all<HistoryRow>("history");
+    return rows.sort((a, b) => b.at - a.at).slice(0, limit);
+  }
+
+  /** Where the reader was in a series. One row per series, so it is a lookup, not a scan. */
+  async setPosition(seriesId: string, chapterId: string, page: number, at = Date.now()): Promise<void> {
+    await this.db.put("position", { seriesId, chapterId, page, at } as unknown as Record<string, unknown>);
+  }
+
+  async getPosition(seriesId: string): Promise<PositionRow | undefined> {
+    return this.db.get<PositionRow>("position", seriesId);
+  }
+
+  async listPositions(): Promise<PositionRow[]> {
+    const rows = await this.db.all<PositionRow>("position");
+    return rows.sort((a, b) => b.at - a.at);
+  }
+
+  /**
+   * The source a series came from, in the terms a backup or a reinstall needs: the provider,
+   * the extension's own source id and, when known, the APK's package id.
+   */
+  async putMapping(mapping: SourceMappingRow): Promise<void> {
+    await this.db.put("mappings", { ...mapping } as unknown as Record<string, unknown>);
+  }
+
+  async getMapping(seriesId: string): Promise<SourceMappingRow | undefined> {
+    return this.db.get<SourceMappingRow>("mappings", seriesId);
+  }
+
+  async listMappings(): Promise<SourceMappingRow[]> {
+    return this.db.all<SourceMappingRow>("mappings");
   }
 
   // ---- categories: hidden + pinned -----------------------------------------
