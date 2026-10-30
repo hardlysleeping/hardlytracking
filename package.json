@@ -14,7 +14,8 @@
     "matrix:check": "node --experimental-strip-types --import ./tests/unit/register-ts.mjs scripts/matrix-check.mjs",
     "sync:roundtrip": "node --experimental-strip-types --import ./tests/unit/register-ts.mjs scripts/sync-roundtrip.mjs",
     "dalvik:smoke": "node --experimental-strip-types --import ./tests/unit/register-ts.mjs scripts/dalvik-smoke.mjs",
-    "serve:lan": "HOST=0.0.0.0 node server/proxy.mjs"
+    "serve:lan": "HOST=0.0.0.0 node server/proxy.mjs",
+    "perf": "node --experimental-strip-types --import ./tests/unit/register-ts.mjs scripts/library-perf.mjs"
   },
   "devDependencies": {
     "@capacitor/cli": "^7.6.10",

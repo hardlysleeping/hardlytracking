@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en" data-device="phone">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>library perf</title>
+  </head>
+  <body>
+    <!-- A bench, not a screen: the real SeriesGrid at 5 000 rows, in the real stylesheet, so the
+         numbers in `npm run perf` and the numbers here are about the same component. Open
+         /perf/bench.html?rows=5000 on the dev server; it prints its three numbers as text. -->
+    <div id="app"></div>
+    <pre id="out" style="position: fixed; inset: auto 0 0 0; margin: 0; padding: 8px; font: 12px/1.4 ui-monospace, monospace; background: #000d; color: #fff; z-index: 9"></pre>
+    <script type="module" src="./bench.svelte.ts"></script>
+  </body>
+</html>

@@ -18,3 +18,4 @@ ios/DerivedData/
 
 # a worktree symlink, never part of the tree
 node_modules
+dist-bench/

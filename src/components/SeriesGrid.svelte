@@ -11,6 +11,24 @@
   import Cover from "./Cover.svelte";
   import { go, pathTo } from "../lib/nav";
 
+  /** A screenful and a bit; the rest arrives while the reader is still looking at the first row. */
+  const FIRST_DRAW = 120;
+  const GROW_BY = 250;
+
+  /** `requestIdleCallback` where it exists, a macrotask where it does not — a missing one must not
+   *  mean a library that never finishes drawing. */
+  function schedule(run: () => void): number {
+    if (typeof requestIdleCallback === "function") {
+      return requestIdleCallback(run, { timeout: 200 }) as unknown as number;
+    }
+    return setTimeout(run, 16) as unknown as number;
+  }
+
+  function cancelSchedule(handle: number): void {
+    if (typeof cancelIdleCallback === "function") cancelIdleCallback(handle);
+    else clearTimeout(handle);
+  }
+
   interface Props {
     series: Series[];
     view?: "grid" | "compact" | "list";
@@ -51,6 +69,35 @@
     badges = new Map(),
     resume = new Map(),
   }: Props = $props();
+
+  /**
+   * How many tiles are in the DOM right now.
+   *
+   * A 5 000-title library is 5 000 covers to *create*, and creating them is the first paint: 412 ms
+   * on this box before the reader sees anything, even though all but a dozen are off screen.
+   * `content-visibility` skips their rendering but not their creation. So the grid draws the first
+   * screenful and grows in idle steps; every tile already reserves its height
+   * (`contain-intrinsic-size`), so the document is the right length from the first frame and the
+   * scrollbar, the scroll offset and a drag do not notice the rest arriving.
+   */
+  let drawnCount = $state(FIRST_DRAW);
+  const drawn = $derived(series.length <= drawnCount ? series : series.slice(0, drawnCount));
+
+  $effect(() => {
+    if (series.length <= drawnCount) return;
+    let cancelled = false;
+    let handle = 0;
+    const grow = (): void => {
+      if (cancelled) return;
+      drawnCount = Math.min(series.length, drawnCount + GROW_BY);
+      if (drawnCount < series.length) handle = schedule(grow);
+    };
+    handle = schedule(grow);
+    return () => {
+      cancelled = true;
+      cancelSchedule(handle);
+    };
+  });
 
   let pressTimer: ReturnType<typeof setTimeout> | null = null;
   /** The tile under a held finger, and whether that hold has turned into a drag. */
@@ -145,7 +192,7 @@
   <p class="empty">{empty}</p>
 {:else}
   <div class="set {view}" style:--cover="{cover}px">
-    {#each series as item (item.id)}
+    {#each drawn as item (item.id)}
       <button
         class="tile"
         class:current={current === item.id}
@@ -229,8 +276,20 @@
     gap: var(--s2);
     min-width: 0;
     border-radius: var(--r2);
+    /* 5 000 rows is a real library, and every tile pays for its cover, its badges and its pill row
+       whether or not it is on screen. `content-visibility: auto` skips that work for rows outside
+       the viewport while keeping them in the DOM (so find-in-page, focus and the drag still work),
+       and `contain-intrinsic-size` gives the skipped rows a height to reserve, so the scrollbar
+       and the scroll offset do not jump as they come in. The size is the cover's aspect at the
+       default width; `auto` in the second value keeps a row's real height once it has been seen. */
+    content-visibility: auto;
+    /* The reserved height is the cover's real height at this width (2:3) plus the title block,
+       derived from `--cover` rather than a guessed constant: a wrong number is not just a gap, it
+       makes every row that scrolls in re-lay-out the grid, which is where the frames went. */
+    contain-intrinsic-size: auto calc(var(--cover) * 1.5 + 76px);
   }
   .set.list .tile {
+    contain-intrinsic-size: auto calc(var(--cover) * 0.5 + 16px);
     display: flex;
     align-items: center;
     gap: var(--s3);
