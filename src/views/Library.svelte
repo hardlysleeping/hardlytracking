@@ -14,6 +14,7 @@
   import { scoreRow } from "../lib/search/index";
   import CategoryRail from "../components/CategoryRail.svelte";
   import SeriesGrid from "../components/SeriesGrid.svelte";
+  import Cover from "../components/Cover.svelte";
   import Sheet from "../components/Sheet.svelte";
   import { go, pathTo } from "../lib/nav";
   import { applyView, visibleCategories } from "../lib/categories";
@@ -220,7 +221,7 @@
   });
 
   /** Continue reading, newest first — the shortcut back into a book. */
-  let continuing = $state<Array<{ seriesId: string; chapterId: string; page: number; title: string }>>([]);
+  let continuing = $state<Array<{ seriesId: string; chapterId: string; page: number; title: string; cover?: string; chapterName: string }>>([]);
   $effect(() => {
     if (library.profile === null) return;
     void library.continueReading().then((rows) => (continuing = rows));
@@ -483,9 +484,12 @@
               <div class="strip">
                 {#each continuing as row (row.seriesId)}
                   <button class="cont" onclick={() => go(pathTo("read", row.seriesId, row.chapterId))}>
-                    <span class="t">{row.title}</span>
-                    <span class="p">page {row.page + 1}</span>
-                    <span class="go">Continue</span>
+                    <Cover series={{ title: row.title, ...(row.cover === undefined ? {} : { cover: row.cover }) }} size="row" />
+                    <span class="body">
+                      <span class="t">{row.title}</span>
+                      <span class="p">{row.chapterName === "" ? `page ${row.page + 1}` : `${row.chapterName} · page ${row.page + 1}`}</span>
+                      <span class="go">Continue</span>
+                    </span>
                   </button>
                 {/each}
               </div>
@@ -882,13 +886,33 @@
     all: unset;
     cursor: pointer;
     display: grid;
-    gap: 1px;
-    min-width: 168px;
-    max-width: 240px;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    gap: var(--s3);
+    min-width: 208px;
+    max-width: 268px;
     padding: var(--s3);
     border-radius: var(--r2);
     border: 1px solid var(--line);
     background: var(--surface);
+  }
+
+  .cont .body {
+    display: grid;
+    gap: 2px;
+    min-width: 0;
+  }
+
+  .cont .t {
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .cont .go {
+    font-size: var(--t-xs);
+    color: var(--accent);
   }
 
   .cont:hover {

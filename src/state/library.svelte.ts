@@ -332,7 +332,7 @@ class LibraryState {
   }
 
   /** The library's continue strip: newest positions, with the titles we already know. */
-  async continueReading(limit = 5): Promise<Array<{ seriesId: string; title: string; chapterId: string; page: number }>> {
+  async continueReading(limit = 5): Promise<Array<{ seriesId: string; title: string; cover?: string; chapterId: string; page: number; chapterName: string }>> {
     if (this.profile === null) return [];
     const [positions, series, known] = await Promise.all([
       this.profile.store.listPositions(),
@@ -340,13 +340,20 @@ class LibraryState {
       this.profile.store.listKnownSeries(),
     ]);
     const titles = new Map(series.map((row) => [row.id, row.title]));
-    for (const row of known) if (!titles.has(row.id)) titles.set(row.id, row.title);
+    const covers = new Map<string, string | undefined>(series.map((row) => [row.id, row.cover]));
+    for (const row of known) {
+      if (!titles.has(row.id)) titles.set(row.id, row.title);
+      if (covers.get(row.id) === undefined && row.cover !== undefined) covers.set(row.id, row.cover);
+    }
+    const chapterNames = new Map((await this.profile.store.listAllChapters()).map((chapter) => [chapter.id, chapter.name]));
     return positions.slice(0, limit).map((row) => ({
       seriesId: row.seriesId,
       chapterId: row.chapterId,
       page: row.page,
       // A title we have seen beats an id; an id is never shown as a title.
       title: titles.get(row.seriesId) ?? "Unknown title",
+      ...(covers.get(row.seriesId) === undefined ? {} : { cover: covers.get(row.seriesId) }),
+      chapterName: chapterNames.get(row.chapterId) ?? "",
     }));
   }
 
