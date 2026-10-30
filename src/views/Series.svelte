@@ -15,6 +15,7 @@
   import Sheet from "../components/Sheet.svelte";
   import { go, pathTo } from "../lib/nav";
   import { flipOrder, orderChapters, orderLabel, type ChapterOrder } from "../lib/chapter-order";
+  import { chapterLabel } from "../lib/titles";
 
   interface Props {
     seriesId: string;
@@ -136,8 +137,11 @@
   }
 
   function label(chapter: Chapter): string {
-    if (chapter.number > 0) return `Chapter ${chapter.number}`;
-    return chapter.name;
+    // A real name beats a generated one. Mihon's own names are "Chapter 12", so this keeps them as
+    // they are, while an archive.org volume called "Berserk v01 (2003)" stops being "Chapter 1".
+    const named = chapterLabel(chapter.name);
+    if (named !== "Chapter") return named;
+    return chapter.number > 0 ? `Chapter ${chapter.number}` : named;
   }
 
   function when(chapter: Chapter): string {

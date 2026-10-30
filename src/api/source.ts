@@ -21,7 +21,7 @@
  * so they get two kinds: sharing `mihon` would make `providerFor` hand a dalvik id to
  * Suwayomi (first match wins) and every lookup would land on the wrong host.
  */
-export type ProviderKind = "mihon" | "dalvik" | "komga" | "local";
+export type ProviderKind = "mihon" | "dalvik" | "komga" | "local" | "archive";
 
 export interface Source {
   /** Namespaced: `mihon:src:0`. */
@@ -102,7 +102,7 @@ export interface SourceProvider {
   setRead(chapterId: string, read: boolean): Promise<void>;
 }
 
-const KINDS: ProviderKind[] = ["mihon", "dalvik", "komga", "local"];
+const KINDS: ProviderKind[] = ["mihon", "dalvik", "komga", "local", "archive"];
 
 export function joinId(provider: ProviderKind, native: string | number): string {
   return `${provider}:${native}`;

@@ -58,7 +58,7 @@ test("a host that answers /capabilities gets a provider; a silent one is a warni
   try {
     const store = new LibraryStore(memoryDatabase());
     const registered = await createProviders({ store, mihonBase: null, dalvikBase: host.baseUrl });
-    assert.deepEqual(registered.providers.map((p) => p.kind), ["local", "dalvik"]);
+    assert.deepEqual(registered.providers.map((p) => p.kind), ["local", "archive", "dalvik"]);
     assert.equal(registered.warnings.length, 0);
     assert.equal(registered.dalvik?.baseUrl, host.baseUrl);
     assert.equal(providerFor(registered.providers, "dalvik:src:1").kind, "dalvik");
@@ -72,7 +72,7 @@ test("a host that answers /capabilities gets a provider; a silent one is a warni
   try {
     const store = new LibraryStore(memoryDatabase());
     const refused = await createProviders({ store, mihonBase: null, dalvikBase: silent.baseUrl });
-    assert.deepEqual(refused.providers.map((p) => p.kind), ["local"], "no provider for a host that does not advertise the bridge");
+    assert.deepEqual(refused.providers.map((p) => p.kind), ["local", "archive"], "no provider for a host that does not advertise the bridge");
     assert.equal(refused.dalvik, null);
     assert.match(refused.warnings[0], /does not advertise the \/dalvik bridge/);
   } finally {
@@ -86,7 +86,7 @@ test("an APK installed through the profile is kept in our database and its sourc
     const database = memoryDatabase();
     const profile = await openLibraryProfile({ database, mihonBase: null, dalvikBase: host.baseUrl });
     assert.equal(profile.dalvik?.extensions.length, 0, "nothing installed yet");
-    assert.equal((await profile.providers[1].sources()).length, 0);
+    assert.equal((await providerFor(profile.providers, "dalvik:src:1").sources()).length, 0);
 
     const installed = await profile.installApk(apk, "eu.kanade.tachiyomi.extension.all.mangadex");
     assert.equal(installed.extensionId, "12fde776sha256");
@@ -105,13 +105,13 @@ test("an APK installed through the profile is kept in our database and its sourc
     assert.equal(row.extensionId, "12fde776sha256");
 
     // …and the sources are live without a reload of the provider.
-    const sources = await profile.providers[1].sources();
+    const sources = await providerFor(profile.providers, "dalvik:src:1").sources();
     assert.deepEqual(sources.map((s) => s.id), ["dalvik:src:2499283573021220255", "dalvik:src:4638673959522768501"]);
 
     // Reinstalling the same APK replaces its row instead of duplicating 61 sources.
     await profile.installApk(apk, "eu.kanade.tachiyomi.extension.all.mangadex");
     assert.equal((await profile.store.listExtensions()).length, 1);
-    assert.equal((await profile.providers[1].sources()).length, 2);
+    assert.equal((await providerFor(profile.providers, "dalvik:src:1").sources()).length, 2);
   } finally {
     await host.close();
   }
@@ -126,7 +126,7 @@ test("a reopened app has the sources of the APK it installed last time", async (
 
     const second = await openLibraryProfile({ database, mihonBase: null, dalvikBase: host.baseUrl });
     assert.equal(second.dalvik?.extensions.length, 1);
-    const sources = await second.providers[1].sources();
+    const sources = await providerFor(second.providers, "dalvik:src:1").sources();
     assert.equal(sources.length, 2, "no APK resend needed: the row carries the source list");
   } finally {
     await host.close();

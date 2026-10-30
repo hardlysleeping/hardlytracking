@@ -14,6 +14,7 @@
 import { apiUrl } from "../lib/host";
 import { browserMihonTransport, createMihonProvider } from "./mihon";
 import { createLocalProvider } from "./local";
+import { createArchiveProvider } from "./archive";
 import { DalvikClient, createDalvikProvider, type DalvikCapabilities, type InstalledExtension } from "./dalvik";
 import { splitId, type SourceProvider } from "./source";
 import type { LibraryStore } from "../lib/db/store";
@@ -56,6 +57,10 @@ export async function createProviders(config: RegistryConfig): Promise<ProviderS
   if (mihonBase !== null) providers.push(createMihonProvider(browserMihonTransport(mihonBase)));
 
   providers.push(createLocalProvider(config.store));
+
+  // archive.org needs no host, no token and no configuration: it is a public catalogue, so it is
+  // always available and never appears as an empty shelf.
+  providers.push(createArchiveProvider(config.fetchImpl === undefined ? {} : { fetchImpl: config.fetchImpl }));
 
   let dalvik: DalvikHost | null = null;
   const dalvikBase = config.dalvikBase === undefined ? apiUrl("/api/dalvik") : config.dalvikBase;

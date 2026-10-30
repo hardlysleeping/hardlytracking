@@ -52,7 +52,7 @@ export interface SeriesSource {
   why?: UnknownWhy;
 }
 
-const PROVIDERS: ProviderKind[] = ["mihon", "dalvik", "komga", "local"];
+const PROVIDERS: ProviderKind[] = ["mihon", "dalvik", "komga", "local", "archive"];
 
 /** `<provider>:<native>`, or `null` for an id with no provider prefix this app writes. */
 function split(seriesId: string): { provider: ProviderKind; native: string } | null {

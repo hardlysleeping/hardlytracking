@@ -54,13 +54,14 @@ test("a local provider refuses a mihon id", async () => {
 
 test("a profile registers local always and mihon only when configured", async () => {
   const withRuntime = await openLibraryProfile({ database: memoryDatabase(), dalvikBase: null });
-  assert.deepEqual(withRuntime.providers.map((p) => p.kind), ["mihon", "local"]);
+  // archive.org is public, so it is registered whether or not any other host is configured.
+  assert.deepEqual(withRuntime.providers.map((p) => p.kind), ["mihon", "local", "archive"]);
   assert.equal(providerFor(withRuntime.providers, "mihon:12").kind, "mihon");
   assert.equal(providerFor(withRuntime.providers, "local:1").kind, "local");
   assert.equal(withRuntime.dalvik, null, "no dalvik host was configured");
 
   const offline = await openLibraryProfile({ database: memoryDatabase(), mihonBase: null, dalvikBase: null });
-  assert.deepEqual(offline.providers.map((p) => p.kind), ["local"]);
+  assert.deepEqual(offline.providers.map((p) => p.kind), ["local", "archive"]);
   assert.throws(() => providerFor(offline.providers, "mihon:12"), /no mihon provider/);
 });
 
