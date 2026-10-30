@@ -15,3 +15,6 @@ ios/App/App/capacitor.config.json
 ios/App/App.xcworkspace/
 ios/DerivedData/
 *.ipa
+
+# a worktree symlink, never part of the tree
+node_modules
