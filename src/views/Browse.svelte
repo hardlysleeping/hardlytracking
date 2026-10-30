@@ -8,6 +8,8 @@
    */
   import { library } from "../state/library.svelte";
   import { go, pathTo } from "../lib/nav";
+  import { settings } from "../state/settings.svelte";
+  import { togglePin } from "../lib/pinned";
 
   let { current = null }: { current?: string | null } = $props();
 
@@ -62,12 +64,24 @@
         <h2>{group.provider}<span>{group.rows.length}</span></h2>
         <div class="rows">
           {#each group.rows as source (source.id)}
-            <button class="row" class:current={current === source.id} onclick={() => go(pathTo("source", source.id))}>
-              <span class="name">{source.name}</span>
-              {#if source.lang}<span class="lang">{source.lang}</span>{/if}
-              {#if source.nsfw}<span class="nsfw">18+</span>{/if}
+            <div class="rowwrap" class:current={current === source.id}>
+              <button class="row" onclick={() => go(pathTo("source", source.id))}>
+                <span class="name">{source.name}</span>
+                {#if source.lang}<span class="lang">{source.lang}</span>{/if}
+                {#if source.nsfw}<span class="nsfw">18+</span>{/if}
+              </button>
+              <button
+                class="pinbtn"
+                class:pinned={settings.pinnedSources.includes(source.id)}
+                aria-label={settings.pinnedSources.includes(source.id) ? `Unpin ${source.name}` : `Pin ${source.name}`}
+                aria-pressed={settings.pinnedSources.includes(source.id)}
+                title={settings.pinnedSources.includes(source.id) ? "Unpin — search will start here" : "Pin — search pinned sources only"}
+                onclick={() => settings.set("pinnedSources", togglePin(settings.pinnedSources, source.id))}
+              >
+                <svg viewBox="0 0 24 24"><path d="M9 4h6l-1 5 3 3H7l3-3zM12 12v8" /></svg>
+              </button>
               <span class="chev" aria-hidden="true">›</span>
-            </button>
+            </div>
           {/each}
         </div>
       </section>
@@ -128,6 +142,46 @@
   .group h2 span {
     font-weight: 400;
     letter-spacing: 0;
+  }
+
+  .rowwrap {
+    display: flex;
+    align-items: center;
+    gap: var(--s1);
+  }
+
+  .rowwrap .row {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .pinbtn {
+    all: unset;
+    cursor: pointer;
+    display: grid;
+    place-items: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 999px;
+    color: var(--text-3);
+    flex: none;
+  }
+
+  .pinbtn svg {
+    width: 14px;
+    height: 14px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.8;
+    stroke-linejoin: round;
+  }
+
+  .pinbtn.pinned {
+    color: var(--accent);
+  }
+
+  .pinbtn.pinned svg {
+    fill: color-mix(in srgb, var(--accent) 30%, transparent);
   }
 
   .rows {
