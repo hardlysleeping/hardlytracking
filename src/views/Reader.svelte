@@ -15,6 +15,7 @@
    * blobs, so the extension host can be offline and the chapter still opens.
    */
   import { cacheImage } from "../lib/cache/action";
+  import type { LocalChapter } from "../lib/downloads/engine";
   import { library } from "../state/library.svelte";
   import { downloads } from "../state/downloads.svelte";
   import { settings } from "../state/settings.svelte";
@@ -40,6 +41,8 @@
   let chapterName = $state("");
   let chapters = $state<Chapter[]>([]);
   let fromDownload = $state(false);
+  /** Set when the chapter is on this device but not all of it: pages that arrived, and the rest. */
+  let partialNotice = $state<string | null>(null);
 
   let chrome = $state(true);
   let settingsOpen = $state(false);
@@ -152,18 +155,48 @@
     arm();
   }
 
+  /**
+   * The chapter list, with the stored copy as the fallback.
+   *
+   * With the extension host down, a downloaded chapter must still open — the name and the
+   * prev/next buttons are a nicety, and a failed fetch must not take the chapter with it.
+   */
+  async function chapterList(seriesId: string): Promise<Chapter[]> {
+    try {
+      return await library.chapters(seriesId);
+    } catch {
+      return (await library.profile?.store.listChapters(seriesId)) ?? [];
+    }
+  }
+
+  /**
+   * Show the device's copy of a chapter.
+   *
+   * The URLs are already object URLs for the pages that are here; a page the device does not have
+   * stays empty rather than pointing at the network, because this path exists precisely for the
+   * case where the network is not available. A chapter that is only partly here says so.
+   */
+  async function openLocal(local: LocalChapter): Promise<void> {
+    pages = local.urls.map((url, index) => ({ index, url: url ?? "" } as Page));
+    urls = local.urls.map((url) => url ?? "");
+    partialNotice =
+      local.complete
+        ? null
+        : `${local.stored} of ${local.total} pages are on this device — the rest need the network.`;
+  }
+
   async function load(id: string): Promise<void> {
     if (library.profile === null) return;
     busy = true;
     error = null;
     index = 0;
+    partialNotice = null;
     try {
       // A downloaded chapter wins: it is the one that works with no network.
-      const local = await downloads.urls(id);
+      const local = await downloads.local(id);
       if (local !== null) {
-        urls = local;
         fromDownload = true;
-        pages = local.map((url, i) => ({ index: i, url }));
+        await openLocal(local);
       } else {
         fromDownload = false;
         pages = await library.pages(id);
@@ -175,9 +208,13 @@
       index = Math.min(progress?.page ?? 0, Math.max(pages.length - 1, 0));
       read = library.ownsProgress(id) ? await library.profile.store.isRead(id) : false;
 
-      const list = await library.chapters(seriesId);
+      // The chapter list is a nicety for the name and the prev/next buttons; with the host down
+      // it must not stop a downloaded chapter from opening, so the stored list is the fallback.
+      const list = await chapterList(seriesId);
       chapters = list;
-      chapterName = list.find((row) => row.id === id)?.name ?? "";
+      chapterName =
+        list.find((row) => row.id === id)?.name ??
+        (fromDownload ? (downloads.rows.find((row) => row.chapterId === id)?.chapterName ?? "") : "");
       // Opening a chapter is the moment history exists; it is not a read mark.
       await library.remember(seriesId, id, index, pages.length);
       // One session per chapter opened: the previous one is closed at the page it reached, so a
@@ -326,6 +363,7 @@
   </header>
 
   {#if error}<p class="banner">{error}</p>{/if}
+  {#if partialNotice}<p class="banner note">{partialNotice}</p>{/if}
   {#if busy}<p class="loading">Fetching pages…</p>{/if}
 
   {#if pages.length > 0}
@@ -655,6 +693,11 @@
     font-size: var(--t-xs);
     color: var(--text-3);
     line-height: 1.6;
+  }
+
+  .banner.note {
+    color: var(--text-2);
+    border-color: var(--line);
   }
 
   .banner {

@@ -101,13 +101,25 @@ export interface RepoRow {
   at: number;
 }
 
+/** Where a download stands. `downloading` is written when a run starts, so a kill is visible. */
+export type DownloadState = "downloading" | "done" | "partial" | "failed";
+
 export interface DownloadRow {
   chapterId: string;
   seriesId: string;
   chapterName: string;
+  /** Pages actually stored on this device — not the count the source promised. */
   pages: number;
   bytes: number;
   at: number;
+  /** Pages the source said the chapter has. Absent on rows written before it was recorded. */
+  total?: number;
+  /** Chapter number, so a downloads list can be read in chapter order. */
+  number?: number;
+  /** Absent on rows written before T15, which were only ever written complete. */
+  state?: DownloadState;
+  /** Why the last run stopped early, when it stopped early. */
+  error?: string;
 }
 
 export interface SourceMappingRow {
@@ -376,6 +388,17 @@ export class LibraryStore {
   async listDownloadPages(chapterId: string): Promise<Array<{ index: number; blob: Blob }>> {
     const rows = await this.db.all<{ id: string; chapterId: string; index: number; blob: Blob }>("downloadPages");
     return rows.filter((row) => row.chapterId === chapterId).map(({ index, blob }) => ({ index, blob }));
+  }
+
+  /**
+   * Every stored page row, in one read.
+   *
+   * A launch has to reconcile every download against the pages that really exist, and asking per
+   * chapter would be one IndexedDB pass per row. The result is also how bytes are recounted after
+   * an interrupted run: the row's own `bytes` is only as honest as its last write.
+   */
+  async allDownloadPages(): Promise<Array<{ id: string; chapterId: string; index: number; blob: Blob }>> {
+    return this.db.all<{ id: string; chapterId: string; index: number; blob: Blob }>("downloadPages");
   }
 
   async putDownloadPage(row: { id: string; chapterId: string; index: number; blob: Blob }): Promise<void> {

@@ -7,44 +7,69 @@
  *
  * One chapter at a time, deliberately. A phone running six extension fetches at once is how a
  * queue becomes a memory spike, and a manga chapter is 20–60 images.
+ *
+ * The decisions — what is complete, what runs next, what a reload resumes — are in
+ * `lib/downloads/state.ts`, and the work is in `lib/downloads/engine.ts`. This file is the
+ * reactive shell: `$state` fields the views read, and the two dependencies the engine cannot own
+ * (the open library, and `fetch` through `/api/img`).
  */
 import { library } from "./library.svelte";
-import type { Chapter } from "../api/source";
+import type { Chapter, Page } from "../api/source";
 import type { DownloadRow } from "../lib/db/store";
+import { DownloadEngine, type DownloadHost, type LocalChapter } from "../lib/downloads/engine";
+import { isComplete, type Progress, type QueueItem } from "../lib/downloads/state";
 import { imageSrc } from "../lib/pages";
-import { pace, workBudget } from "../lib/performance";
+import { workBudget } from "../lib/performance";
 import { settings } from "./settings.svelte";
 
-export type { DownloadRow };
+export type { DownloadRow, LocalChapter, Progress, QueueItem };
 
-export interface Progress {
-  chapterId: string;
-  done: number;
-  total: number;
-}
-
-class Downloads {
+class Downloads implements DownloadHost {
   rows = $state<DownloadRow[]>([]);
-  queue = $state<Array<{ chapterId: string; seriesId: string; chapterName: string }>>([]);
+  queue = $state<QueueItem[]>([]);
   active = $state<Progress | null>(null);
   error = $state<string | null>(null);
 
-  private running = false;
-  /** Object URLs handed to the reader, so they can be revoked when a chapter is deleted. */
-  private cache = new Map<string, string[]>();
+  private engine: DownloadEngine | null = null;
+  private engineStore: unknown = null;
 
-  async load(): Promise<void> {
+  /** The engine for the open library, built once per opened store. */
+  private worker(): DownloadEngine | null {
     const store = library.profile?.store;
-    if (store === undefined) return;
-    this.rows = await store.listDownloads();
+    if (store === undefined) return null;
+    if (this.engine === null || this.engineStore !== store) {
+      this.engine = new DownloadEngine(this, {
+        store,
+        // The page list is the one thing that has to come from the source; a host that is down
+        // throws here and the chapter is recorded as failed rather than as an empty chapter.
+        pages: (chapterId: string) => library.pages(chapterId),
+        fetchBlob: (page: Page) => fetchPage(page),
+        // The Performance setting decides how many pages are in flight and whether the queue paces
+        // itself; read lazily so a change applies to the next chapter, not the next reload.
+        budget: () => workBudget(settings.cpuLevel),
+      });
+      this.engineStore = store;
+    }
+    return this.engine;
+  }
+
+  /** Read the device, fix any row that lies, and bring the queue back after a reload. */
+  async load(): Promise<void> {
+    await this.worker()?.load();
   }
 
   get bytes(): number {
     return this.rows.reduce((sum, row) => sum + row.bytes, 0);
   }
 
+  /** A chapter whose pages are all here. A partial one is not "downloaded" — it is on its way. */
   isDownloaded(chapterId: string): boolean {
-    return this.rows.some((row) => row.chapterId === chapterId);
+    return this.rows.some((row) => row.chapterId === chapterId && isComplete(row));
+  }
+
+  /** Some pages of this chapter are on the device, complete or not. */
+  hasLocal(chapterId: string): boolean {
+    return this.rows.some((row) => row.chapterId === chapterId && row.pages > 0);
   }
 
   inQueue(chapterId: string): boolean {
@@ -53,117 +78,52 @@ class Downloads {
 
   /** Queue a chapter. A duplicate is ignored rather than downloaded twice. */
   enqueue(seriesId: string, chapter: Chapter): void {
-    if (this.isDownloaded(chapter.id) || this.inQueue(chapter.id)) return;
-    this.queue = [...this.queue, { chapterId: chapter.id, seriesId, chapterName: chapter.name }];
-    void this.run();
+    this.worker()?.enqueue(seriesId, chapter);
   }
 
   enqueueMany(seriesId: string, chapters: Chapter[]): void {
-    for (const chapter of chapters) {
-      if (this.isDownloaded(chapter.id) || this.inQueue(chapter.id)) continue;
-      this.queue = [...this.queue, { chapterId: chapter.id, seriesId, chapterName: chapter.name }];
-    }
-    void this.run();
+    this.worker()?.enqueueMany(seriesId, chapters);
   }
 
   cancel(chapterId: string): void {
-    this.queue = this.queue.filter((item) => item.chapterId !== chapterId);
+    this.worker()?.cancel(chapterId);
   }
 
-  private async run(): Promise<void> {
-    if (this.running) return;
-    const store = library.profile?.store;
-    if (store === undefined) return;
-    this.running = true;
-    try {
-      while (this.queue.length > 0) {
-        const next = this.queue[0];
-        this.queue = this.queue.slice(1);
-        this.active = { chapterId: next.chapterId, done: 0, total: 0 };
-        try {
-          const pages = await library.pages(next.chapterId);
-          this.active = { chapterId: next.chapterId, done: 0, total: pages.length };
-          let bytes = 0;
-          // The CPU level decides how many pages are in flight and how hard the queue pushes.
-          // Sequential was the old behaviour for one chapter; the level makes it a choice, and a
-          // single page at a time is still what "background" asks for.
-          const budget = workBudget(settings.cpuLevel);
-          let cursor = 0;
-          const fetchPage = async (page: (typeof pages)[number]): Promise<void> => {
-            const response = await fetch(imageSrc(page), { signal: AbortSignal.timeout(budget.pageTimeoutMs) });
-            if (!response.ok) throw new Error(`page ${page.index + 1}: HTTP ${response.status}`);
-            const blob = await response.blob();
-            bytes += blob.size;
-            await store.putDownloadPage({
-              id: `${next.chapterId}#${page.index}`,
-              chapterId: next.chapterId,
-              index: page.index,
-              blob,
-            });
-            this.active = { chapterId: next.chapterId, done: (this.active?.done ?? 0) + 1, total: pages.length };
-            await pace(settings.cpuLevel);
-          };
-          const worker = async (): Promise<void> => {
-            while (cursor < pages.length) {
-              const page = pages[cursor++];
-              await fetchPage(page);
-            }
-          };
-          await Promise.all(
-            Array.from({ length: Math.max(1, Math.min(budget.downloadConcurrency, pages.length)) }, () => worker()),
-          );
-          await store.putDownload({
-            chapterId: next.chapterId,
-            seriesId: next.seriesId,
-            chapterName: next.chapterName,
-            pages: pages.length,
-            bytes,
-            at: Date.now(),
-          });
-          await this.load();
-        } catch (error) {
-          // One failed chapter must not stop the queue; it is reported and skipped.
-          this.error = `${next.chapterName}: ${error instanceof Error ? error.message : String(error)}`;
-        } finally {
-          this.active = null;
-        }
-      }
-    } finally {
-      this.running = false;
-    }
+  retry(chapterId: string): void {
+    this.worker()?.retry(chapterId);
   }
 
   /**
    * The pages of a downloaded chapter, as object URLs the reader can put in an `<img>`.
    *
-   * Cached per chapter: rebuilding them on every page turn would leak a URL per render.
+   * `null` means this device has no download for the chapter, so the reader uses the network as
+   * it always did. Anything else is the device's copy — including a partial one, where `urls` has
+   * `null` for the pages that are missing.
    */
-  async urls(chapterId: string): Promise<string[] | null> {
-    const cached = this.cache.get(chapterId);
-    if (cached !== undefined) return cached;
-    const store = library.profile?.store;
-    if (store === undefined) return null;
-    const rows = await store.listDownloadPages(chapterId);
-    if (rows.length === 0) return null;
-    const urls = rows.sort((a, b) => a.index - b.index).map((row) => URL.createObjectURL(row.blob));
-    this.cache.set(chapterId, urls);
-    return urls;
+  async local(chapterId: string): Promise<LocalChapter | null> {
+    return (await this.worker()?.local(chapterId)) ?? null;
   }
 
   async remove(chapterId: string): Promise<void> {
-    const store = library.profile?.store;
-    if (store === undefined) return;
-    for (const url of this.cache.get(chapterId) ?? []) URL.revokeObjectURL(url);
-    this.cache.delete(chapterId);
-    await store.removeDownload(chapterId);
-    await this.load();
+    await this.worker()?.remove(chapterId);
   }
 
   async removeSeries(seriesId: string): Promise<void> {
-    for (const row of this.rows.filter((item) => item.seriesId === seriesId)) {
-      await this.remove(row.chapterId);
-    }
+    await this.worker()?.removeSeries(seriesId);
   }
+}
+
+/**
+ * One page's bytes.
+ *
+ * A page that needs headers goes through our own `/api/img` (a browser will not let an `<img>` or
+ * a bare `fetch` set `Referer`), which is the same rule the reader uses — `imageSrc` is the single
+ * place that decides.
+ */
+async function fetchPage(page: Page): Promise<Blob> {
+  const response = await fetch(imageSrc(page));
+  if (!response.ok) throw new Error(`page ${page.index + 1}: HTTP ${response.status}`);
+  return response.blob();
 }
 
 export const downloads = new Downloads();
