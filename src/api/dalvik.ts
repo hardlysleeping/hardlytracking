@@ -24,6 +24,7 @@
  *   Keeping -1 as a number would sort specials to the top, so it becomes 0 and the name
  *   carries the truth.
  */
+import { apiHeaders } from "../lib/host";
 import { joinId, nativeId, paged, type Chapter, type Page, type Paged, type ProviderKind, type Series, type Source, type SourceProvider } from "./source";
 
 export type DalvikMethod =
@@ -155,7 +156,7 @@ export class DalvikClient {
     const timer = setTimeout(() => controller.abort(), 4000);
     let response: Response;
     try {
-      response = await this.fetchImpl(`${this.baseUrl}/capabilities`, { signal: controller.signal });
+      response = await this.fetchImpl(`${this.baseUrl}/capabilities`, { signal: controller.signal, headers: apiHeaders() });
     } catch (error) {
       throw new DalvikError(`no extension host at ${this.baseUrl}: ${(error as Error).message}`, 0);
     } finally {
@@ -183,7 +184,7 @@ export class DalvikClient {
     try {
       response = await this.fetchImpl(`${this.baseUrl}/dalvik`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: apiHeaders({ "content-type": "application/json" }),
         body: JSON.stringify(call),
         signal: controller.signal,
       });

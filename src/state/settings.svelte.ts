@@ -36,6 +36,10 @@ export interface Prefs {
   historyPaused: boolean;
   /** Days a session is kept; 0 is forever. Applies to sessions only, never to progress. */
   historyRetentionDays: number;
+  /** Source ids the user pinned, for "search pinned sources only" (Komikku's behaviour). */
+  pinnedSources: string[];
+  /** Global search defaults to the pinned sources when there are any. */
+  searchPinnedOnly: boolean;
 }
 
 class Settings {
@@ -58,6 +62,8 @@ class Settings {
   tapZones = $state(true);
   historyPaused = $state(false);
   historyRetentionDays = $state(0);
+  pinnedSources = $state<string[]>([]);
+  searchPinnedOnly = $state(true);
 
   private store: LibraryStore | null = null;
 
@@ -81,6 +87,8 @@ class Settings {
     this.tapZones = await read("tapZones", this.tapZones);
     this.historyPaused = await read("historyPaused", this.historyPaused);
     this.historyRetentionDays = await read("historyRetentionDays", this.historyRetentionDays);
+    this.pinnedSources = await read("pinnedSources", this.pinnedSources);
+    this.searchPinnedOnly = await read("searchPinnedOnly", this.searchPinnedOnly);
     this.ready = true;
   }
 

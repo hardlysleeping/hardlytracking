@@ -1,3 +1,5 @@
+import { apiUrl, withToken } from "./host";
+
 /**
  * Turning a page into something an `<img>` can load.
  *
@@ -11,7 +13,7 @@ import type { Page } from "../api/source";
 export function imageSrc(page: Page): string {
   if (page.headers === undefined || Object.keys(page.headers).length === 0) return page.url;
   const encoded = base64url(JSON.stringify(page.headers));
-  return `/api/img?url=${encodeURIComponent(page.url)}&h=${encoded}`;
+  return withToken(apiUrl(`/api/img?url=${encodeURIComponent(page.url)}&h=${encoded}`));
 }
 
 function base64url(text: string): string {

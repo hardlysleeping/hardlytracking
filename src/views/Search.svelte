@@ -10,7 +10,8 @@
   import { providerFor } from "../api/registry";
   import type { Series, Source } from "../api/source";
   import SeriesGrid from "../components/SeriesGrid.svelte";
-  import { go } from "../lib/nav";
+  import { settings } from "../state/settings.svelte";
+  import { pinnedSources, togglePin } from "../lib/pinned";
 
   interface Props {
     initial?: string | null;
@@ -36,12 +37,22 @@
 
   const sources = $derived(library.sources);
 
+  /** Pinned sources, in the order the user pinned them, limited to what is actually installed. */
+  const pinned = $derived(pinnedSources(sources, settings.pinnedSources));
+
   $effect(() => {
-    // First visit: search everything, up to a sane number. Sixty sources at once is a hammer.
+    // First visit: pinned sources when the user has any (Komikku's rule), otherwise the first dozen —
+    // sixty sources at once is a hammer, not a search.
     if (picked || sources.length === 0) return;
     picked = true;
-    chosen = new Set(sources.slice(0, 12).map((source) => source.id));
+    chosen = new Set(
+      settings.searchPinnedOnly && pinned.length > 0 ? pinned.map((source) => source.id) : sources.slice(0, 12).map((source) => source.id),
+    );
   });
+
+  function pin(id: string): void {
+    settings.set("pinnedSources", togglePin(settings.pinnedSources, id));
+  }
 
   $effect(() => {
     if (initial !== null && initial !== "" && blocks.length === 0 && !running) void run();
@@ -106,10 +117,20 @@
 
 <section class="view">
   <header class="bar">
-    <button class="btn ghost icon" aria-label="Back to browse" onclick={() => go("/browse")}>
-      <svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7" /></svg>
+    <h1>Search</h1>
+    <button
+      class="chip pinnedonly"
+      class:on={settings.searchPinnedOnly}
+      aria-pressed={settings.searchPinnedOnly}
+      title="New searches start with your pinned sources"
+      onclick={() => {
+        const next = !settings.searchPinnedOnly;
+        settings.set("searchPinnedOnly", next);
+        if (next && pinned.length > 0) chosen = new Set(pinned.map((source) => source.id));
+      }}
+    >
+      Pinned only
     </button>
-    <h1>Search all sources</h1>
   </header>
 
   <form
@@ -127,17 +148,40 @@
     <span class="label">Sources ({chosen.size})</span>
     <button class="chip" onclick={() => (chosen = new Set(sources.map((source) => source.id)))}>All</button>
     <button class="chip" onclick={() => (chosen = new Set())}>None</button>
+    {#if pinned.length > 0}
+      <button class="chip" class:on={chosen.size === pinned.length && pinned.every((s) => chosen.has(s.id))} onclick={() => (chosen = new Set(pinned.map((s) => s.id)))}>
+        Pinned ({pinned.length})
+      </button>
+    {/if}
     <div class="chips">
       {#each sources as source (source.id)}
-        <button class="chip" class:on={chosen.has(source.id)} aria-pressed={chosen.has(source.id)} onclick={() => toggle(source.id)}>
-          {source.name}{#if source.lang}<span class="lang">{source.lang}</span>{/if}
-        </button>
+        <span class="pick" class:on={chosen.has(source.id)}>
+          <button class="chip" class:on={chosen.has(source.id)} aria-pressed={chosen.has(source.id)} onclick={() => toggle(source.id)}>
+            {source.name}{#if source.lang}<span class="lang">{source.lang}</span>{/if}
+          </button>
+          <button
+            class="pinbtn"
+            class:pinned={settings.pinnedSources.includes(source.id)}
+            aria-label={settings.pinnedSources.includes(source.id) ? `Unpin ${source.name}` : `Pin ${source.name}`}
+            aria-pressed={settings.pinnedSources.includes(source.id)}
+            title={settings.pinnedSources.includes(source.id) ? "Unpin" : "Pin"}
+            onclick={() => pin(source.id)}
+          >
+            <svg viewBox="0 0 24 24"><path d="M9 4h6l-1 5 3 3H7l3-3zM12 12v8" /></svg>
+          </button>
+        </span>
       {/each}
     </div>
   </div>
 
   {#if blocks.length === 0}
-    <p class="empty">Pick sources and search. Each one answers on its own.</p>
+    <p class="empty">
+      {#if settings.searchPinnedOnly && pinned.length > 0}
+        Searching your {pinned.length} pinned source{pinned.length === 1 ? "" : "s"}. Pin more, or tap All to widen it.
+      {:else}
+        Pick sources and search. Each one answers on its own.
+      {/if}
+    </p>
   {:else if !running}
     <p class="summary">{found} result{found === 1 ? "" : "s"} across {blocks.length} source{blocks.length === 1 ? "" : "s"}</p>
   {/if}

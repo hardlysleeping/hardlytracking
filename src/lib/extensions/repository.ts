@@ -17,6 +17,7 @@
  * origin: repository indexes live on one host and APKs redirect to another.
  */
 import { parseIndex, type ExtensionEntry, type ExtensionIndex } from "./index";
+import { apiUrl, withToken } from "../host";
 
 export interface Repository {
   /** What the user pasted, normalised; this is the key a repository is remembered by. */
@@ -39,11 +40,51 @@ export class RepositoryError extends Error {
 
 /** `/api/repo?url=…` — same origin, so no CORS and no mixed content. */
 export function repoProxyUrl(target: string): string {
-  return `/api/repo?url=${encodeURIComponent(target)}`;
+  return withToken(apiUrl(`/api/repo?url=${encodeURIComponent(target)}`));
 }
 
 function trimSlash(url: string): string {
   return url.replace(/\/+$/, "");
+}
+
+/** The schemes an install link can use. Mihon's own is `mihon://`; forks kept their old names. */
+const INSTALL_SCHEMES = ["mihon:", "tachiyomi:", "komikku:", "yokai:"];
+
+/**
+ * Turn what the user actually has into a repository URL.
+ *
+ * The ecosystem publishes *install links*, not repository roots:
+ *
+ *   mihon://extension-store?url=https://raw.githubusercontent.com/…/repo/index.pb
+ *
+ * That is what the wiki's Install button carries and what people paste, so it is what the field
+ * accepts. A GitHub blob URL is rewritten to its raw form for the same reason — it is a link people
+ * copy out of a browser, not a URL an HTTP client can read.
+ */
+export function parseInstallLink(input: string): string {
+  const text = input.trim();
+  if (text === "") return "";
+  const scheme = INSTALL_SCHEMES.find((candidate) => text.toLowerCase().startsWith(candidate));
+  if (scheme !== undefined) {
+    // `mihon://extension-store?url=…` — the host is the action, the query carries the payload.
+    const query = text.slice(text.indexOf("?") + 1);
+    if (text.includes("?")) {
+      for (const pair of query.split("&")) {
+        const [key, value = ""] = pair.split("=");
+        if (key === "url" || key === "repo") {
+          try {
+            return trimSlash(decodeURIComponent(value));
+          } catch {
+            return trimSlash(value);
+          }
+        }
+      }
+    }
+    return "";
+  }
+  const blob = /^https?:\/\/github\.com\/([^/]+)\/([^/]+)\/blob\/(.+)$/i.exec(text);
+  if (blob !== null) return trimSlash(`https://raw.githubusercontent.com/${blob[1]}/${blob[2]}/${blob[3]}`);
+  return trimSlash(text);
 }
 
 /**
@@ -54,9 +95,19 @@ function trimSlash(url: string): string {
  * indexes are today, with the legacy name as the fallback.
  */
 export function candidateIndexUrls(input: string): string[] {
-  const url = trimSlash(input.trim());
+  const url = parseInstallLink(input);
   if (url === "") return [];
+  // An index file named outright: `.json` is read as-is, `.pb` is a protobuf index we do not parse,
+  // so its JSON siblings in the same directory are tried first and the `.pb` itself is last (it
+  // fails with a message that says so, rather than pretending the repository is empty).
   if (/\.json$/i.test(url)) return [url];
+  if (/\.pb$/i.test(url)) {
+    const base = url.replace(/\/[^/]*$/, "");
+    return [`${base}/index.json`, `${base}/index.min.json`, url];
+  }
+  // A repository root. `index.json` is the v2 name the live indexes use; the legacy name is the
+  // fallback. `index.pb` is deliberately not tried here: we cannot read it, so offering it would
+  // only turn a working repository into a parse error.
   return [`${url}/index.json`, `${url}/index.min.json`];
 }
 
@@ -68,7 +119,11 @@ export interface LoadOptions {
 export async function loadRepository(input: string, options: LoadOptions = {}): Promise<Repository> {
   const doFetch = options.fetchImpl ?? ((target: string) => fetch(repoProxyUrl(target)));
   const candidates = candidateIndexUrls(input);
-  if (candidates.length === 0) throw new RepositoryError("no repository URL given");
+  if (candidates.length === 0) {
+    throw new RepositoryError(
+      "that is not a repository link — paste the repository URL, or the Install link from the extension list",
+    );
+  }
 
   const failures: string[] = [];
   for (const indexUrl of candidates) {
@@ -101,14 +156,21 @@ export async function loadRepository(input: string, options: LoadOptions = {}): 
       continue;
     }
     return {
-      url: trimSlash(input.trim()),
+      url: parseInstallLink(input),
       indexUrl,
       name: index.name === "" ? hostOf(indexUrl) : index.name,
       extensions: index.extensions,
     };
   }
 
-  throw new RepositoryError(`could not read a repository index from ${input.trim()}`, failures);
+  const normalized = parseInstallLink(input);
+  const triedPb = candidates.length > 0 && candidates[candidates.length - 1].endsWith(".pb");
+  throw new RepositoryError(
+    triedPb
+      ? `could not read a repository index from ${normalized} — that link points at a protobuf index (index.pb), which this build cannot read, and no JSON index was found beside it`
+      : `could not read a repository index from ${normalized}`,
+    failures,
+  );
 }
 
 function hostOf(url: string): string {

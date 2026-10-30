@@ -11,6 +11,12 @@
   import { updateState, type ExtensionEntry } from "../lib/extensions/index";
   import { RepositoryError, type Repository } from "../lib/extensions/repository";
 
+  interface Props {
+    /** A repository from an install link (`mihon://…`, `?repo=…`), added on arrival. */
+    repo?: string | null;
+  }
+  let { repo = null }: Props = $props();
+
   let section = $state<"installed" | "available" | "repositories">("installed");
 
   let repoUrl = $state("");
@@ -39,6 +45,19 @@
 
   /** A live repository publishes over a thousand entries; drawing them all is a stall. */
   const shown = $derived(matched.slice(0, 120));
+
+  /**
+   * An install link opened this screen: put it in the field, then add it, so the user sees what was
+   * added and can correct it if the link was wrong.
+   */
+  let consumedRepo: string | null = null;
+  $effect(() => {
+    if (repo === null || repo === consumedRepo) return;
+    consumedRepo = repo;
+    repoUrl = repo;
+    section = "repositories";
+    void addRepository();
+  });
 
   async function addRepository(): Promise<void> {
     const url = repoUrl.trim();
@@ -207,7 +226,15 @@
         void addRepository();
       }}
     >
-      <input class="field" type="url" placeholder="https://raw.githubusercontent.com/keiyoushi/extensions/repo" bind:value={repoUrl} aria-label="Repository URL" spellcheck="false" />
+      <input
+        class="field"
+        type="text"
+        inputmode="url"
+        placeholder="Repository URL, or an Install link (mihon://extension-store?url=…)"
+        bind:value={repoUrl}
+        aria-label="Repository URL or install link"
+        spellcheck="false"
+      />
       <button class="btn primary" type="submit" disabled={adding}>{adding ? "Reading…" : "Add repository"}</button>
     </form>
 

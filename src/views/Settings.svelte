@@ -13,6 +13,8 @@
   import { DENSITY_OPTIONS, coverWidth, deviceClass } from "../lib/layout-modes";
   import { viewport } from "../lib/layout.svelte";
   import { go } from "../lib/nav";
+  import { onMount } from "svelte";
+  import { hostInfo, hostToken, pairingLink, remoteHost, setHostToken, setRemoteHost, type HostInfo } from "../lib/host";
 
   /** The slider shows the cover the library actually draws, not a value a preset overrides. */
   const cover = $derived(coverWidth(settings.libraryDensity, deviceClass(viewport.width), settings.coverSize));
@@ -30,6 +32,41 @@
    * exactly what survives — progress, read marks, library and downloads.
    */
   let clearing = $state<"all" | "range" | null>(null);
+
+  /** Phone access: what this server says about itself, and the pairing state of this device. */
+  let info = $state<HostInfo | null>(null);
+  let token = $state(hostToken());
+  let hostValue = $state(remoteHost());
+  let copied = $state(false);
+
+  onMount(() => {
+    void hostInfo().then((value) => (info = value));
+  });
+
+  const link = $derived(info === null ? null : pairingLink(info, token));
+
+  function saveToken(value: string): void {
+    setHostToken(value);
+    token = hostToken();
+    void hostInfo().then((next) => (info = next));
+  }
+
+  function saveHost(value: string): void {
+    setRemoteHost(value);
+    hostValue = remoteHost();
+    void hostInfo().then((next) => (info = next));
+  }
+
+  async function copyLink(): Promise<void> {
+    if (link === null) return;
+    try {
+      await navigator.clipboard.writeText(link);
+      copied = true;
+      setTimeout(() => (copied = false), 1500);
+    } catch {
+      copied = false;
+    }
+  }
   let cleared = $state<string | null>(null);
 
   const RETENTION_PRESETS = [0, 30, 90, 180, 365];
@@ -247,6 +284,37 @@
     {#if cleared !== null}
       <p class="hint">{cleared}</p>
     {/if}
+  </section>
+
+  <section class="group">
+    <h2>Phone access</h2>
+    <p class="hint">
+      This machine can be the runtime for your phone: it serves the app and its extensions over the network,
+      so the phone needs nothing installed on it.
+    </p>
+    {#if info === null}
+      <p class="hint">Not serving on the network. Start the server with <code>HOST=0.0.0.0 HARDLYTRACKING_TOKEN=… npm run serve</code>.</p>
+    {:else if !info.serving}
+      <p class="hint">Serving on this machine only (127.0.0.1). Restart with <code>HOST=0.0.0.0</code> to let a phone in.</p>
+    {:else if link !== null}
+      <div class="row">
+        <span>Open on your phone<em class="sub">{link}</em></span>
+        <button class="chip" onclick={() => void copyLink()}>{copied ? "Copied" : "Copy"}</button>
+      </div>
+      {#if info.tokenRequired && token === ""}
+        <p class="hint">That link has no token yet — paste the server's <code>HARDLYTRACKING_TOKEN</code> below so the phone can call the runtime.</p>
+      {/if}
+    {:else}
+      <p class="hint">Serving on the network, but no network address was found.</p>
+    {/if}
+    <label class="row">
+      <span>Server token<em class="sub">Stored on this device only, and never in a backup.</em></span>
+      <input class="field" type="text" value={token} placeholder="optional" spellcheck="false" onchange={(event) => saveToken(event.currentTarget.value)} />
+    </label>
+    <label class="row">
+      <span>Use a remote runtime<em class="sub">Point this device at a desktop instead of itself, e.g. http://192.168.1.20:8460</em></span>
+      <input class="field" type="text" value={hostValue} placeholder="this device" spellcheck="false" onchange={(event) => saveHost(event.currentTarget.value)} />
+    </label>
   </section>
 
   <section class="group">

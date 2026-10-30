@@ -29,13 +29,35 @@
   import { appearance } from "./lib/theme.svelte";
   import { viewport } from "./lib/layout.svelte";
   import { destinationOf } from "./lib/destinations";
-  import { parseRoute } from "./lib/nav";
+  import { parseRoute, go } from "./lib/nav";
+  import { isFetchableRepo, registerProtocolHandler, repoFromLocation } from "./lib/deep-link";
+  import { pairFromLocation, setHostToken, setRemoteHost } from "./lib/host";
 
   let route = $state(parseRoute(location.hash));
 
   const active = $derived(destinationOf(route));
 
+  /**
+   * An install link opened this app: `?repo=…`, `#/extensions?repo=…`, or a packaged build handing us
+   * `mihon://extension-store?url=…`. The repository is remembered here and consumed by the Extensions
+   * screen, which is where adding one belongs.
+   */
+  let pendingRepo = $state<string | null>(null);
+
   onMount(() => {
+    // A pairing link points this device at a desktop that serves the runtime, and carries its token.
+    const pair = pairFromLocation(location.href);
+    if (pair.host !== null) setRemoteHost(pair.host);
+    if (pair.token !== null) setHostToken(pair.token);
+
+    const requested = repoFromLocation(location.href);
+    if (requested !== null && isFetchableRepo(requested)) {
+      pendingRepo = requested;
+      go("/extensions");
+    }
+    // Lets `web+mihon://…` links open this app in a tab; a bare `mihon://` is the packaged build's
+    // scheme, and pasting it into the field works here.
+    registerProtocolHandler();
     appearance.start();
     const stopViewport = viewport.start();
     const onHash = () => (route = parseRoute(location.hash));
@@ -75,7 +97,7 @@
     {:else if route.name === "more"}
       <More />
     {:else if route.name === "extensions"}
-      <Extensions />
+      <Extensions repo={pendingRepo} />
     {:else if route.name === "settings"}
       <Settings />
     {:else if route.name === "downloads"}

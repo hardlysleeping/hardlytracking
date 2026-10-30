@@ -6,6 +6,7 @@
  * device is not a session with a fake token, it is a profile whose database is
  * local and whose providers are whatever the build configured.
  */
+import { apiUrl } from "../lib/host";
 import { createProviders, type DalvikHost } from "./registry";
 import type { InstalledExtension } from "./dalvik";
 import type { SourceProvider } from "./source";
@@ -66,8 +67,8 @@ export async function openLibraryProfile(options: OpenProfileOptions = {}): Prom
   const registry = await createProviders({
     store,
     // `null` is the local-only build; only an absent option means "the default runtime".
-    mihonBase: options.mihonBase === undefined ? "/api/mihon" : options.mihonBase,
-    dalvikBase: options.dalvikBase === undefined ? "/api/dalvik" : options.dalvikBase,
+    mihonBase: options.mihonBase === undefined ? apiUrl("/api/mihon") : options.mihonBase,
+    dalvikBase: options.dalvikBase === undefined ? apiUrl("/api/dalvik") : options.dalvikBase,
     ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
   });
 

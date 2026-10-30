@@ -11,6 +11,7 @@
  * built from the APKs this device already installed; a host that does not answer is
  * a warning line, not a silent empty shelf.
  */
+import { apiUrl } from "../lib/host";
 import { browserMihonTransport, createMihonProvider } from "./mihon";
 import { createLocalProvider } from "./local";
 import { DalvikClient, createDalvikProvider, type DalvikCapabilities, type InstalledExtension } from "./dalvik";
@@ -51,13 +52,13 @@ export async function createProviders(config: RegistryConfig): Promise<ProviderS
   const providers: SourceProvider[] = [];
   const warnings: string[] = [];
 
-  const mihonBase = config.mihonBase === undefined ? "/api/mihon" : config.mihonBase;
+  const mihonBase = config.mihonBase === undefined ? apiUrl("/api/mihon") : config.mihonBase;
   if (mihonBase !== null) providers.push(createMihonProvider(browserMihonTransport(mihonBase)));
 
   providers.push(createLocalProvider(config.store));
 
   let dalvik: DalvikHost | null = null;
-  const dalvikBase = config.dalvikBase === undefined ? "/api/dalvik" : config.dalvikBase;
+  const dalvikBase = config.dalvikBase === undefined ? apiUrl("/api/dalvik") : config.dalvikBase;
   if (dalvikBase !== null) {
     const client = new DalvikClient({ baseUrl: dalvikBase, ...(config.fetchImpl === undefined ? {} : { fetchImpl: config.fetchImpl }) });
     try {

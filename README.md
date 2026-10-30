@@ -109,3 +109,35 @@ physical iPhone, and no Komga/Suwayomi/PWA work starts while a hard gate fails.
 Tauri desktop and packaged apps, the embedded runtime, the iOS embedded-JVM plugin, the
 Komga provider (needs credentials), Mihon/Komikku backup import, downloads and sync.
 See `BACKLOG.md` and `KANBAN.md`.
+
+## Install links and repositories
+
+The Add repository field accepts what the extension lists actually publish — a repository root, an
+index URL, or the **Install link** itself:
+
+```
+mihon://extension-store?url=https://raw.githubusercontent.com/keiyoushi/extensions/repo/index.pb
+```
+
+A `mihon://` / `tachiyomi://` / `komikku://` link is unwrapped to its `url=` payload, a GitHub blob
+URL is rewritten to raw, and an `index.pb` link falls back to the JSON index published beside it
+(Keiyoushi, Cursed Yūzōnō and FelipeGFA all ship `index.json` next to the protobuf). Every repository
+listed on [wotaku.wiki/ext/mihon](https://wotaku.wiki/ext/mihon) loads through this path.
+
+`?repo=…` on the app's own URL opens Extensions and adds that repository, which is what the
+`web+mihon` protocol handler points at. A bare `mihon://` link belongs to the packaged app (OS
+scheme registration); in a browser tab, paste the link into the field.
+
+## Serving the desktop to a phone
+
+The same server can be the runtime for a phone on the same network or tailnet:
+
+```
+HOST=0.0.0.0 HARDLYTRACKING_TOKEN=… npm run serve     # or: npm run serve:lan
+```
+
+It serves the app and proxies `/api/dalvik`, `/api/repo`, `/api/img` and `/api/mihon`, so the phone
+runs no extensions itself. Static files stay open (a browser navigation cannot send a header) and
+every `/api/*` call needs the token, as `x-hardlytracking-token` or `?token=`. Settings → Phone
+access shows the exact link to open on the phone, and a pairing link (`?host=…&token=…`) points a
+device at another desktop instead of itself.

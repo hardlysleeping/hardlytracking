@@ -20,11 +20,22 @@
  * `http://127.0.0.1:<port>/image/…` addresses it mints.
  */
 import { createServer } from "node:http";
+import { networkInterfaces } from "node:os";
 import { readFile } from "node:fs/promises";
 import { extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const PORT = Number(process.env.PORT ?? 8460);
+/**
+ * Where to listen. Loopback by default; `HOST=0.0.0.0` makes this machine the runtime for a phone
+ * on the same network (or tailnet) — the desktop app serving the mobile one.
+ */
+const HOST = process.env.HOST ?? "127.0.0.1";
+/**
+ * A shared secret for that mode. Static files stay open (a browser navigation cannot send a
+ * header), every `/api/*` call needs it, as `x-hardlytracking-token` or `?token=`.
+ */
+const TOKEN = (process.env.HARDLYTRACKING_TOKEN ?? "").trim();
 const RUNTIME = (process.env.RUNTIME_URL ?? "http://127.0.0.1:4567").replace(/\/+$/, "");
 const DALVIK = (process.env.DALVIK_URL ?? "http://127.0.0.1:8792").replace(/\/+$/, "");
 const DIST = process.env.DIST ?? fileURLToPath(new URL("../dist/", import.meta.url));
@@ -262,8 +273,61 @@ async function serveStatic(request, response) {
   }
 }
 
+/** The addresses a phone could use to reach this server, when it is listening on the network. */
+function networkAddresses() {
+  const out = [];
+  for (const [name, list] of Object.entries(networkInterfaces())) {
+    for (const entry of list ?? []) {
+      if (entry.family !== "IPv4" || entry.internal) continue;
+      // Docker bridges and veth pairs are not addresses a phone can use; listing seven of them
+      // buries the one that works.
+      if (/^(br-|docker|veth|virbr)/.test(name)) continue;
+      out.push({ name, address: entry.address });
+    }
+  }
+  return out;
+}
+
+function authorised(request, url) {
+  if (TOKEN === "") return true;
+  const header = request.headers["x-hardlytracking-token"];
+  if (typeof header === "string" && header === TOKEN) return true;
+  return url.searchParams.get("token") === TOKEN;
+}
+
 const server = createServer((request, response) => {
-  const path = new URL(request.url ?? "/", "http://localhost").pathname;
+  const url = new URL(request.url ?? "/", "http://localhost");
+  const path = url.pathname;
+
+  // Pairing info and the API are the only guarded things: the app itself has to load before it can
+  // send a header, so static files stay open and the token is what protects the library.
+  if (path === "/api/host-info") {
+    if (!authorised(request, url)) {
+      response.writeHead(401, { "Content-Type": "application/json; charset=utf-8" });
+      response.end(JSON.stringify({ error: "token required" }));
+      return;
+    }
+    response.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
+    response.end(
+      JSON.stringify({
+        host: HOST,
+        port: PORT,
+        serving: HOST !== "127.0.0.1" && HOST !== "localhost",
+        tokenRequired: TOKEN !== "",
+        addresses: networkAddresses(),
+        runtime: RUNTIME,
+        dalvik: DALVIK,
+      }),
+    );
+    return;
+  }
+
+  if (path.startsWith("/api/") && !authorised(request, url)) {
+    response.writeHead(401, { "Content-Type": "application/json; charset=utf-8" });
+    response.end(JSON.stringify({ error: "token required — open the link the desktop app shows you" }));
+    return;
+  }
+
   const handler = path === "/api/repo"
     ? serveRepo
     : path === "/api/img"
@@ -279,6 +343,11 @@ const server = createServer((request, response) => {
   });
 });
 
-server.listen(PORT, () => {
-  console.log(`HardlyTracking on http://127.0.0.1:${PORT} (runtime ${RUNTIME}, dalvik ${DALVIK}, dist ${DIST})`);
+server.listen(PORT, HOST, () => {
+  const where = HOST === "127.0.0.1" ? "this machine only" : HOST;
+  console.log(`HardlyTracking on http://${HOST}:${PORT} (${where}; runtime ${RUNTIME}, dalvik ${DALVIK}, dist ${DIST})`);
+  if (HOST !== "127.0.0.1" && HOST !== "localhost") {
+    for (const entry of networkAddresses()) console.log(`  phone: http://${entry.address}:${PORT}/`);
+    if (TOKEN === "") console.log("  no HARDLYTRACKING_TOKEN set: anyone who can reach this port can read the library");
+  }
 });

@@ -1,5 +1,5 @@
 /**
- * The five destinations, and which one a route belongs to.
+ * The destinations, and which one a route belongs to.
  *
  * A series page or a reader is not a destination: it is pushed on top of one, so the bar keeps
  * saying where you are. That is why the shell asks `destinationOf(route)` rather than matching
@@ -35,6 +35,12 @@ export const DESTINATIONS: Destination[] = [
     icon: "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM15.5 8.5l-2 5-5 2 2-5z",
   },
   {
+    id: "search",
+    label: "Search",
+    href: "/search",
+    icon: "M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14zM16.2 16.2 21 21",
+  },
+  {
     id: "history",
     label: "History",
     href: "/history",
@@ -53,7 +59,6 @@ const UNDER: Record<string, string> = {
   series: "library",
   read: "library",
   source: "browse",
-  search: "browse",
   extensions: "browse",
   settings: "more",
   downloads: "more",
@@ -70,6 +75,6 @@ export function destinationOf(route: Route): string {
 export function backHref(route: Route): string | null {
   if (DESTINATIONS.some((d) => d.id === route.name)) return null;
   if (route.name === "series" || route.name === "read") return "/library";
-  if (route.name === "source" || route.name === "extensions" || route.name === "search") return "/browse";
+  if (route.name === "source" || route.name === "extensions") return "/browse";
   return "/more";
 }
