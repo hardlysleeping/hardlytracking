@@ -15,8 +15,12 @@ function store() {
   return new LibraryStore(memoryDatabase());
 }
 
-test("the built-in list has one entry, and it is archive.org", () => {
-  assert.equal(BUILTIN_EXTENSIONS.length, 1);
+test("the built-in list is archive.org and the Mihon runtime", () => {
+  assert.equal(BUILTIN_EXTENSIONS.length, 2);
+  assert.deepEqual(
+    BUILTIN_EXTENSIONS.map((entry) => entry.extensionId),
+    ["builtin:internet-archive", "builtin:mihon-runtime"],
+  );
   const row = BUILTIN_EXTENSIONS[0];
   assert.equal(row.extensionId, BUILTIN_ARCHIVE_ID);
   assert.equal(row.builtin, true);
@@ -30,11 +34,11 @@ test("the built-in list has one entry, and it is archive.org", () => {
 test("a fresh install gets the row, and seeding twice does not duplicate it", async () => {
   const library = store();
   const first = await ensureBuiltinExtensions(library);
-  assert.equal(first.length, 1);
+  assert.equal(first.length, 2, "archive.org and the runtime");
   assert.equal(first[0].extensionId, BUILTIN_ARCHIVE_ID);
 
   const second = await ensureBuiltinExtensions(library);
-  assert.equal(second.length, 1, "one row, not two");
+  assert.equal(second.length, 2, "one row each, not four");
   assert.equal(second[0].enabled, true);
 });
 

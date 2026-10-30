@@ -17,6 +17,9 @@ import type { LibraryStore } from "../lib/db/store";
 /** Stable id: not a hash of anything, because there are no bytes to hash. */
 export const BUILTIN_ARCHIVE_ID = "builtin:internet-archive";
 
+/** The Mihon extension host, as a built-in rather than something the user has to find. */
+export const BUILTIN_RUNTIME_ID = "builtin:mihon-runtime";
+
 /**
  * Internet Archive, preinstalled and on by default.
  *
@@ -31,6 +34,16 @@ export const BUILTIN_EXTENSIONS: InstalledExtension[] = [
     name: "Internet Archive",
     iconUrl: "https://archive.org/apple-touch-icon.png",
     sources: [{ id: ARCHIVE_SOURCE.id, name: ARCHIVE_SOURCE.name, lang: ARCHIVE_SOURCE.lang ?? "en" }],
+    versionName: "1.0.0",
+    enabled: true,
+    builtin: true,
+  },
+  {
+    extensionId: BUILTIN_RUNTIME_ID,
+    packageId: "ing.hardlysleep.hardlytracking.builtin.runtime",
+    name: "Mihon extensions",
+    // No icon: this one is a host, not a store. The card falls back to its initial.
+    sources: [],
     versionName: "1.0.0",
     enabled: true,
     builtin: true,

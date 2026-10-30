@@ -8,7 +8,7 @@
  */
 import { apiUrl } from "../lib/host";
 import { createProviders, type DalvikHost } from "./registry";
-import { BUILTIN_ARCHIVE_ID, ensureBuiltinExtensions, isBuiltin } from "./builtin";
+import { BUILTIN_ARCHIVE_ID, BUILTIN_RUNTIME_ID, ensureBuiltinExtensions, isBuiltin } from "./builtin";
 import type { InstalledExtension } from "./dalvik";
 import type { SourceProvider } from "./source";
 import { openDatabase, type Database } from "../lib/db/open";
@@ -75,7 +75,10 @@ export async function openLibraryProfile(options: OpenProfileOptions = {}): Prom
   // Built-ins are installed before the providers are built, because a provider's switch is its row:
   // the first launch of a fresh install must already know that archive.org is on.
   const builtins = await ensureBuiltinExtensions(store);
-  const switches = { archive: builtins.find((row) => row.extensionId === BUILTIN_ARCHIVE_ID)?.enabled !== false };
+  const switches = {
+    archive: builtins.find((row) => row.extensionId === BUILTIN_ARCHIVE_ID)?.enabled !== false,
+    runtime: builtins.find((row) => row.extensionId === BUILTIN_RUNTIME_ID)?.enabled !== false,
+  };
   const registry = await createProviders({
     store,
     // `null` is the local-only build; only an absent option means "the default runtime".
@@ -83,9 +86,23 @@ export async function openLibraryProfile(options: OpenProfileOptions = {}): Prom
     dalvikBase: options.dalvikBase === undefined ? apiUrl("/api/dalvik") : options.dalvikBase,
     ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
     archiveEnabled: () => switches.archive,
+    runtimeEnabled: () => switches.runtime,
   });
 
   const dalvik = registry.dalvik;
+
+  // The runtime's card says what the host actually has: its sources are the ones installed in it, so
+  // the row is written after the probe rather than shipping an empty list that looks broken.
+  if (dalvik !== null && switches.runtime) {
+    const row = await store.getExtension(BUILTIN_RUNTIME_ID);
+    if (row !== undefined) {
+      const live = dalvik.extensions.flatMap((extension) => extension.sources);
+      if (live.length !== row.sources.length) {
+        await store.putExtension({ ...row, sources: live });
+      }
+    }
+  }
+
   return {
     kind: "device",
     slug: LOCAL_PROFILE_SLUG,
@@ -126,6 +143,7 @@ export async function openLibraryProfile(options: OpenProfileOptions = {}): Prom
       // A built-in has no host to tell: its provider reads this flag on the next call.
       if (isBuiltin(extensionId)) {
         if (extensionId === BUILTIN_ARCHIVE_ID) switches.archive = enabled;
+        if (extensionId === BUILTIN_RUNTIME_ID) switches.runtime = enabled;
         return;
       }
       if (dalvik === null) return;

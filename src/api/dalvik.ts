@@ -343,6 +343,13 @@ export interface DalvikProviderOptions {
   /** Titles seen this session, so a chapter call can name the manga it is about. */
   titles?: Map<string, string>;
   /**
+   * Whether the runtime itself is enabled.
+   *
+   * The host is a built-in extension in the app's own list, so it has a switch like any other. When
+   * it is off, no source is offered — installed APKs keep their rows, and nothing is probed.
+   */
+  enabled?: () => boolean;
+  /**
    * Where a read mark lives for this host.
    *
    * The runtime has no read-state API at all, so `ownsProgress` is true and the mark is ours:
@@ -462,6 +469,9 @@ export function createDalvikProvider(options: DalvikProviderOptions): SourceProv
     ownsProgress: true,
 
     async sources(): Promise<Source[]> {
+      // The runtime itself can be off — it is a built-in extension like archive.org — and then it
+      // offers nothing, whatever APKs happen to be installed in it.
+      if (options.enabled !== undefined && !options.enabled()) return [];
       // A disabled extension keeps its APK and its row, but offers no sources: that is what
       // disabling means, and it has to happen here or the chips never disappear.
       return options.extensions.filter((extension) => extension.enabled !== false).flatMap((extension) =>

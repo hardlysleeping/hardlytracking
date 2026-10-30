@@ -1,11 +1,12 @@
-# HardlyTracking — one origin for the app and the Mihon runtime.
+# HardlyTracking — one origin for the app and both extension hosts.
 #
 #   docker compose up -d
 #   open http://<host>:8460
 #
-# `web` serves the built Svelte app and proxies /api/mihon/* to `runtime`.
-# `runtime` is a Mihon extension host (Suwayomi today). Its library and read state
-# are its own volume; the app keeps its library in the browser/packaged database.
+# `web` serves the built Svelte app and proxies /api/mihon/* to `runtime` and /api/dalvik to
+# `dalvik`. `runtime` is Suwayomi (a library server); `dalvik` is M-Extension-Server, which runs
+# Mihon/Komikku APKs themselves. The app's library and read state are its own — these hosts are
+# execution engines, never the source of truth.
 services:
   web:
     image: node:22-alpine
@@ -14,6 +15,7 @@ services:
     environment:
       PORT: "8460"
       RUNTIME_URL: "http://runtime:4567"
+      DALVIK_URL: "http://dalvik:8080"
     volumes:
       - ./dist:/app/dist:ro
       - ./server:/app/server:ro
@@ -21,6 +23,7 @@ services:
       - "8460:8460"
     depends_on:
       - runtime
+      - dalvik
     restart: unless-stopped
 
   runtime:
@@ -33,6 +36,22 @@ services:
     volumes:
       - suwayomi-data:/home/suwayomi/.local/share/Tachidesk
     cpus: 2
+    restart: unless-stopped
+
+  # M-Extension-Server: the real Mihon extension host. Build it once from its source —
+  #   git clone https://github.com/kodjodevf/M-Extension-Server ../M-Extension-Server
+  #   docker build -t mextension-server:local ../M-Extension-Server
+  # The image carries a JRE and the Android SDK stubs the APKs link against, so it is the only
+  # piece of this stack that can execute a Mihon extension at all.
+  dalvik:
+    image: mextension-server:local
+    environment:
+      - TZ=America/Los_Angeles
+    # One core: an extension host is a burst of work per page request, and an unbounded JVM here
+    # competes with the reader on the same machine.
+    cpus: 1.0
+    ports:
+      - "8792:8080"
     restart: unless-stopped
 
 volumes:

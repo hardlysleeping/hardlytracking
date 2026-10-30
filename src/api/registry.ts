@@ -35,6 +35,8 @@ export interface RegistryConfig {
    * care about the switch still gets the provider.
    */
   archiveEnabled?: () => boolean;
+  /** Whether the built-in Mihon runtime is on. `undefined` means yes. */
+  runtimeEnabled?: () => boolean;
 }
 
 /** The live dalvik host: the client to install through, and the list it reads. */
@@ -87,6 +89,7 @@ export async function createProviders(config: RegistryConfig): Promise<ProviderS
         createDalvikProvider({
           client,
           extensions,
+          ...(config.runtimeEnabled === undefined ? {} : { enabled: config.runtimeEnabled }),
           // The host keeps no read state, so the marks are ours: the same store the local
           // provider writes to, which is what `ownsProgress: true` promises.
           readState: {
