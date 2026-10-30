@@ -47,7 +47,7 @@ export interface DownloadDeps {
    */
   pages: (chapterId: string) => Promise<Page[]>;
   /** The bytes of one page. The caller owns headers, tokens and `/api/img`. */
-  fetchBlob: (page: Page) => Promise<Blob>;
+  fetchBlob: (page: Page, timeoutMs?: number) => Promise<Blob>;
   /**
    * How much work the app may have in flight, from the Performance setting.
    *
@@ -271,7 +271,10 @@ export class DownloadEngine {
   async local(chapterId: string): Promise<LocalChapter | null> {
     const row = this.host.rows.find((entry) => entry.chapterId === chapterId);
     const pages = await this.deps.store.listDownloadPages(chapterId);
-    if (row === undefined && pages.length === 0) return null;
+    // A row whose pages are all gone (deleted under us, or a stale "done" that reconciled to
+    // partial) is not a local chapter: handing the reader twenty empty slots shows a blank chapter
+    // instead of falling back to the network.
+    if (pages.length === 0) return null;
 
     const cached = this.urls.get(chapterId);
     // The cache is a page-set, not a promise: a retry that added pages rebuilds it, and a chapter
@@ -402,7 +405,9 @@ export class DownloadEngine {
         while (cursor < pending.length) {
           const page = pending[cursor++];
           if (this.cancelled.has(item.chapterId)) throw new Cancelled();
-          const blob = await this.deps.fetchBlob(page);
+          // A page that never resolves would stall the queue forever — the one freeze-shaped hole
+          // left after the concurrency cap, so the level's timeout is enforced here.
+          const blob = await this.deps.fetchBlob(page, budget.pageTimeoutMs);
           bytes += blob.size;
           await store.putDownloadPage({
             id: `${item.chapterId}#${page.index}`,

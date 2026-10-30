@@ -18,6 +18,19 @@ import { emptyDocument } from "./document";
 
 const READ_PREFIX = "read:";
 
+/**
+ * Preference keys that describe one device and must never travel in a backup.
+ *
+ * `downloadQueue` is a to-do list of chapters to fetch onto THIS machine; `sync.device` is this
+ * device's identity in the merge. Importing either is not "bringing your settings over", it is
+ * starting work and stealing an identity.
+ */
+const LOCAL_ONLY_PREFIXES = ["downloadQueue", "sync.device", "cache."] as const;
+
+function isLocalOnlyKey(key: string): boolean {
+  return LOCAL_ONLY_PREFIXES.some((prefix) => key === prefix || key.startsWith(`${prefix}.`));
+}
+
 /** Preferences that are view state, not user state: they travel, but as their own rows. */
 const isReadKey = (key: string): boolean => key.startsWith(READ_PREFIX);
 
@@ -166,9 +179,12 @@ export async function documentFromStore(store: LibraryStore, options: BuildOptio
       ...stamp,
     }));
 
-  // Everything else in prefs is user state (reader mode, theme, the two category views).
+  // Everything else in prefs is user state (reader mode, theme, the two category views) — except
+  // the keys that describe THIS device. A download queue restored onto another machine would start
+  // downloading chapters it never queued, and a copied `sync.device` would make two devices share
+  // one identity in the merge. Those stay home.
   doc.preferences = prefs
-    .filter((row) => !isReadKey(row.key))
+    .filter((row) => !isReadKey(row.key) && !isLocalOnlyKey(row.key))
     .map((row) => ({ key: row.key, value: row.value, ...stamp }));
 
   return doc;

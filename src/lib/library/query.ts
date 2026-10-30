@@ -65,15 +65,17 @@ export function runQuery(input: QueryInput, state: QueryState, facts: QueryFacts
     input.marks,
   );
 
-  // 2. the collection
-  const collection = state.collection;
+  const parsed = parseSearch(state.search.text);
+
+  // 2. the collection — unless the search box asked for `scope:all`, which is the whole point of
+  // typing the operator: one query across every collection, without changing the tab.
+  const collection = parsed.scope === "all" ? null : state.collection;
   const inCollection =
     collection === null
       ? visible
       : visible.filter((series) => (series.categoryIds ?? []).includes(collection));
 
   // 3. the filter (sheet + search operators, one model)
-  const parsed = parseSearch(state.search.text);
   const filter = mergeFilter(state.filter, parsed.filter);
   const filtered = inCollection.filter((series) => matchesFilter(filter, facts, series));
 

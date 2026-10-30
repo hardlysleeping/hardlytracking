@@ -177,12 +177,31 @@
    * case where the network is not available. A chapter that is only partly here says so.
    */
   async function openLocal(local: LocalChapter): Promise<void> {
-    pages = local.urls.map((url, index) => ({ index, url: url ?? "" } as Page));
-    urls = local.urls.map((url) => url ?? "");
+    // Pages that are here come from the device. Pages that are not are filled from the source when
+    // there is a connection — the alternative was `<img src="">`, which renders as a broken image
+    // and reads as a broken chapter.
+    const gaps = local.urls.some((url) => url === null);
+    let remote: Page[] = [];
+    if (gaps) {
+      try {
+        remote = await library.pages(local.chapterId);
+      } catch {
+        remote = [];
+      }
+    }
+    const filled = local.urls.map((url, index) => {
+      if (url !== null) return { index, url } as Page;
+      const fallback = remote[index];
+      if (fallback === undefined) return { index, url: "" } as Page;
+      return { index, url: imageSrc(fallback) } as Page;
+    });
+    pages = filled;
+    urls = filled.map((page) => page.url);
+    const stillMissing = filled.filter((page) => page.url === "").length;
     partialNotice =
-      local.complete
+      stillMissing === 0
         ? null
-        : `${local.stored} of ${local.total} pages are on this device — the rest need the network.`;
+        : `${stillMissing} of ${local.total} pages are not on this device and could not be fetched. Retry the download when you have a connection.`;
   }
 
   async function load(id: string): Promise<void> {
@@ -378,13 +397,17 @@
     >
       {#each pages as page (page.index)}
         <div class="page" data-page={page.index}>
-          <img
-            use:cacheImage={urls[page.index] ?? page.url}
-            src={urls[page.index] ?? page.url}
-            alt={`Page ${page.index + 1} of ${pages.length}`}
-            loading={page.index < 3 ? "eager" : "lazy"}
-            decoding="async"
-          />
+          {#if (urls[page.index] ?? page.url) === ""}
+            <div class="missing" role="note">Page {page.index + 1} is not on this device</div>
+          {:else}
+            <img
+              use:cacheImage={urls[page.index] ?? page.url}
+              src={urls[page.index] ?? page.url}
+              alt={`Page ${page.index + 1} of ${pages.length}`}
+              loading={page.index < 3 ? "eager" : "lazy"}
+              decoding="async"
+            />
+          {/if}
         </div>
       {/each}
     </div>
@@ -698,6 +721,17 @@
   .banner.note {
     color: var(--text-2);
     border-color: var(--line);
+  }
+
+  .missing {
+    display: grid;
+    place-items: center;
+    min-height: 40vh;
+    color: var(--text-3);
+    font-size: var(--t-sm);
+    border: 1px dashed var(--line);
+    border-radius: var(--r2);
+    margin: var(--s3);
   }
 
   .banner {

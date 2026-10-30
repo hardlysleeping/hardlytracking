@@ -225,3 +225,36 @@ test("looksLikeSyncDocument is a cheap check, not a validator that throws", () =
   assert.equal(looksLikeSyncDocument(serializeSync(emptyDocument("dev-a"))), true);
   assert.equal(looksLikeSyncDocument("nope"), false);
 });
+
+// A file written by the previous format must still be readable: the collections it never had
+// arrive empty, and a document that claims a collection it does not carry is still refused.
+test("a v2 document is read, and the collections it never had arrive empty", () => {
+  // Exactly what the previous format wrote: version 2 in meta, and none of the lists that arrived
+  // in v3. Built from a real document so the test cannot invent a collection name.
+  const full = emptyDocument("dev-old", 1);
+  const v2 = { ...full, meta: { ...full.meta, version: 2 } };
+  delete v2.chapters;
+  delete v2.positions;
+  delete v2.repos;
+
+  const doc = parseSync(JSON.stringify(v2));
+  // meta records what the FILE said; the point is that it parsed instead of being refused, and that
+  // the three lists v3 added are present and empty rather than missing.
+  assert.equal(doc.meta.version, 2, "the file's own version is kept, not rewritten");
+  assert.deepEqual(doc.chapters, [], "the list v2 never had arrives empty");
+  assert.deepEqual(doc.positions, []);
+  assert.deepEqual(doc.repos, []);
+  assert.deepEqual(doc.series, []);
+  assert.deepEqual(doc.preferences, []);
+});
+
+test("a document that claims a newer version than this app writes is refused, not guessed", () => {
+  assert.throws(() =>
+    parseSync(
+      JSON.stringify({
+        meta: { format: "hardlytracking.sync", version: 4, device: "x", updatedAt: new Date(1).toISOString(), revision: 1 },
+        series: [],
+      }),
+    ),
+  );
+});

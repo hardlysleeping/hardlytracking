@@ -43,7 +43,7 @@ class Downloads implements DownloadHost {
         // The page list is the one thing that has to come from the source; a host that is down
         // throws here and the chapter is recorded as failed rather than as an empty chapter.
         pages: (chapterId: string) => library.pages(chapterId),
-        fetchBlob: (page: Page) => fetchPage(page),
+        fetchBlob: (page: Page, timeoutMs?: number) => fetchPage(page, timeoutMs),
         // The Performance setting decides how many pages are in flight and whether the queue paces
         // itself; read lazily so a change applies to the next chapter, not the next reload.
         budget: () => workBudget(settings.cpuLevel),
@@ -120,8 +120,11 @@ class Downloads implements DownloadHost {
  * a bare `fetch` set `Referer`), which is the same rule the reader uses — `imageSrc` is the single
  * place that decides.
  */
-async function fetchPage(page: Page): Promise<Blob> {
-  const response = await fetch(imageSrc(page));
+async function fetchPage(page: Page, timeoutMs?: number): Promise<Blob> {
+  // The timeout comes from the work level: a request left hanging is work the machine keeps paying
+  // for, and a stalled page would hold the queue forever.
+  const signal = timeoutMs === undefined ? undefined : AbortSignal.timeout(timeoutMs);
+  const response = await fetch(imageSrc(page), signal === undefined ? {} : { signal });
   if (!response.ok) throw new Error(`page ${page.index + 1}: HTTP ${response.status}`);
   return response.blob();
 }
