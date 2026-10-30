@@ -14,6 +14,7 @@
   import Cover from "../components/Cover.svelte";
   import Sheet from "../components/Sheet.svelte";
   import { go, pathTo } from "../lib/nav";
+  import { flipOrder, orderChapters, orderLabel, type ChapterOrder } from "../lib/chapter-order";
 
   interface Props {
     seriesId: string;
@@ -32,7 +33,7 @@
   let query = $state("");
   let onlyUnread = $state(false);
   let onlyDownloaded = $state(false);
-  let ascending = $state(false);
+  let order = $state<ChapterOrder>("newest");
 
   let expanded = $state(false);
   let menuOpen = $state(false);
@@ -76,7 +77,8 @@
       if (needle !== "" && !chapter.name.toLowerCase().includes(needle)) return false;
       return true;
     });
-    return ascending ? [...list].sort((a, b) => a.number - b.number) : list;
+    // Always sorted, never "trust the host's order" — that is what made the toggle look dead.
+    return orderChapters(list, order);
   });
 
   const unread = $derived(chapters.filter((chapter) => !chapter.read).length);
@@ -211,7 +213,13 @@
       <header class="chead">
         <h2>Chapters</h2>
         <span class="count">{chapters.length}{unread > 0 ? ` · ${unread} unread` : ""}</span>
-        <button class="chip sortchip" onclick={() => (ascending = !ascending)}>{ascending ? "Oldest first" : "Newest first"}</button>
+        <button
+          class="chip sortchip"
+          aria-label={`Chapter order: ${orderLabel(order)}. Tap to switch.`}
+          onclick={() => (order = flipOrder(order))}
+        >
+          {orderLabel(order)}
+        </button>
         <div class="cacts">
           <input class="field" type="search" placeholder="Filter chapters" bind:value={query} aria-label="Filter chapters" />
           <button class="chip" class:on={onlyUnread} aria-pressed={onlyUnread} onclick={() => (onlyUnread = !onlyUnread)}>Unread</button>
