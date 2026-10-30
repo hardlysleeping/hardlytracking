@@ -239,9 +239,28 @@ export class LibraryStore {
     await this.db.put("progress", row as unknown as Record<string, unknown>);
   }
 
+  /**
+   * Called after a chapter is marked read, so a tracker can push it.
+   *
+   * Set by `trackers/sync.ts` and by nothing else. Fire-and-forget by contract: the read is already
+   * saved when this runs, so it is never awaited and a throw here can never fail the write.
+   */
+  onReadMark?: (chapter: { id: string; seriesId: string; number: number }) => void;
+
   /** Local read marks. The providers that own these are `local` and `dalvik`. */
   async setRead(chapterId: string, read: boolean): Promise<void> {
     await this.setPref(`read:${chapterId}`, read);
+    if (!read || this.onReadMark === undefined) return;
+    // Unreading never pushes: a list is a high-water mark, and "I unread chapter 3" is not a fact
+    // any tracker can express. The number comes from our own chapter row, because the caller only
+    // knows an id.
+    const chapter = await this.db.get<Chapter>("chapters", chapterId);
+    if (chapter === undefined) return;
+    try {
+      this.onReadMark({ id: chapter.id, seriesId: chapter.seriesId, number: chapter.number });
+    } catch {
+      // A tracker is a mirror. The chapter is read; a broken mirror is a retry, not a lost read.
+    }
   }
 
   async isRead(chapterId: string): Promise<boolean> {

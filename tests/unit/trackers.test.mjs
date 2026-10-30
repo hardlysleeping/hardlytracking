@@ -145,7 +145,8 @@ test("a service that is down costs a retry, not the chapter", async () => {
   assert.match(row.pending.error, /service is down/);
 
   tracker.failing = false;
-  const flushed = await flushPending(host);
+  // The ladder makes the retry wait a minute; this case is about what a retry does, not when.
+  const flushed = await flushPending(host, { force: true });
   assert.deepEqual(flushed, { flushed: 1, failed: 0 });
   const [after] = await library.listTrackers();
   assert.equal(after.pending, undefined);

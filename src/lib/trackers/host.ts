@@ -7,6 +7,7 @@
  * a lost chapter.
  */
 import type { LibraryStore } from "../db/store";
+import { isDue, nextChapter } from "./queue";
 import {
   planPush,
   reconcile,
@@ -78,7 +79,7 @@ export async function pushChapter(
       const merged = reconcile({ chapter: plan.send }, entry);
       await options.store.putTracker({
         ...row,
-        lastChapter: Math.max(row.lastChapter ?? 0, merged.chapter),
+        lastChapter: nextChapter(row.lastChapter, merged.chapter),
         ...(entry.status === undefined ? {} : { status: entry.status }),
         syncedAt: now(),
         pending: undefined,
@@ -87,7 +88,8 @@ export async function pushChapter(
     } catch (error) {
       await options.store.putTracker({
         ...row,
-        pending: { chapter: plan.send, at: now(), error: message(error) },
+        // The ladder starts at one failure, so the next attempt waits out the first rung.
+        pending: { chapter: plan.send, at: now(), error: message(error), attempt: (row.pending?.attempt ?? 0) + 1 },
       });
       outcomes.push({ pushed: false, reason: "failed", error: message(error) });
     }
@@ -99,31 +101,49 @@ export async function pushChapter(
  * Retry everything that owes a push.
  *
  * Called on launch, on reconnect and from "Sync trackers now". It reads the queue off the rows, so a
- * process that was killed mid-push still knows what it owes.
+ * process that was killed mid-push still knows what it owes — and it reads the ladder off the row
+ * too, so a service that has been failing is not asked again on every launch.
+ *
+ * `force` is the manual button: the user asked, so the ladder is ignored for this pass.
  */
-export async function flushPending(options: TrackerHostOptions): Promise<{ flushed: number; failed: number }> {
-  const rows = (await options.store.listTrackers()).filter((row) => row.pending !== undefined);
+export async function flushPending(
+  options: TrackerHostOptions,
+  flush: { force?: boolean } = {},
+): Promise<{ flushed: number; failed: number }> {
+  const now = options.now ?? Date.now;
+  const all = await options.store.listTrackers();
   let flushed = 0;
   let failed = 0;
-  for (const row of rows) {
+  for (const row of all) {
+    if (row.pending === undefined) continue;
+    if (flush.force !== true && !isDue(row.pending, now())) continue;
+    // A debt the row has already outgrown is not sent: the service is at or past it, and pushing it
+    // would walk the list backwards. Drop the debt instead.
+    if (row.pending.chapter <= (row.lastChapter ?? 0)) {
+      await options.store.putTracker({ ...row, pending: undefined });
+      continue;
+    }
     const tracker = options.trackers[row.service];
     if (tracker === undefined) {
       failed += 1;
       continue;
     }
-    const chapter = row.pending?.chapter ?? 0;
+    const chapter = row.pending.chapter;
     try {
       const entry = await tracker.push(row.remoteId, chapter);
       await options.store.putTracker({
         ...row,
-        lastChapter: Math.max(row.lastChapter ?? 0, entry.lastChapter ?? chapter),
+        lastChapter: nextChapter(row.lastChapter, entry.lastChapter ?? chapter),
         ...(entry.status === undefined ? {} : { status: entry.status }),
-        syncedAt: (options.now ?? Date.now)(),
+        syncedAt: now(),
         pending: undefined,
       });
       flushed += 1;
     } catch (error) {
-      await options.store.putTracker({ ...row, pending: { chapter, at: (options.now ?? Date.now)(), error: message(error) } });
+      await options.store.putTracker({
+        ...row,
+        pending: { chapter, at: now(), error: message(error), attempt: (row.pending.attempt ?? 0) + 1 },
+      });
       failed += 1;
     }
   }

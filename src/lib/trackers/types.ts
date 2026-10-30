@@ -51,9 +51,20 @@ export interface TrackerRow {
    * A push that did not land.
    *
    * This is the queue: the row carries what it owes, so a failure survives a reload and the next
-   * launch retries it. The reader never waits for it.
+   * launch retries it. The reader never waits for it. `attempt` is how many times this chapter has
+   * been tried and failed — the backoff ladder reads it, and absent means zero.
    */
-  pending?: { chapter: number; at: number; error?: string };
+  pending?: PendingPush;
+}
+
+/** What a row owes a service, and what the retry ladder needs to know about it. */
+export interface PendingPush {
+  chapter: number;
+  /** When the last attempt happened (or, for a fresh debt, when it was noticed). */
+  at: number;
+  error?: string;
+  /** Failures so far. Absent = 0 = never tried = due now. */
+  attempt?: number;
 }
 
 /** A connected service. The only row in this app that holds a secret. */

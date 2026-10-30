@@ -27,6 +27,7 @@ Repo: `~/apps/hardlytracking` · branch `master` · remote `github.com/hardlysle
 
 | Card | Backlog | Evidence |
 |---|---|---|
+| T30 `t_fc96361a` | tracking | **Push on read + queue (engine)**: `src/lib/trackers/queue.ts` (the 1 m → 5 m → 15 m → 1 h → 6 h ladder, `isDue`, `nextChapter`), `host.flushPending` now reads `pending.attempt` so a failing service is not re-asked on every launch, a `force` pass for the manual button, and a debt the row has outgrown is dropped instead of pushed backwards. `sync.ts` arms it: `installTrackerSync` sets `store.onReadMark` (fired after the local write in `setRead`, never awaited), drains on `online` and on launch, and exposes `syncAll()`. 9 new tests (488/488), `tsc` clean, `svelte-check` 0 errors, build green; live at :8460 a seeded title's `Read` wrote `read:…:ch:1`/`:ch:2` = true with no error. **Open:** no adapter (T26–T28 need his logins) and no button (T29), so nothing is bound yet |
 | T24 `t_2ae97e10` | 23 | **iPhone Library screen, all 14 plan tasks** (T-L1…T-L14, `1ed3bd0`…`da588c6`): one query model, header + `⋯`, real filter model + `Filter (n)` + chips, collection tabs with `+N`, continue reading with covers and next-unread, ten sort keys with per-collection memory, manual order + drag, selection with tri-state collections, badge set + quick resume + three sizes, search operators + scope, view state that survives a route change, the 5 000-row budget, offline + derived widths. Gate: 479/479 tests, `tsc` clean, `svelte-check` 0 errors; 5 000 rows in a production build at 22 ms first paint / 60 fps / a read mark touching 2 nodes (44.6 ms), `&cv=off` 27 ms / 42 fps; parity controls read off the live DOM at 440×956 with no sideways pan; offline by blocking `/api/*` — one line in place, 24 tiles kept. `docs/runs/2026-10-30-t24-library.md` |
 | T1 `t_2a08f8b6` | 9 | 24/24 unit tests, `tsc --noEmit` clean, `svelte-check` 0/0, build 60.8 kB JS / 4.7 kB CSS |
 | T2 `t_3ee23911` | 10 | `npm run smoke` 9/9 direct at `:4567` and 9/9 through the proxy `:8460` |
@@ -45,7 +46,7 @@ Repo: `~/apps/hardlytracking` · branch `master` · remote `github.com/hardlysle
 
 | Card | Plan | Work | Gate |
 |---|---|---|---|
-| — | — | Nothing waiting: T24 is closed and sits in **Done** above | — |
+| — | — | Nothing waiting that can be built here: T26–T28 need his own tracker logins, T29 is deprioritised by his call, T12/T13 need an Apple toolchain and a physical iPhone, T6 waits on the native path. T30's engine is done — what it lacks is an adapter to push through and a button to press | — |
 
 T24 is on the board as `t_2ae97e10`, completed with the same evidence as this file. `src/api/**` and
 `src-tauri/**` were never touched by it, so it did not collide with T12/T17.

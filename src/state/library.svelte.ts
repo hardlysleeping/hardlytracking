@@ -13,6 +13,7 @@ import type { RepoRow, ViewStateRow } from "../lib/db/store";
 import { BACKGROUND_GRACE_MS, viewStateKey } from "../lib/history";
 import { nextUnread } from "../lib/library/continue";
 import { settings } from "./settings.svelte";
+import { installTrackerSync } from "../lib/trackers/sync";
 import { imageCache } from "../lib/cache/images";
 import type { Chapter, Page, Series, Source } from "../api/source";
 
@@ -54,6 +55,10 @@ class LibraryState {
       imageCache.attach(this.profile.store.database);
       void imageCache.prune();
       void this.pruneSessions();
+      // Arm the tracker hook: a read mark becomes a queued push once a service is connected
+      // (T26–T28). With no adapter registered this is inert, and the day one lands nothing else
+      // has to be rewired.
+      installTrackerSync(this.profile.store);
       void this.loadSources();
     } catch (error) {
       this.openError = message(error);
