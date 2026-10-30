@@ -8,6 +8,7 @@
    */
   import { library } from "../state/library.svelte";
   import { providerFor } from "../api/registry";
+  import { needsLogin } from "../api/mihon-bridge";
   import type { Series } from "../api/source";
   import SeriesGrid from "../components/SeriesGrid.svelte";
   import { go } from "../lib/nav";
@@ -25,6 +26,9 @@
   let page = $state(1);
   let busy = $state(false);
   let error = $state<string | null>(null);
+  /** The login page a 401 named, so the button opens the page the source asked for. */
+  let loginUrl = $state<string | null>(null);
+  let loginState = $state<"idle" | "busy" | "done">("idle");
 
   const source = $derived(library.sources.find((row) => row.id === sourceId) ?? null);
 
@@ -44,6 +48,7 @@
     if (mode === "search" && query.trim() === "") return;
     busy = true;
     error = null;
+    loginUrl = null;
     try {
       const provider = providerFor(library.profile.providers, sourceId);
       const result =
@@ -57,8 +62,43 @@
       page = next;
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
+      // A source that wants a login says so with a 401 and the page to open; anything else is a
+      // failure to show as it is, without offering a login that would not help.
+      if (needsLogin(e)) loginUrl = e.loginUrl ?? "";
     } finally {
       busy = false;
+    }
+  }
+
+  /**
+   * Open the source's page in the in-app webview and hand the runtime what it set.
+   *
+   * The outcome is stated plainly: a cancelled page is not an error, a build without a webview says
+   * so, and a login that did not take is reported rather than silently retried.
+   */
+  async function login(): Promise<void> {
+    if (library.profile === null) return;
+    loginState = "busy";
+    try {
+      const result = await library.profile.login(sourceId, { loginUrl });
+      if (result.status === "ok") {
+        loginState = "done";
+        error = null;
+        await run(1);
+        return;
+      }
+      error =
+        result.status === "cancelled"
+          ? "Login cancelled."
+          : result.status === "unsupported"
+            ? result.reason
+            : result.status === "failed"
+              ? `The login page could not open: ${result.reason}`
+              : `The source still refuses this session: ${result.reason}`;
+      loginState = "idle";
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e);
+      loginState = "idle";
     }
   }
 
@@ -102,6 +142,11 @@
   </div>
 
   {#if error}<p class="banner">{error}</p>{/if}
+  {#if loginUrl !== null}
+    <button class="btn login" disabled={loginState === "busy"} onclick={() => void login()}>
+      {loginState === "busy" ? "Waiting for the login page…" : "Log in to this source"}
+    </button>
+  {/if}
   {#if busy && items.length === 0}<p class="empty">Loading…</p>{/if}
 
   <SeriesGrid series={items} cover={132} empty={mode === "search" ? "This source found nothing." : "This source returned nothing."} />
@@ -187,5 +232,11 @@
 
   .more {
     margin-top: var(--s5);
+  }
+
+  /* The login button sits directly under the banner that asked for it, so the two read as one
+     message: "this source wants a login" and "here is the button". */
+  .login {
+    margin-top: var(--s2);
   }
 </style>

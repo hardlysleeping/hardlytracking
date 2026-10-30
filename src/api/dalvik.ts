@@ -25,6 +25,8 @@
  *   carries the truth.
  */
 import { apiHeaders } from "../lib/host";
+import type { CookieJar } from "../lib/webview/store";
+import { hostOf } from "../lib/webview/cookies";
 import { joinId, nativeId, paged, type Chapter, type Page, type Paged, type ProviderKind, type Series, type Source, type SourceProvider } from "./source";
 
 export type DalvikMethod =
@@ -95,15 +97,56 @@ export interface DalvikCall {
   sourceBaseUrl?: string;
 }
 
+/**
+ * What the app knows about the source's session, sent alongside a call.
+ *
+ * These are **request headers**, not body fields — M-Extension-Server reads them off the
+ * `/dalvik` POST and applies them to the extension instance before the method runs (verified
+ * against v1.0.9's `DalvikHandler.serve`):
+ *
+ * - `Cookie` → split on `;`, each pair becomes an `okhttp3.Cookie` on the source's own host and
+ *   goes into that instance's `NetworkHelper` jar. This is the whole cookie hand-off: the runtime
+ *   has no "here are my cookies" route, and its jar is memory-only, so the app re-sends this on
+ *   every call.
+ * - `User-Agent` → `NetworkHelper.setUA`, ignored when empty or when it starts with `Dart/`.
+ *   Matrix row WEB-10: the runtime then looks like the webview that logged in.
+ * - `source-base-url` → the source's site, when the extension declared one.
+ * - `x-mangayomi-webview-port` → the port of the app's own webview bridge, so a challenge page the
+ *   extension opens is rendered by us instead of the runtime's CEF.
+ */
+export interface DalvikAuth {
+  /** A `Cookie:` header for the source's own site. */
+  cookie?: string;
+  /** The UA the webview used, so both ends present one identity. */
+  userAgent?: string;
+  /** The source's site; the runtime scopes cookies with its host. */
+  sourceBaseUrl?: string;
+  /** Loopback port of the app's webview bridge (`src/lib/webview/bridge.ts`). */
+  webviewPort?: number;
+}
+
 export class DalvikError extends Error {
   readonly status: number;
   readonly runtimeCode: number | null;
+  /**
+   * The login page the source wants opened, when it names one.
+   *
+   * A WebView-login source answers 401 and the page to show; the app opens *that* page rather than
+   * guessing `/login`. Absent means the caller falls back to the source's own base url.
+   */
+  readonly loginUrl: string | null;
 
-  constructor(message: string, status: number, runtimeCode: number | null = null) {
+  constructor(message: string, status: number, runtimeCode: number | null = null, loginUrl: string | null = null) {
     super(message);
     this.name = "DalvikError";
     this.status = status;
     this.runtimeCode = runtimeCode;
+    this.loginUrl = loginUrl;
+  }
+
+  /** Whether this is the source saying "log in first" — matrix rows WEB-01 and WEB-09. */
+  get needsLogin(): boolean {
+    return this.status === 401 || this.runtimeCode === 401;
   }
 }
 
@@ -114,10 +157,17 @@ export interface DalvikOptions {
   timeoutMs?: number;
 }
 
+export interface DalvikCallOptions {
+  /** The session to carry on this call: cookies, UA, base url, webview bridge port. */
+  auth?: DalvikAuth;
+}
+
 export interface DalvikResult<T> {
   body: T;
   /** Present when this call installed an APK; the key for every call after it. */
   extensionId: string | null;
+  /** `Set-Cookie` values the host answered with, when it answered with any. */
+  setCookie: string[];
 }
 
 /** What `/capabilities` answers. Only the field we rely on is required. */
@@ -130,6 +180,45 @@ export interface DalvikCapabilities {
 }
 
 const EXTENSION_HEADER = "x-mangayomi-extension-id";
+/**
+ * The cookie header, sent twice.
+ *
+ * `Cookie` is a forbidden header for `fetch` in a browser tab — the browser drops it silently — so
+ * the app's own proxy (`server/proxy.mjs`) promotes this private header onto the upstream request.
+ * A packaged build talking to a loopback runtime sends both, and the runtime reads whichever
+ * arrives (it checks `cookie` then `Cookie`). Two headers, one value, no build-specific branch.
+ */
+const COOKIE_HEADER = "x-hardlytracking-cookies";
+
+/** A `DalvikAuth` as request headers. Absent fields are absent headers, never empty ones. */
+export function authHeaders(auth: DalvikAuth | undefined): Record<string, string> {
+  if (auth === undefined) return {};
+  const headers: Record<string, string> = {};
+  if (auth.cookie !== undefined && auth.cookie !== "") {
+    headers["cookie"] = auth.cookie;
+    headers[COOKIE_HEADER] = auth.cookie;
+  }
+  // Empty and `Dart/…` are ignored by the runtime anyway; not sending them keeps the intent clear.
+  if (auth.userAgent !== undefined && auth.userAgent.trim() !== "") headers["user-agent"] = auth.userAgent.trim();
+  if (auth.sourceBaseUrl !== undefined && auth.sourceBaseUrl !== "") headers["source-base-url"] = auth.sourceBaseUrl;
+  if (auth.webviewPort !== undefined && auth.webviewPort > 0) headers["x-mangayomi-webview-port"] = String(auth.webviewPort);
+  return headers;
+}
+
+/**
+ * `Set-Cookie` off a response, as the individual values.
+ *
+ * `getSetCookie()` is the only lossless way (`headers.get` joins several cookies into one string,
+ * and a cookie's `Expires` contains a comma, so splitting that string splits the wrong place). It
+ * exists in Node 20+ and current browsers; where it does not, one header is taken whole rather
+ * than mangled.
+ */
+function setCookieOf(response: Response): string[] {
+  const headers = response.headers as Headers & { getSetCookie?: () => string[] };
+  if (typeof headers.getSetCookie === "function") return headers.getSetCookie();
+  const single = response.headers.get("set-cookie");
+  return single === null || single === "" ? [] : [single];
+}
 
 export class DalvikClient {
   readonly baseUrl: string;
@@ -176,15 +265,20 @@ export class DalvikClient {
     return capabilities;
   }
 
-  /** One call, one body. Errors carry the runtime's own message, never a guess. */
-  async call<T = unknown>(call: DalvikCall): Promise<DalvikResult<T>> {
+  /**
+   * One call, one body. Errors carry the runtime's own message, never a guess.
+   *
+   * `auth` is how a session travels: the runtime takes cookies, the user agent, the source's base
+   * url and the app's webview bridge port as request headers on this call and nothing else.
+   */
+  async call<T = unknown>(call: DalvikCall, options: DalvikCallOptions = {}): Promise<DalvikResult<T>> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
     let response: Response;
     try {
       response = await this.fetchImpl(`${this.baseUrl}/dalvik`, {
         method: "POST",
-        headers: apiHeaders({ "content-type": "application/json" }),
+        headers: apiHeaders({ "content-type": "application/json", ...authHeaders(options.auth) }),
         body: JSON.stringify(call),
         signal: controller.signal,
       });
@@ -203,15 +297,16 @@ export class DalvikClient {
     }
 
     if (!response.ok) {
-      const detail = body as { error?: string; code?: number } | null;
+      const detail = body as { error?: string; code?: number; loginUrl?: string } | null;
       throw new DalvikError(
         detail?.error ?? `the extension host answered ${response.status}`,
         response.status,
         typeof detail?.code === "number" ? detail.code : null,
+        typeof detail?.loginUrl === "string" && detail.loginUrl !== "" ? detail.loginUrl : null,
       );
     }
 
-    return { body: body as T, extensionId: response.headers.get(EXTENSION_HEADER) };
+    return { body: body as T, extensionId: response.headers.get(EXTENSION_HEADER), setCookie: setCookieOf(response) };
   }
 
   /**
@@ -358,6 +453,18 @@ export interface DalvikProviderOptions {
    * a provider built on its own (a test, a build with no database) has nowhere to write.
    */
   readState?: DalvikReadState;
+  /**
+   * Where this device keeps the source's cookies.
+   *
+   * Read on **every** call, because the runtime's own jar is memory-only and has no read route: the
+   * app is the store, and the `Cookie:` header is how the store reaches the extension. Without a
+   * jar a source that needs a login simply answers 401 and the UI offers to log in.
+   */
+  cookies?: CookieJar;
+  /** The UA the webview logged in with, so the runtime presents the same identity (WEB-10). */
+  userAgent?: () => string | undefined;
+  /** Loopback port of the app's webview bridge, for challenge pages the extension opens. */
+  webviewPort?: () => number | undefined;
 }
 
 /** The device's own read marks, as the provider needs them. */
@@ -425,6 +532,43 @@ export function createDalvikProvider(options: DalvikProviderOptions): SourceProv
     return client.asset(sourceRelative(sourceBaseUrl, raw) ?? raw);
   }
 
+  /**
+   * The session for one source, as the runtime wants it: a `Cookie:` header for the source's own
+   * host, the webview's UA, the source's base url, and the app's bridge port.
+   *
+   * Read per call, not once: a login can happen mid-session, and a cookie can expire. The host is
+   * the source's site — the runtime scopes what we send with that same host, so the two ends agree
+   * on which jar the pairs belong in.
+   */
+  async function authFor(sourceBaseUrl: string | undefined): Promise<DalvikAuth> {
+    const host = sourceBaseUrl === undefined ? null : hostOf(sourceBaseUrl);
+    const cookie = host === null || options.cookies === undefined ? undefined : await options.cookies.header(host);
+    const userAgent = options.userAgent?.();
+    const webviewPort = options.webviewPort?.();
+    return {
+      ...(cookie === undefined ? {} : { cookie }),
+      ...(userAgent === undefined ? {} : { userAgent }),
+      ...(sourceBaseUrl === undefined ? {} : { sourceBaseUrl }),
+      ...(webviewPort === undefined ? {} : { webviewPort }),
+    };
+  }
+
+  /**
+   * One call with the source's session attached, and whatever cookies the host answers with kept.
+   *
+   * Every method below goes through here, which is what makes "cookie sharing" a property of the
+   * provider instead of something each call site has to remember to do.
+   */
+  async function invoke<T>(call: DalvikCall, sourceBaseUrl: string | undefined): Promise<DalvikResult<T>> {
+    const auth = await authFor(sourceBaseUrl);
+    const result = await client.call<T>(call, { auth });
+    if (result.setCookie.length > 0 && options.cookies !== undefined) {
+      const host = sourceBaseUrl === undefined ? null : hostOf(sourceBaseUrl);
+      if (host !== null) await options.cookies.remember(host, result.setCookie);
+    }
+    return result;
+  }
+
   function toSeries(sourceId: string, manga: DalvikManga, sourceBaseUrl?: string): Series {
     const id = joinId(kind, `${sourceId}:${manga.url}`);
     if (typeof manga.title === "string" && manga.title !== "") titles.set(id, manga.title);
@@ -487,13 +631,11 @@ export function createDalvikProvider(options: DalvikProviderOptions): SourceProv
     async popular(namespaced: string, page: number): Promise<Paged<Series>> {
       const sourceId = bareSourceId(namespaced);
       const extension = extensionFor(sourceId);
-      const result = await client.call<{ mangas: DalvikManga[]; hasNextPage: boolean }>({
-        method: "getPopularManga",
-        extensionId: extension.extensionId,
-        sourceId,
-        page,
-      });
       const sourceBaseUrl = baseUrlForSourceId(sourceId);
+      const result = await invoke<{ mangas: DalvikManga[]; hasNextPage: boolean }>(
+        { method: "getPopularManga", extensionId: extension.extensionId, sourceId, page },
+        sourceBaseUrl,
+      );
       return paged(
         (result.body.mangas ?? []).map((manga) => toSeries(sourceId, manga, sourceBaseUrl)),
         result.body.hasNextPage === true,
@@ -503,13 +645,11 @@ export function createDalvikProvider(options: DalvikProviderOptions): SourceProv
     async latest(namespaced: string, page: number): Promise<Paged<Series>> {
       const sourceId = bareSourceId(namespaced);
       const extension = extensionFor(sourceId);
-      const result = await client.call<{ mangas: DalvikManga[]; hasNextPage: boolean }>({
-        method: "getLatestManga",
-        extensionId: extension.extensionId,
-        sourceId,
-        page,
-      });
       const sourceBaseUrl = baseUrlForSourceId(sourceId);
+      const result = await invoke<{ mangas: DalvikManga[]; hasNextPage: boolean }>(
+        { method: "getLatestManga", extensionId: extension.extensionId, sourceId, page },
+        sourceBaseUrl,
+      );
       return paged(
         (result.body.mangas ?? []).map((manga) => toSeries(sourceId, manga, sourceBaseUrl)),
         result.body.hasNextPage === true,
@@ -519,14 +659,11 @@ export function createDalvikProvider(options: DalvikProviderOptions): SourceProv
     async search(namespaced: string, query: string, page: number): Promise<Paged<Series>> {
       const sourceId = bareSourceId(namespaced);
       const extension = extensionFor(sourceId);
-      const result = await client.call<{ mangas: DalvikManga[]; hasNextPage: boolean }>({
-        method: "getSearchManga",
-        extensionId: extension.extensionId,
-        sourceId,
-        page,
-        search: query,
-      });
       const sourceBaseUrl = baseUrlForSourceId(sourceId);
+      const result = await invoke<{ mangas: DalvikManga[]; hasNextPage: boolean }>(
+        { method: "getSearchManga", extensionId: extension.extensionId, sourceId, page, search: query },
+        sourceBaseUrl,
+      );
       return paged(
         (result.body.mangas ?? []).map((manga) => toSeries(sourceId, manga, sourceBaseUrl)),
         result.body.hasNextPage === true,
@@ -536,24 +673,21 @@ export function createDalvikProvider(options: DalvikProviderOptions): SourceProv
     async details(seriesId: string): Promise<Series> {
       const { sourceId, url } = splitNative(nativeId(seriesId, kind));
       const extension = extensionFor(sourceId);
-      const result = await client.call<DalvikManga>({
-        method: "getDetailsManga",
-        extensionId: extension.extensionId,
-        sourceId,
-        mangaData: { url, initialized: true },
-      });
-      return toSeries(sourceId, result.body, baseUrlForSourceId(sourceId));
+      const sourceBaseUrl = baseUrlForSourceId(sourceId);
+      const result = await invoke<DalvikManga>(
+        { method: "getDetailsManga", extensionId: extension.extensionId, sourceId, mangaData: { url, initialized: true } },
+        sourceBaseUrl,
+      );
+      return toSeries(sourceId, result.body, sourceBaseUrl);
     },
 
     async chapters(seriesId: string): Promise<Chapter[]> {
       const { sourceId } = splitNative(nativeId(seriesId, kind));
       const extension = extensionFor(sourceId);
-      const result = await client.call<DalvikChapter[]>({
-        method: "getChapterList",
-        extensionId: extension.extensionId,
-        sourceId,
-        mangaData: mangaDataFor(seriesId),
-      });
+      const result = await invoke<DalvikChapter[]>(
+        { method: "getChapterList", extensionId: extension.extensionId, sourceId, mangaData: mangaDataFor(seriesId) },
+        baseUrlForSourceId(sourceId),
+      );
       const rows = (Array.isArray(result.body) ? result.body : []).map((chapter) => ({
         ...toChapter(sourceId, chapter),
         seriesId,
@@ -568,15 +702,14 @@ export function createDalvikProvider(options: DalvikProviderOptions): SourceProv
     async pages(chapterId: string): Promise<Page[]> {
       const { sourceId, url } = splitNative(nativeId(chapterId, kind).replace(/^ch:/, ""));
       const extension = extensionFor(sourceId);
-      const result = await client.call<DalvikPage[]>({
-        method: "getPageList",
-        extensionId: extension.extensionId,
-        sourceId,
-        chapterData: { url, name: "" },
-      });
+      const sourceBaseUrl = baseUrlForSourceId(sourceId);
+      const result = await invoke<DalvikPage[]>(
+        { method: "getPageList", extensionId: extension.extensionId, sourceId, chapterData: { url, name: "" } },
+        sourceBaseUrl,
+      );
       const pages = Array.isArray(result.body) ? result.body : [];
       return pages.map((page, index) => {
-        const address = imageAddress(baseUrlForSourceId(sourceId), page.imageUrl) ?? client.asset(page.url);
+        const address = imageAddress(sourceBaseUrl, page.imageUrl) ?? client.asset(page.url);
         if (address === undefined) {
           throw new DalvikError(`page ${index} came back without an image address`, 0);
         }

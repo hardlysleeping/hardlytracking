@@ -8,11 +8,15 @@
  */
 import { apiUrl } from "../lib/host";
 import { createProviders, type DalvikHost } from "./registry";
-import { BUILTIN_ARCHIVE_ID, BUILTIN_RUNTIME_ID, ensureBuiltinExtensions, isBuiltin } from "./builtin";
+import { BUILTIN_ARCHIVE_ID, BUILTIN_READ_SERVER_ID, ensureBuiltinExtensions, isBuiltin } from "./builtin";
+import { readServerEnabled, setReadServerEnabled } from "../lib/host";
 import type { InstalledExtension } from "./dalvik";
 import type { SourceProvider } from "./source";
 import { openDatabase, type Database } from "../lib/db/open";
 import { LibraryStore } from "../lib/db/store";
+import { dbCookieJar, type CookieJar } from "../lib/webview/store";
+import { hostOf } from "../lib/webview/cookies";
+import { loginSource, type LoginResult } from "./mihon-bridge";
 
 export interface LibraryProfile {
   readonly kind: "device";
@@ -37,6 +41,15 @@ export interface LibraryProfile {
   setExtensionEnabled(extensionId: string, enabled: boolean): Promise<void>;
   /** Forget an extension: its row, and its sources with it. The APK is the host's to drop. */
   uninstallExtension(extensionId: string): Promise<void>;
+  /** Where source cookies live on this device. */
+  readonly cookies: CookieJar;
+  /**
+   * Log a source in through the in-app webview and hand what it set to the runtime.
+   *
+   * Resolves to what happened — `ok`, `cancelled`, `unsupported`, `failed`, `rejected` — because a
+   * login that did not take has to be visible in the UI, not thrown away (matrix rows WEB-07/09).
+   */
+  login(sourceId: string, options?: { loginUrl?: string | null }): Promise<LoginResult>;
 }
 
 export const LOCAL_PROFILE_SLUG = "device://library";
@@ -72,12 +85,18 @@ export interface OpenProfileOptions {
 export async function openLibraryProfile(options: OpenProfileOptions = {}): Promise<LibraryProfile> {
   const database = options.database ?? (await openDatabase());
   const store = new LibraryStore(database);
+  // One jar per profile: cookies outlive the runtime process, which is the point of keeping them
+  // here rather than trusting a `MemoryCookieJar` on the other side of a loopback port.
+  const jar = dbCookieJar(database);
+  // The webview's user agent, remembered so a later call looks like the client that logged in
+  // (matrix row WEB-10). Per device, not per source: it is one webview.
+  let sessionUserAgent = await store.getPref<string>("webview.userAgent");
   // Built-ins are installed before the providers are built, because a provider's switch is its row:
   // the first launch of a fresh install must already know that archive.org is on.
   const builtins = await ensureBuiltinExtensions(store);
   const switches = {
     archive: builtins.find((row) => row.extensionId === BUILTIN_ARCHIVE_ID)?.enabled !== false,
-    runtime: builtins.find((row) => row.extensionId === BUILTIN_RUNTIME_ID)?.enabled !== false,
+    readServer: readServerEnabled(),
   };
   const registry = await createProviders({
     store,
@@ -87,22 +106,13 @@ export async function openLibraryProfile(options: OpenProfileOptions = {}): Prom
     ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
     archiveEnabled: () => switches.archive,
     runtimeEnabled: () => switches.runtime,
+    // The session: the jar this device keeps, and the UA the webview logged in with. Read on every
+    // call, because the runtime's own jar is memory-only and has no read route (matrix row HTTP-07).
+    cookies: jar,
+    userAgent: () => sessionUserAgent,
   });
 
   const dalvik = registry.dalvik;
-
-  // The runtime's card says what the host actually has: its sources are the ones installed in it, so
-  // the row is written after the probe rather than shipping an empty list that looks broken.
-  if (dalvik !== null && switches.runtime) {
-    const row = await store.getExtension(BUILTIN_RUNTIME_ID);
-    if (row !== undefined) {
-      const live = dalvik.extensions.flatMap((extension) => extension.sources);
-      if (live.length !== row.sources.length) {
-        await store.putExtension({ ...row, sources: live });
-      }
-    }
-  }
-
   return {
     kind: "device",
     slug: LOCAL_PROFILE_SLUG,
@@ -143,7 +153,12 @@ export async function openLibraryProfile(options: OpenProfileOptions = {}): Prom
       // A built-in has no host to tell: its provider reads this flag on the next call.
       if (isBuiltin(extensionId)) {
         if (extensionId === BUILTIN_ARCHIVE_ID) switches.archive = enabled;
-        if (extensionId === BUILTIN_RUNTIME_ID) switches.runtime = enabled;
+        // The read server's switch is the pairing decision: the address and token stay, the calls
+        // stop going to them. Every later call re-reads it through apiUrl().
+        if (extensionId === BUILTIN_READ_SERVER_ID) {
+          switches.readServer = enabled;
+          setReadServerEnabled(enabled);
+        }
         return;
       }
       if (dalvik === null) return;
@@ -158,6 +173,38 @@ export async function openLibraryProfile(options: OpenProfileOptions = {}): Prom
       if (dalvik === null) return;
       const at = dalvik.extensions.findIndex((extension) => extension.extensionId === extensionId);
       if (at >= 0) dalvik.extensions.splice(at, 1);
+    },
+    cookies: jar,
+    async login(sourceId: string, loginOptions: { loginUrl?: string | null } = {}): Promise<LoginResult> {
+      if (dalvik === null) {
+        throw new Error("no extension host answered /capabilities, so there is no runtime to sign in to");
+      }
+      const bare = sourceId.replace(/^dalvik:/, "").replace(/^src:/, "");
+      // The site comes from the installed extension's own source list — the same value the
+      // provider hands the runtime as `source-base-url`, so both ends scope the cookies to one host.
+      const found = dalvik.extensions
+        .flatMap((extension) => extension.sources)
+        .find((source) => source.id === bare);
+      const baseUrl = found?.baseUrl;
+      if (baseUrl === undefined || hostOf(baseUrl) === null) {
+        throw new Error(`source ${bare} has no site address, so there is no page to log in on`);
+      }
+      const result = await loginSource(
+        {
+          sourceId: bare,
+          baseUrl,
+          ...(found?.name === undefined ? {} : { title: found.name }),
+          ...(loginOptions.loginUrl === undefined ? {} : { loginUrl: loginOptions.loginUrl }),
+        },
+        { client: dalvik.client, extensions: dalvik.extensions, jar },
+      );
+      // The UA only comes back from a successful login, and it is a device fact, so it is kept even
+      // though the cookies are the source's: the next login page will present the same client.
+      if (result.status === "ok" && result.userAgent !== undefined) {
+        sessionUserAgent = result.userAgent;
+        await store.setPref("webview.userAgent", result.userAgent);
+      }
+      return result;
     },
   };
 }

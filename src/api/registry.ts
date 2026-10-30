@@ -18,6 +18,7 @@ import { createArchiveProvider } from "./archive";
 import { DalvikClient, createDalvikProvider, type DalvikCapabilities, type InstalledExtension } from "./dalvik";
 import { splitId, type SourceProvider } from "./source";
 import type { LibraryStore } from "../lib/db/store";
+import type { CookieJar } from "../lib/webview/store";
 
 export interface RegistryConfig {
   store: LibraryStore;
@@ -37,6 +38,15 @@ export interface RegistryConfig {
   archiveEnabled?: () => boolean;
   /** Whether the built-in Mihon runtime is on. `undefined` means yes. */
   runtimeEnabled?: () => boolean;
+  /**
+   * Where this device keeps source cookies, so a logged-in source stays logged in across a runtime
+   * restart (the runtime's own jar is memory-only). Absent means no session is carried.
+   */
+  cookies?: CookieJar;
+  /** The UA the webview logged in with, read per call (matrix row WEB-10). */
+  userAgent?: () => string | undefined;
+  /** Loopback port of the app's webview bridge, when this build hosts one. */
+  webviewPort?: () => number | undefined;
 }
 
 /** The live dalvik host: the client to install through, and the list it reads. */
@@ -90,6 +100,11 @@ export async function createProviders(config: RegistryConfig): Promise<ProviderS
           client,
           extensions,
           ...(config.runtimeEnabled === undefined ? {} : { enabled: config.runtimeEnabled }),
+          // The session travels on every call: cookies from this device's jar, the UA the webview
+          // used, and — when this build hosts one — the port of the app's own webview bridge.
+          ...(config.cookies === undefined ? {} : { cookies: config.cookies }),
+          ...(config.userAgent === undefined ? {} : { userAgent: config.userAgent }),
+          ...(config.webviewPort === undefined ? {} : { webviewPort: config.webviewPort }),
           // The host keeps no read state, so the marks are ours: the same store the local
           // provider writes to, which is what `ownsProgress: true` promises.
           readState: {

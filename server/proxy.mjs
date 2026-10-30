@@ -79,6 +79,14 @@ async function proxy(request, response, upstreamBase, prefix) {
   for (const [key, value] of Object.entries(request.headers)) {
     if (!HOP_BY_HOP.has(key) && typeof value === "string") headers[key] = value;
   }
+  // A browser tab cannot set `Cookie` — it is a forbidden header and `fetch` drops it silently — so
+  // the app sends the session as `x-hardlytracking-cookies` and it is promoted here. Without this,
+  // every WebView login works in the packaged app and does nothing in the PWA, which is the build
+  // most people run.
+  if (typeof headers["x-hardlytracking-cookies"] === "string") {
+    headers["cookie"] = headers["x-hardlytracking-cookies"];
+    delete headers["x-hardlytracking-cookies"];
+  }
   headers["accept-encoding"] = "identity";
 
   let upstream;
