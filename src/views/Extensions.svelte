@@ -10,6 +10,9 @@
   import { library } from "../state/library.svelte";
   import { updateState, type ExtensionEntry } from "../lib/extensions/index";
   import { RepositoryError, type Repository } from "../lib/extensions/repository";
+  import { extensionLabel, extensionLanguages, sourcesOfExtension } from "../lib/extensions/installed";
+  import { proxiedImage } from "../lib/pages";
+  import { go, pathTo } from "../lib/nav";
 
   interface Props {
     /** A repository from an install link (`mihon://…`, `?repo=…`), added on arrival. */
@@ -29,6 +32,33 @@
   let search = $state("");
   let activeRepo = $state<string | null>(null);
   let installing = $state<string | null>(null);
+  /** Two-step uninstall: removing an extension is destructive and one stray tap should not do it. */
+  let removing = $state<string | null>(null);
+  let busy = $state<string | null>(null);
+
+  async function toggle(row: (typeof library.extensions)[number]): Promise<void> {
+    busy = row.extensionId;
+    try {
+      await library.setExtensionEnabled(row.extensionId, row.enabled === false);
+    } finally {
+      busy = null;
+    }
+  }
+
+  async function uninstall(row: (typeof library.extensions)[number]): Promise<void> {
+    busy = row.extensionId;
+    try {
+      await library.uninstallExtension(row.extensionId);
+      removing = null;
+    } finally {
+      busy = null;
+    }
+  }
+
+  /** The extension's own sources, as the provider lists them — for its browse button. */
+  function sourcesFor(row: (typeof library.extensions)[number]) {
+    return sourcesOfExtension(library.sources, row);
+  }
 
   const installed = $derived(library.extensions);
 
@@ -152,18 +182,61 @@
     {:else}
       <ul class="rows">
         {#each installed as row (row.extensionId)}
-          <li class="card">
-            <div class="info">
-              <span class="name">{row.packageId}</span>
-              <span class="sub">
-                {row.versionName ?? "unknown version"} · {row.sources.length} source{row.sources.length === 1 ? "" : "s"}
-              </span>
+          {@const label = extensionLabel(row)}
+          {@const langs = extensionLanguages(row)}
+          {@const owned = sourcesFor(row)}
+          <li class="card" class:off={row.enabled === false}>
+            <div class="head">
+              {#if row.iconUrl}
+                <img class="icon" src={proxiedImage(row.iconUrl)} alt="" loading="lazy" decoding="async" />
+              {:else}
+                <span class="icon fallback" aria-hidden="true">{label.slice(0, 1)}</span>
+              {/if}
+              <div class="info">
+                <span class="name">{label}</span>
+                <span class="sub">
+                  {row.versionName ?? "unknown version"} · {row.sources.length} source{row.sources.length === 1 ? "" : "s"}{#if langs.length > 0} · {langs.join(", ")}{/if}
+                </span>
+                {#if row.enabled === false}<span class="badge off">Disabled</span>{/if}
+              </div>
+              <label class="switch" title={row.enabled === false ? "Enable" : "Disable"}>
+                <input
+                  type="checkbox"
+                  checked={row.enabled !== false}
+                  disabled={busy === row.extensionId}
+                  aria-label={`${row.enabled === false ? "Enable" : "Disable"} ${label}`}
+                  onchange={() => void toggle(row)}
+                />
+                <span class="track" aria-hidden="true"><span class="knob"></span></span>
+              </label>
             </div>
+
             <div class="srcs">
-              {#each row.sources.slice(0, 6) as source (source.id)}
-                <span class="chip small">{source.name}{#if source.lang} <span class="lang">{source.lang}</span>{/if}</span>
+              {#each row.sources.slice(0, 8) as source (source.id)}
+                <button
+                  class="chip small link"
+                  title={`Browse ${source.name}`}
+                  onclick={() => go(pathTo("source", `dalvik:src:${source.id}`))}
+                >
+                  {source.name}{#if source.lang} <span class="lang">{source.lang}</span>{/if}
+                </button>
               {/each}
-              {#if row.sources.length > 6}<span class="chip small">+{row.sources.length - 6}</span>{/if}
+              {#if row.sources.length > 8}<span class="chip small">+{row.sources.length - 8}</span>{/if}
+            </div>
+
+            <div class="acts">
+              {#if owned.length > 0}
+                <button class="btn ghost" onclick={() => go(pathTo("source", owned[0].id))}>Browse</button>
+              {/if}
+              {#if removing === row.extensionId}
+                <span class="confirm">
+                  <span>Uninstall {label}? Its {row.sources.length} source{row.sources.length === 1 ? "" : "s"} disappear; your library stays.</span>
+                  <button class="chip" onclick={() => (removing = null)}>Cancel</button>
+                  <button class="chip danger" disabled={busy === row.extensionId} onclick={() => void uninstall(row)}>Uninstall</button>
+                </span>
+              {:else}
+                <button class="btn ghost quiet" onclick={() => (removing = row.extensionId)}>Uninstall</button>
+              {/if}
             </div>
           </li>
         {/each}
@@ -330,13 +403,140 @@
   }
 
   .card {
-    display: flex;
-    align-items: center;
-    gap: var(--s3);
+    display: grid;
+    gap: var(--s2);
     padding: var(--s3);
     border: 1px solid var(--line);
     border-radius: var(--r2);
     background: var(--surface);
+  }
+
+  .card.off {
+    opacity: 0.62;
+  }
+
+  .head {
+    display: flex;
+    align-items: center;
+    gap: var(--s3);
+  }
+
+  .icon {
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+    object-fit: cover;
+    flex: none;
+    background: var(--surface-2, var(--surface));
+  }
+
+  .icon.sm {
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+  }
+
+  .icon.fallback {
+    display: grid;
+    place-items: center;
+    font-weight: 650;
+    color: var(--text-3);
+    border: 1px solid var(--line);
+  }
+
+  .switch {
+    flex: none;
+    display: grid;
+    place-items: center;
+    cursor: pointer;
+  }
+
+  .switch input {
+    position: absolute;
+    opacity: 0;
+    width: 1px;
+    height: 1px;
+  }
+
+  .track {
+    width: 42px;
+    height: 25px;
+    border-radius: 999px;
+    background: var(--line);
+    display: block;
+    position: relative;
+    transition: background 140ms ease;
+  }
+
+  .knob {
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 19px;
+    height: 19px;
+    border-radius: 999px;
+    background: var(--text-3);
+    transition: transform 140ms ease, background 140ms ease;
+  }
+
+  .switch input:checked + .track {
+    background: color-mix(in srgb, var(--accent) 45%, transparent);
+  }
+
+  .switch input:checked + .track .knob {
+    transform: translateX(17px);
+    background: var(--accent);
+  }
+
+  .switch input:focus-visible + .track {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  .badge.off {
+    justify-self: start;
+    font-size: var(--t-xs);
+    color: var(--text-3);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 1px 8px;
+  }
+
+  .chip.link {
+    cursor: pointer;
+  }
+
+  .chip.link:hover {
+    color: var(--accent);
+  }
+
+  .acts {
+    display: flex;
+    align-items: center;
+    gap: var(--s2);
+    flex-wrap: wrap;
+  }
+
+  .btn.quiet {
+    color: var(--text-3);
+  }
+
+  .btn.quiet:hover {
+    color: var(--danger, #d9534f);
+  }
+
+  .chip.danger {
+    color: var(--danger, #d9534f);
+    border-color: currentColor;
+  }
+
+  .confirm {
+    display: flex;
+    align-items: center;
+    gap: var(--s2);
+    flex-wrap: wrap;
+    font-size: var(--t-xs);
+    color: var(--text-3);
   }
 
   .info {

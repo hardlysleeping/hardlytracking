@@ -284,6 +284,10 @@ function base64(bytes: Uint8Array): string {
 export interface InstalledExtension {
   extensionId: string;
   packageId: string;
+  /** The extension's own name from the index — what a person calls it, not a package id. */
+  name?: string;
+  /** The index's icon, proxied like every other image so no host-specific rule leaks in. */
+  iconUrl?: string;
   sources: DalvikSource[];
   /** Where it came from, so an update can find the same entry again. */
   repoUrl?: string;
@@ -417,7 +421,9 @@ export function createDalvikProvider(options: DalvikProviderOptions): SourceProv
     ownsProgress: true,
 
     async sources(): Promise<Source[]> {
-      return options.extensions.flatMap((extension) =>
+      // A disabled extension keeps its APK and its row, but offers no sources: that is what
+      // disabling means, and it has to happen here or the chips never disappear.
+      return options.extensions.filter((extension) => extension.enabled !== false).flatMap((extension) =>
         extension.sources.map((source) => ({
           id: joinId(kind, `src:${source.id}`),
           provider: kind,

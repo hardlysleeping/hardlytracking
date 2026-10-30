@@ -32,6 +32,10 @@ export interface LibraryProfile {
    * later call names. The row lands in our database because the runtime keeps no list.
    */
   installApk(apk: Uint8Array, packageId: string, meta?: InstallMeta): Promise<InstalledExtension>;
+  /** Turn an installed extension on or off. Its row and its APK stay; its sources stop appearing. */
+  setExtensionEnabled(extensionId: string, enabled: boolean): Promise<void>;
+  /** Forget an extension: its row, and its sources with it. The APK is the host's to drop. */
+  uninstallExtension(extensionId: string): Promise<void>;
 }
 
 export const LOCAL_PROFILE_SLUG = "device://library";
@@ -39,6 +43,9 @@ export const LOCAL_PROFILE_SLUG = "device://library";
 /** What a repository knows about an APK that the host cannot tell us. */
 export interface InstallMeta {
   repoUrl?: string;
+  /** The index's name and icon, so the card says "MangaFire" instead of a package id. */
+  name?: string;
+  iconUrl?: string;
   versionName?: string;
   versionCode?: number;
   enabled?: boolean;
@@ -89,6 +96,8 @@ export async function openLibraryProfile(options: OpenProfileOptions = {}): Prom
       const row: InstalledExtension = {
         extensionId: installed.extensionId,
         packageId,
+        ...(meta.name === undefined ? {} : { name: meta.name }),
+        ...(meta.iconUrl === undefined ? {} : { iconUrl: meta.iconUrl }),
         sources: installed.sources,
         enabled: meta.enabled ?? true,
         ...(meta.repoUrl === undefined ? {} : { repoUrl: meta.repoUrl }),
@@ -102,6 +111,21 @@ export async function openLibraryProfile(options: OpenProfileOptions = {}): Prom
       if (at >= 0) dalvik.extensions[at] = row;
       else dalvik.extensions.push(row);
       return row;
+    },
+    async setExtensionEnabled(extensionId: string, enabled: boolean): Promise<void> {
+      const row = await store.getExtension(extensionId);
+      if (row === undefined) return;
+      const next: InstalledExtension = { ...row, enabled };
+      await store.putExtension(next);
+      if (dalvik === null) return;
+      const at = dalvik.extensions.findIndex((extension) => extension.extensionId === extensionId);
+      if (at >= 0) dalvik.extensions[at] = next;
+    },
+    async uninstallExtension(extensionId: string): Promise<void> {
+      await store.removeExtension(extensionId);
+      if (dalvik === null) return;
+      const at = dalvik.extensions.findIndex((extension) => extension.extensionId === extensionId);
+      if (at >= 0) dalvik.extensions.splice(at, 1);
     },
   };
 }

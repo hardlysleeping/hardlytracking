@@ -8,6 +8,7 @@
   import { library } from "../state/library.svelte";
   import Cover from "../components/Cover.svelte";
   import { go, pathTo } from "../lib/nav";
+  import { chapterLabel, seriesLabel } from "../lib/titles";
 
   interface Row {
     seriesId: string;
@@ -31,26 +32,56 @@
     if (store === undefined) return;
     loading = true;
     try {
-      const [history, series, positions] = await Promise.all([
+      const [history, series, positions, allChapters] = await Promise.all([
         store.listHistory(200),
         store.listSeries(),
         store.listPositions(),
+        store.listAllChapters(),
       ]);
       const byId = new Map(series.map((row) => [row.id, row]));
       const positionOf = new Map(positions.map((row) => [row.chapterId, row.page]));
-      const chapterNames = new Map((await store.listAllChapters()).map((chapter) => [chapter.id, chapter.name]));
+      const chapterNames = new Map(allChapters.map((chapter) => [chapter.id, chapter.name]));
       rows = history.map((row) => ({
         seriesId: row.seriesId,
         chapterId: row.chapterId,
         at: row.at,
-        title: byId.get(row.seriesId)?.title ?? row.seriesId,
+        title: seriesLabel(byId.get(row.seriesId)?.title),
         cover: byId.get(row.seriesId)?.cover,
         page: positionOf.get(row.chapterId) ?? 0,
-        chapterName: chapterNames.get(row.chapterId) ?? "Chapter",
+        chapterName: chapterLabel(chapterNames.get(row.chapterId)),
       }));
     } finally {
       loading = false;
     }
+
+    // Rows for series that are not in the library get their names from the titles we have seen
+    // before, and only then from the source. This is what turns a raw id into "Black Clover".
+    const unknown = [...new Set(rows.filter((row) => row.title === "Unknown title").map((row) => row.seriesId))];
+    if (unknown.length === 0) return;
+    await Promise.all(
+      unknown.slice(0, 12).map(async (seriesId) => {
+        const meta = await library.resolveSeriesMeta(seriesId);
+        if (meta === null) return;
+        const names = new Map<string, string>();
+        if (rows.some((row) => row.seriesId === seriesId && row.chapterName === "Chapter")) {
+          try {
+            for (const chapter of await library.chapters(seriesId)) names.set(chapter.id, chapter.name);
+          } catch {
+            // A dead source must not empty the list: the rows keep their placeholder.
+          }
+        }
+        rows = rows.map((row) =>
+          row.seriesId === seriesId
+            ? {
+                ...row,
+                title: seriesLabel(meta.title),
+                ...(meta.cover === undefined ? {} : { cover: meta.cover }),
+                chapterName: chapterLabel(names.get(row.chapterId) ?? row.chapterName),
+              }
+            : row,
+        );
+      }),
+    );
   }
 
   const groups = $derived.by(() => {

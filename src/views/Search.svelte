@@ -11,6 +11,7 @@
   import type { Series, Source } from "../api/source";
   import SeriesGrid from "../components/SeriesGrid.svelte";
   import { settings } from "../state/settings.svelte";
+  import { isFresh, searchCacheKey, type CachedSearch } from "../lib/search/index";
   import { pinnedSources, togglePin } from "../lib/pinned";
 
   interface Props {
@@ -73,6 +74,20 @@
     const pickedSources = sources.filter((source) => chosen.has(source.id));
     blocks = pickedSources.map((source) => ({ source, state: "loading", items: [], hasNext: false, page: 1 }));
 
+    // What this device already answered for this query paints immediately — a repeat search is
+    // instant, and with no network it still shows the last answer instead of an error.
+    const store = library.profile.store;
+    await Promise.all(
+      pickedSources.map(async (source) => {
+        const cached = await store.getSearchCache<CachedSearch>(searchCacheKey(source.id, needle));
+        if (cached === undefined || !isFresh(cached)) return;
+        if (mine !== token) return;
+        blocks = blocks.map((block) =>
+          block.source.id === source.id ? { ...block, state: "done", items: cached.items, hasNext: false } : block,
+        );
+      }),
+    );
+
     await Promise.all(
       pickedSources.map(async (source) => {
         try {
@@ -81,6 +96,13 @@
           blocks = blocks.map((block) =>
             block.source.id === source.id ? { ...block, state: "done", items: result.items, hasNext: result.hasNext } : block,
           );
+          void store.putSearchCache(searchCacheKey(source.id, needle), {
+            key: searchCacheKey(source.id, needle),
+            sourceId: source.id,
+            query: needle,
+            items: result.items,
+            at: Date.now(),
+          } satisfies CachedSearch);
         } catch (error) {
           if (mine !== token) return;
           blocks = blocks.map((block) =>

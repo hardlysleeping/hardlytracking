@@ -40,6 +40,10 @@ export interface Prefs {
   pinnedSources: string[];
   /** Global search defaults to the pinned sources when there are any. */
   searchPinnedOnly: boolean;
+  /** Cover/page image cache ceiling, MB. */
+  imageCacheLimitMb: number;
+  /** Cache images at all. */
+  cacheImages: boolean;
 }
 
 class Settings {
@@ -64,6 +68,8 @@ class Settings {
   historyRetentionDays = $state(0);
   pinnedSources = $state<string[]>([]);
   searchPinnedOnly = $state(true);
+  imageCacheLimitMb = $state(256);
+  cacheImages = $state(true);
 
   private store: LibraryStore | null = null;
 
@@ -89,6 +95,8 @@ class Settings {
     this.historyRetentionDays = await read("historyRetentionDays", this.historyRetentionDays);
     this.pinnedSources = await read("pinnedSources", this.pinnedSources);
     this.searchPinnedOnly = await read("searchPinnedOnly", this.searchPinnedOnly);
+    this.imageCacheLimitMb = await read("imageCacheLimitMb", this.imageCacheLimitMb);
+    this.cacheImages = await read("cacheImages", this.cacheImages);
     this.ready = true;
   }
 

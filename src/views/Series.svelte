@@ -49,6 +49,7 @@
     try {
       const provider = providerFor(library.profile.providers, id);
       series = await provider.details(id);
+      void library.rememberSeriesMeta(series);
       saved = await library.isSaved(id);
       position = (await library.profile.store.getPosition(id)) ?? null;
       chapters = await library.chapters(id);

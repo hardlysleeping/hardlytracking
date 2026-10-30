@@ -11,6 +11,7 @@
   import { categories } from "../state/categories.svelte";
   import { settings } from "../state/settings.svelte";
   import { viewStateKey } from "../lib/history";
+  import { scoreRow } from "../lib/search/index";
   import CategoryRail from "../components/CategoryRail.svelte";
   import SeriesGrid from "../components/SeriesGrid.svelte";
   import Sheet from "../components/Sheet.svelte";
@@ -233,10 +234,14 @@
       if (selected !== null && !(series.categoryIds ?? []).includes(selected)) return false;
       if (onlySource !== null && series.provider !== onlySource) return false;
       if (onlyUnread && (unread.get(series.id) ?? 0) === 0) return false;
-      if (needle !== "" && !`${series.title} ${series.author ?? ""}`.toLowerCase().includes(needle)) return false;
+      if (needle !== "" && scoreRow(series, needle) === 0) return false;
       return true;
     });
-    if (settings.librarySort === "title") {
+    if (needle !== "") {
+      // A query ranks, it does not merely filter: the row whose title starts with what was typed
+      // comes first, then a title word, then the author. Same index the local search uses.
+      list = [...list].sort((a, b) => scoreRow(b, needle) - scoreRow(a, needle) || a.title.localeCompare(b.title));
+    } else if (settings.librarySort === "title") {
       list = [...list].sort((a, b) => a.title.localeCompare(b.title));
     } else if (settings.librarySort === "recent") {
       list = [...list].sort((a, b) => (readOrder.get(b.id) ?? 0) - (readOrder.get(a.id) ?? 0));

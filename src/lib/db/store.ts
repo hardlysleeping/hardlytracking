@@ -44,6 +44,20 @@ export interface SessionRow {
   completedChapter: boolean;
 }
 
+/**
+ * A title we have seen but not saved.
+ *
+ * History, Updates and the Continue strip are about series that may never be in the library, and a
+ * raw id in a list is not a title. This row is the smallest thing that makes them readable: the name
+ * and the cover, kept the first time the app saw the series anywhere.
+ */
+export interface KnownSeriesRow {
+  id: string;
+  title: string;
+  cover?: string;
+  at: number;
+}
+
 /** A deletion, kept as a fact so another device cannot resurrect the row. */
 export interface TombstoneRow {
   key: string;
@@ -119,8 +133,12 @@ interface PagesRow {
 export class LibraryStore {
   private readonly db: Database;
 
+  /** The engine itself, for the few things that are storage rather than library (the image cache). */
+  readonly database: Database;
+
   constructor(db: Database) {
     this.db = db;
+    this.database = db;
   }
 
   async addSeries(series: Series): Promise<void> {
@@ -228,6 +246,33 @@ export class LibraryStore {
 
   async listExtensions(): Promise<InstalledExtension[]> {
     return this.db.all<InstalledExtension>("extensions");
+  }
+
+  // ---- titles we have seen but not saved -------------------------------------
+
+  async putKnownSeries(row: KnownSeriesRow): Promise<void> {
+    const existing = await this.db.get<KnownSeriesRow>("knownSeries", row.id);
+    // Keep the first name, refresh the cover: a source that renames a title should not rewrite
+    // history, but a better cover is worth taking.
+    const merged: KnownSeriesRow = {
+      id: row.id,
+      title: existing?.title ?? row.title,
+      ...(row.cover ?? existing?.cover === undefined ? {} : { cover: row.cover ?? existing?.cover }),
+      at: row.at,
+    };
+    await this.db.put("knownSeries", merged as unknown as Record<string, unknown>);
+  }
+
+  async getKnownSeries(id: string): Promise<KnownSeriesRow | undefined> {
+    return this.db.get<KnownSeriesRow>("knownSeries", id);
+  }
+
+  async listKnownSeries(): Promise<KnownSeriesRow[]> {
+    return this.db.all<KnownSeriesRow>("knownSeries");
+  }
+
+  async getExtension(extensionId: string): Promise<InstalledExtension | undefined> {
+    return this.db.get<InstalledExtension>("extensions", extensionId);
   }
 
   async putExtension(extension: InstalledExtension): Promise<void> {
@@ -436,6 +481,20 @@ export class LibraryStore {
 
   async setExtensionPref<T>(extensionId: string, key: string, value: T): Promise<void> {
     await this.db.put("extensionPrefs", { key: `${extensionId}:${key}`, value });
+  }
+
+  /** A cached source search answer, so a repeated query paints before the network does. */
+  async getSearchCache<T>(key: string): Promise<T | undefined> {
+    const row = await this.db.get<{ key: string; value: T }>("searchCache", key);
+    return row?.value;
+  }
+
+  async putSearchCache<T>(key: string, value: T): Promise<void> {
+    await this.db.put("searchCache", { key, value });
+  }
+
+  async clearSearchCache(): Promise<void> {
+    for (const row of await this.db.all<{ key: string }>("searchCache")) await this.db.remove("searchCache", row.key);
   }
 
   async getSyncMeta<T>(key: string): Promise<T | undefined> {

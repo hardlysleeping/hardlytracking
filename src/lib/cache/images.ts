@@ -1,0 +1,161 @@
+/**
+ * Image cache: covers and page images, on this device, behind a ceiling.
+ *
+ * Why it exists: a source list re-downloads every cover on every visit, and a phone on a train
+ * should still show the shelf. The rule from HardlyReader's cache carries over — the *list* is data
+ * and is never evicted; only *copies* are, and the ceiling is a number the user chose.
+ *
+ * Storage is the app's own database (`imageCache` store: key, blob, bytes, at, usedAt), so it
+ * travels with the same open/close lifecycle as everything else and works in a packaged build.
+ * Reads return an object URL; the raw URL is the fallback when the cache is off, full, or the fetch
+ * failed — a cover that cannot be cached must still be a cover.
+ */
+import type { Database } from "../db/open";
+import {
+  CACHE_POLICY_DEFAULT,
+  planEviction,
+  measureCache,
+  type CacheEntry,
+  type CachePolicy,
+} from "./policy";
+
+interface ImageRow {
+  key: string;
+  blob: Blob;
+  bytes: number;
+  at: number;
+  usedAt: number;
+}
+
+const MAX_IMAGE_BYTES = 12 * 1024 * 1024;
+/** Covers are small; a page image is not. Refuse absurd things rather than fill the disk. */
+const ALLOWED = /^image\//i;
+
+export class ImageCache {
+  private db: Database | null = null;
+  private urls = new Map<string, string>();
+  private inflight = new Map<string, Promise<string>>();
+  policy: CachePolicy = { ...CACHE_POLICY_DEFAULT };
+
+  attach(db: Database, policy?: Partial<CachePolicy>): void {
+    this.db = db;
+    if (policy !== undefined) this.policy = { ...this.policy, ...policy };
+  }
+
+  setPolicy(policy: Partial<CachePolicy>): void {
+    this.policy = { ...this.policy, ...policy };
+    void this.prune();
+  }
+
+  /** Every row, for the Settings sentence and for eviction. */
+  async entries(): Promise<CacheEntry[]> {
+    if (this.db === null) return [];
+    const rows = await this.db.all<ImageRow>("imageCache");
+    return rows.map((row) => ({ key: row.key, bytes: row.bytes, at: row.at, usedAt: row.usedAt }));
+  }
+
+  async usage(): Promise<number> {
+    return measureCache(await this.entries());
+  }
+
+  /**
+   * The URL to put in an `<img>`.
+   *
+   * Cached → an object URL. Not cached → the network URL *and* a background fetch that stores it,
+   * so the second visit is instant. `null` means "do not cache this" (a blob:, a data:).
+   */
+  async resolve(url: string, options: { fetch?: boolean } = {}): Promise<string> {
+    if (this.db === null || !this.policy.cacheImages) return url;
+    // Covers and page images go through the app's own `/api/img` proxy, so the interesting URLs are
+    // same-origin paths, not absolute ones. A blob: or data: URL is already local — never cached.
+    if (!/^(https?:|\/)/i.test(url)) return url;
+
+    const cached = this.urls.get(url);
+    if (cached !== undefined) {
+      void this.touch(url);
+      return cached;
+    }
+    if (options.fetch === false) return url;
+
+    const pending = this.inflight.get(url);
+    if (pending !== undefined) return pending;
+
+    const task = (async (): Promise<string> => {
+      try {
+        const row = await this.db!.get<ImageRow>("imageCache", url);
+        if (row !== undefined) {
+          const objectUrl = URL.createObjectURL(row.blob);
+          this.urls.set(url, objectUrl);
+          void this.touch(url);
+          return objectUrl;
+        }
+        const response = await fetch(url);
+        if (!response.ok) return url;
+        const type = response.headers.get("content-type") ?? "";
+        if (!ALLOWED.test(type)) return url;
+        const blob = await response.blob();
+        if (blob.size === 0 || blob.size > MAX_IMAGE_BYTES) return url;
+        const now = Date.now();
+        await this.db!.put("imageCache", { key: url, blob, bytes: blob.size, at: now, usedAt: now } as unknown as Record<string, unknown>);
+        const objectUrl = URL.createObjectURL(blob);
+        this.urls.set(url, objectUrl);
+        void this.prune();
+        return objectUrl;
+      } catch {
+        return url; // a cache miss is not an error: the plain URL still renders
+      } finally {
+        this.inflight.delete(url);
+      }
+    })();
+
+    this.inflight.set(url, task);
+    return task;
+  }
+
+  /** Prefetch a screenful, so scrolling does not wait on the network. */
+  warm(urls: readonly string[]): void {
+    for (const url of urls.slice(0, 60)) void this.resolve(url);
+  }
+
+  private async touch(url: string): Promise<void> {
+    if (this.db === null) return;
+    const row = await this.db.get<ImageRow>("imageCache", url);
+    if (row === undefined) return;
+    await this.db.put("imageCache", { ...row, usedAt: Date.now() } as unknown as Record<string, unknown>);
+  }
+
+  /** Enforce the ceiling. Never touches anything pinned; reports what it removed. */
+  async prune(): Promise<{ removed: number; freed: number }> {
+    if (this.db === null) return { removed: 0, freed: 0 };
+    const entries = await this.entries();
+    const doomed = planEviction(entries, this.policy);
+    let freed = 0;
+    for (const key of doomed) {
+      const row = await this.db.get<ImageRow>("imageCache", key);
+      freed += row?.bytes ?? 0;
+      const objectUrl = this.urls.get(key);
+      if (objectUrl !== undefined) {
+        URL.revokeObjectURL(objectUrl);
+        this.urls.delete(key);
+      }
+      await this.db.remove("imageCache", key);
+    }
+    return { removed: doomed.length, freed };
+  }
+
+  /** Clear every cached copy. The library is untouched — this only drops pictures. */
+  async clear(): Promise<{ removed: number; freed: number }> {
+    if (this.db === null) return { removed: 0, freed: 0 };
+    const rows = await this.db.all<ImageRow>("imageCache");
+    let freed = 0;
+    for (const row of rows) {
+      freed += row.bytes;
+      await this.db.remove("imageCache", row.key);
+    }
+    for (const url of this.urls.values()) URL.revokeObjectURL(url);
+    this.urls.clear();
+    return { removed: rows.length, freed };
+  }
+}
+
+export const imageCache = new ImageCache();

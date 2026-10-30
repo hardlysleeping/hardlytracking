@@ -1,6 +1,14 @@
 import { apiUrl, withToken } from "./host";
 
 /**
+ * Any remote image through our own `/api/img`: page images need headers, extension icons need a
+ * host that does not answer a bare `<img>`, and one route means one place where a token is added.
+ */
+export function proxiedImage(url: string): string {
+  return withToken(apiUrl(`/api/img?url=${encodeURIComponent(url)}`));
+}
+
+/**
  * Turning a page into something an `<img>` can load.
  *
  * Most pages are a plain URL. Some sources (MangaFire among them) answer 403 unless the request

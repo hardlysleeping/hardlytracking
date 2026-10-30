@@ -15,6 +15,8 @@
   import { go } from "../lib/nav";
   import { onMount } from "svelte";
   import { hostInfo, hostToken, pairingLink, remoteHost, setHostToken, setRemoteHost, type HostInfo } from "../lib/host";
+  import { imageCache } from "../lib/cache/images";
+  import { CACHE_LIMIT_CHOICES, describeCache, formatBytes, type CacheEntry } from "../lib/cache/policy";
 
   /** The slider shows the cover the library actually draws, not a value a preset overrides. */
   const cover = $derived(coverWidth(settings.libraryDensity, deviceClass(viewport.width), settings.coverSize));
@@ -35,12 +37,33 @@
 
   /** Phone access: what this server says about itself, and the pairing state of this device. */
   let info = $state<HostInfo | null>(null);
+
+  /** The image cache, described the way HardlyReader describes its own: a number, not a spinner. */
+  let cacheEntries = $state<CacheEntry[]>([]);
+  let cacheNote = $state<string | null>(null);
+
+  const cacheSentence = $derived(
+    cacheNote ?? describeCache(cacheEntries, { limitBytes: settings.imageCacheLimitMb * 1024 * 1024, cacheImages: settings.cacheImages, keepRead: true }),
+  );
+
+  async function refreshCache(): Promise<void> {
+    cacheEntries = await imageCache.entries();
+  }
+
+  async function clearImages(): Promise<void> {
+    const removed = await imageCache.clear();
+    cacheNote = `Cleared ${removed.removed} cached image${removed.removed === 1 ? "" : "s"} — ${formatBytes(removed.freed)} freed`;
+    await refreshCache();
+    setTimeout(() => (cacheNote = null), 4000);
+  }
   let token = $state(hostToken());
   let hostValue = $state(remoteHost());
   let copied = $state(false);
 
   onMount(() => {
     void hostInfo().then((value) => (info = value));
+    void refreshCache();
+    imageCache.setPolicy({ limitBytes: settings.imageCacheLimitMb * 1024 * 1024, cacheImages: settings.cacheImages });
   });
 
   const link = $derived(info === null ? null : pairingLink(info, token));
@@ -323,6 +346,39 @@
       <span>Downloads</span>
       <span class="muted">{bytes} · {downloads.rows.length} chapters</span>
     </div>
+    <label class="row">
+      <span>Image cache<em class="sub">{cacheSentence}</em></span>
+      <select
+        class="field"
+        value={String(settings.imageCacheLimitMb)}
+        onchange={(event) => {
+          const mb = Number(event.currentTarget.value);
+          settings.set("imageCacheLimitMb", mb);
+          imageCache.setPolicy({ limitBytes: mb * 1024 * 1024 });
+          void refreshCache();
+        }}
+      >
+        {#each CACHE_LIMIT_CHOICES as choice (choice.id)}
+          <option value={String(choice.bytes / 1024 / 1024)}>{choice.label}</option>
+        {/each}
+      </select>
+    </label>
+    <label class="row">
+      <span>Cache cover and page images<em class="sub">Off means every image is fetched again.</em></span>
+      <input
+        type="checkbox"
+        checked={settings.cacheImages}
+        onchange={(event) => {
+          settings.set("cacheImages", event.currentTarget.checked);
+          imageCache.setPolicy({ cacheImages: event.currentTarget.checked });
+          void refreshCache();
+        }}
+      />
+    </label>
+    <button class="row link" onclick={() => void clearImages()}>
+      <span>Clear cached images</span>
+      <span class="chev">›</span>
+    </button>
     <button class="row link" onclick={() => go("/downloads")}>
       <span>Manage downloads</span>
       <span class="chev">›</span>

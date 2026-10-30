@@ -12,6 +12,7 @@ import type { ExtensionEntry } from "../lib/extensions/index";
 import type { RepoRow, ViewStateRow } from "../lib/db/store";
 import { BACKGROUND_GRACE_MS, viewStateKey } from "../lib/history";
 import { settings } from "./settings.svelte";
+import { imageCache } from "../lib/cache/images";
 import type { Chapter, Page, Series, Source } from "../api/source";
 
 /** One row of the Updates list: a chapter, and the title it belongs to. */
@@ -48,6 +49,9 @@ class LibraryState {
       this.extensions = await this.profile.store.listExtensions();
       this.repos = await this.profile.store.listRepos();
       this.ready = true;
+      // Covers and page images live in the same database, behind the user's ceiling.
+      imageCache.attach(this.profile.store.database);
+      void imageCache.prune();
       void this.pruneSessions();
       void this.loadSources();
     } catch (error) {
@@ -62,6 +66,57 @@ class LibraryState {
    * bytes have to come from somewhere the user chose. `installApk` keeps the row; reloading
    * sources is what turns it into chips on this page.
    */
+  /**
+   * Remember a title we saw, so History and Continue can name it later.
+   *
+   * Called wherever a series object exists anyway (its own page, a source list, search results) —
+   * never as an extra network call just to fill a label.
+   */
+  async rememberSeriesMeta(series: Pick<Series, "id" | "title" | "cover">): Promise<void> {
+    const store = this.profile?.store;
+    if (store === undefined) return;
+    await store.putKnownSeries({ id: series.id, title: series.title, ...(series.cover === undefined ? {} : { cover: series.cover }), at: Date.now() });
+  }
+
+  /**
+   * A title and cover for an id, from the cheapest place that has one.
+   *
+   * library row → a title seen before → the provider itself. The last step is a network call, so it
+   * is only made when the first two miss, and the answer is kept.
+   */
+  async resolveSeriesMeta(seriesId: string): Promise<{ title: string; cover?: string } | null> {
+    const store = this.profile?.store;
+    if (store === undefined) return null;
+    const saved = this.library.find((row) => row.id === seriesId);
+    if (saved !== undefined) return { title: saved.title, ...(saved.cover === undefined ? {} : { cover: saved.cover }) };
+    const known = await store.getKnownSeries(seriesId);
+    if (known !== undefined) return { title: known.title, ...(known.cover === undefined ? {} : { cover: known.cover }) };
+    try {
+      const provider = providerFor(this.profile!.providers, seriesId);
+      const series = await provider.details(seriesId);
+      await this.rememberSeriesMeta(series);
+      return { title: series.title, ...(series.cover === undefined ? {} : { cover: series.cover }) };
+    } catch {
+      return null;
+    }
+  }
+
+  /** Turn an installed extension on or off; its sources appear or disappear with it. */
+  async setExtensionEnabled(extensionId: string, enabled: boolean): Promise<void> {
+    if (this.profile === null) return;
+    await this.profile.setExtensionEnabled(extensionId, enabled);
+    this.extensions = await this.profile.store.listExtensions();
+    await this.loadSources();
+  }
+
+  /** Uninstall: the row goes, and its sources with it. */
+  async uninstallExtension(extensionId: string): Promise<void> {
+    if (this.profile === null) return;
+    await this.profile.uninstallExtension(extensionId);
+    this.extensions = await this.profile.store.listExtensions();
+    await this.loadSources();
+  }
+
   async installApk(file: File): Promise<InstalledExtension> {
     if (this.profile === null) throw new Error("the library is not open yet");
     const apk = new Uint8Array(await file.arrayBuffer());
@@ -113,6 +168,8 @@ class LibraryState {
     if (this.profile === null) throw new Error("the library is not open yet");
     const apk = await downloadApk(entry);
     const installed = await this.profile.installApk(apk, entry.pkg, {
+      name: entry.name,
+      iconUrl: entry.iconUrl,
       repoUrl,
       versionName: entry.version,
       versionCode: entry.versionCode,
@@ -277,13 +334,19 @@ class LibraryState {
   /** The library's continue strip: newest positions, with the titles we already know. */
   async continueReading(limit = 5): Promise<Array<{ seriesId: string; title: string; chapterId: string; page: number }>> {
     if (this.profile === null) return [];
-    const [positions, series] = await Promise.all([this.profile.store.listPositions(), this.profile.store.listSeries()]);
+    const [positions, series, known] = await Promise.all([
+      this.profile.store.listPositions(),
+      this.profile.store.listSeries(),
+      this.profile.store.listKnownSeries(),
+    ]);
     const titles = new Map(series.map((row) => [row.id, row.title]));
+    for (const row of known) if (!titles.has(row.id)) titles.set(row.id, row.title);
     return positions.slice(0, limit).map((row) => ({
       seriesId: row.seriesId,
       chapterId: row.chapterId,
       page: row.page,
-      title: titles.get(row.seriesId) ?? row.seriesId,
+      // A title we have seen beats an id; an id is never shown as a title.
+      title: titles.get(row.seriesId) ?? "Unknown title",
     }));
   }
 

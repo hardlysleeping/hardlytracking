@@ -14,6 +14,7 @@
    * A downloaded chapter is read from this device: the pages come from the library database as
    * blobs, so the extension host can be offline and the chapter still opens.
    */
+  import { cacheImage } from "../lib/cache/action";
   import { library } from "../state/library.svelte";
   import { downloads } from "../state/downloads.svelte";
   import { settings } from "../state/settings.svelte";
@@ -340,6 +341,7 @@
       {#each pages as page (page.index)}
         <div class="page" data-page={page.index}>
           <img
+            use:cacheImage={urls[page.index] ?? page.url}
             src={urls[page.index] ?? page.url}
             alt={`Page ${page.index + 1} of ${pages.length}`}
             loading={page.index < 3 ? "eager" : "lazy"}

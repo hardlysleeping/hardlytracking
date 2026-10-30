@@ -28,6 +28,9 @@ export const STORES = [
   "viewState",
   "syncMeta",
   "tombstones",
+  "imageCache",
+  "searchCache",
+  "knownSeries",
 ] as const;
 export type StoreName = (typeof STORES)[number];
 
@@ -58,6 +61,9 @@ const KEY_PATH: Record<StoreName, string> = {
   viewState: "key",
   syncMeta: "key",
   tombstones: "key",
+  imageCache: "key",
+  searchCache: "key",
+  knownSeries: "id",
 };
 
 export function keyPathOf(store: StoreName): string {
@@ -72,7 +78,7 @@ export interface Database {
 }
 
 const DB_NAME = "hardlytracking";
-const DB_VERSION = 9;
+const DB_VERSION = 11;
 
 function wrap<T>(request: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => {

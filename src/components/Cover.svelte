@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { imageCache } from "../lib/cache/images";
   /**
    * A cover, with an honest fallback: the title, not a broken-image icon.
    *
@@ -11,11 +12,33 @@
   }
   let { series, size = "grid" }: Props = $props();
   let broken = $state(false);
+
+  /**
+   * The cover through the image cache: a cached copy renders instantly and works offline, an
+   * uncached one renders from the network and is stored for next time. `series.cover` stays the
+   * source of truth — the cache never invents a URL.
+   */
+  let src = $state<string | undefined>(series.cover);
+  $effect(() => {
+    const url = series.cover;
+    if (url === undefined || url === "") {
+      src = undefined;
+      return;
+    }
+    let live = true;
+    src = url;
+    void imageCache.resolve(url).then((resolved) => {
+      if (live && resolved !== url) src = resolved;
+    });
+    return () => {
+      live = false;
+    };
+  });
 </script>
 
 <div class="cover {size}">
   {#if series.cover && !broken}
-    <img src={series.cover} alt="" loading="lazy" decoding="async" onerror={() => (broken = true)} />
+    <img src={src} alt="" loading="lazy" decoding="async" onerror={() => (broken = true)} />
   {:else}
     <span class="fallback">{series.title}</span>
   {/if}
