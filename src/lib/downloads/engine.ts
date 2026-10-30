@@ -26,6 +26,7 @@ import {
   type QueueItem,
   type StoredCount,
 } from "./state";
+import { plainQueue } from "./state";
 
 /** The store methods a download needs. `LibraryStore` satisfies this as it stands. */
 export interface DownloadStore {
@@ -318,7 +319,8 @@ export class DownloadEngine {
   }
 
   private async persistQueue(): Promise<void> {
-    await this.deps.store.setPref(QUEUE_PREF, this.host.queue);
+    // Plain data, never the live proxy: structured clone refuses one, and the queue would be lost.
+    await this.deps.store.setPref(QUEUE_PREF, plainQueue(this.host.queue));
   }
 
   /**

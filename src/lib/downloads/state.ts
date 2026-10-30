@@ -13,6 +13,24 @@ export type { DownloadRow, DownloadState };
 /** Where the waiting queue is kept. One pref key, so a reload reads the same list the app wrote. */
 export const QUEUE_PREF = "downloadQueue";
 
+/**
+ * The queue as plain data.
+ *
+ * The app's queue is a rune proxy, and IndexedDB's structured clone refuses a proxy: queueing a
+ * download threw `DataCloneError: [object Array] could not be cloned`, so nothing was ever written
+ * down and a reload lost the queue. Copying the fields is what makes it storable.
+ */
+export function plainQueue(queue: readonly QueueItem[]): QueueItem[] {
+  return queue.map((item) => ({
+    chapterId: item.chapterId,
+    seriesId: item.seriesId,
+    chapterName: item.chapterName,
+    ...(item.number === undefined ? {} : { number: item.number }),
+    ...(item.state === undefined ? {} : { state: item.state }),
+    ...(item.error === undefined ? {} : { error: item.error }),
+  }));
+}
+
 /** One chapter waiting for its turn. The active chapter is *not* in this list while it runs. */
 export interface QueueItem {
   chapterId: string;
