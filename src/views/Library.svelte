@@ -18,14 +18,16 @@
   import Sheet from "../components/Sheet.svelte";
   import LibraryHeader from "../components/LibraryHeader.svelte";
   import OverflowSheet, { type LibraryStats } from "../components/OverflowSheet.svelte";
+  import FilterSheet from "../components/FilterSheet.svelte";
   import { go, pathTo } from "../lib/nav";
   import { visibleCategories } from "../lib/categories";
   import { collectionBar, coverWidth, libraryLayout } from "../lib/layout-modes";
   import { viewport } from "../lib/layout.svelte";
   import { emptyFacts, runQuery, type QueryFacts } from "../lib/library/query";
-  import { EMPTY_FILTER } from "../lib/library/filter";
+  import { EMPTY_FILTER, isEmptyFilter } from "../lib/library/filter";
   import { DEFAULT_SORT, type SortSpec } from "../lib/library/sort";
   import type { SearchScope } from "../lib/library/search";
+  import { sourceLabel } from "../lib/titles";
   import SeriesPage from "./Series.svelte";
   import type { Series } from "../api/source";
 
@@ -40,10 +42,11 @@
   let filterOpen = $state(false);
   let sortOpen = $state(false);
   let categoriesOpen = $state(false);
+  /** Display knobs (cover size, continue strip) — the settings that are not a filter. */
+  let displayOpen = $state(false);
 
-  /** filter sheet state, applied when the sheet closes with Apply */
-  let onlyUnread = $state(false);
-  let onlySource = $state<string | null>(null);
+  /** The applied filter is a setting, not component state: a reload must keep it. */
+  const filter = $derived(settings.libraryFilter);
 
   let selection = $state<Set<string> | null>(null);
   let busy = $state<string | null>(null);
@@ -82,8 +85,15 @@
       sort: settings.librarySort,
       view: settings.libraryView,
       coverSize: settings.coverSize,
-      onlyUnread,
-      onlySource,
+      // The two old fields are still written, so a row saved by an older build restores.
+      onlyUnread: settings.libraryFilter.unread === "unread",
+      onlySource: settings.libraryFilter.sources[0] ?? null,
+      // A plain copy: the database refuses a `$state` proxy (DataCloneError).
+      filter: {
+        ...settings.libraryFilter,
+        statuses: [...settings.libraryFilter.statuses],
+        sources: [...settings.libraryFilter.sources],
+      },
       query,
       scroll: typeof window === "undefined" ? 0 : window.scrollY,
       selectedSeriesId: null as string | null,
@@ -112,8 +122,16 @@
     if (row.sort !== undefined) settings.set("librarySort", row.sort as typeof settings.librarySort);
     if (row.view !== undefined) settings.set("libraryView", row.view as typeof settings.libraryView);
     if (row.coverSize !== undefined) settings.set("coverSize", row.coverSize);
-    if (row.onlyUnread !== undefined) onlyUnread = row.onlyUnread;
-    if (row.onlySource !== undefined) onlySource = row.onlySource;
+    if (row.filter !== undefined) {
+      settings.set("libraryFilter", row.filter);
+    } else if (row.onlyUnread !== undefined || row.onlySource !== undefined) {
+      // A row written before the filter was one value: rebuild the filter it meant.
+      settings.set("libraryFilter", {
+        ...EMPTY_FILTER,
+        unread: row.onlyUnread === true ? "unread" : "any",
+        sources: row.onlySource == null ? [] : [row.onlySource],
+      });
+    }
     if (row.query !== undefined) {
       query = row.query;
       searching = row.query.trim() !== "";
@@ -158,7 +176,7 @@
 
   // Any change to how the collection is shown is remembered, without waiting for navigation.
   $effect(() => {
-    void [settings.librarySort, settings.libraryView, settings.coverSize, onlyUnread, onlySource, query];
+    void [settings.librarySort, settings.libraryView, settings.coverSize, settings.libraryFilter, query];
     saveViewSoon();
   });
 
@@ -271,6 +289,12 @@
 
   const sources = $derived([...new Set(library.library.map((series) => series.provider))]);
 
+  /** The statuses the filter can offer: the ones this library actually contains. */
+  const statusOptions = $derived([...new Set([...counts.status.values()])].sort());
+
+  /** The providers as ids for the filter and names for the sheet. */
+  const sourceOptions = $derived(sources.map((id) => ({ id, label: sourceLabel(id) })));
+
   /** The numbers the `⋯` sheet reports, from what the screen already counted. */
   const stats = $derived<LibraryStats>({
     series: library.library.length,
@@ -304,7 +328,7 @@
       { series: visible, categories: categories.items, marks: { hiddenView: categories.hiddenView, pinView: categories.pinView } },
       {
         collection: selected,
-        filter: { ...EMPTY_FILTER, unread: onlyUnread ? "unread" : "any", sources: onlySource === null ? [] : [onlySource] },
+        filter,
         search: { text: query, scope: searchScope },
         sort: sortSpec,
       },
@@ -316,7 +340,7 @@
     if (library.library.length === 0) return "Your library is empty.";
     if (query.trim() !== "") return `Nothing matches “${query.trim()}”.`;
     if (selected !== null) return "Nothing in this category yet.";
-    if (onlyUnread || onlySource !== null) return "Nothing matches these filters.";
+    if (!isEmptyFilter(filter)) return "Nothing matches these filters.";
     if (categories.hiddenView === "only") return "No hidden category has anything in it.";
     return "Every row here is filed under a hidden category. Reveal it in Categories to see them.";
   });
@@ -502,10 +526,9 @@
         {/if}
 
         <div class="tools">
-          <button class="btn ghost" onclick={() => (filterOpen = true)}>
-            Filter{onlyUnread || onlySource !== null ? " •" : ""}
-          </button>
+          <button class="btn ghost" onclick={() => (filterOpen = true)}>Filter</button>
           <button class="btn ghost" onclick={() => (sortOpen = true)}>Sort · {SORT_LABELS[settings.librarySort]}</button>
+          <button class="btn ghost" onclick={() => (displayOpen = true)}>Display</button>
           <div class="views" role="group" aria-label="Layout">
             {#each VIEWS as view (view.id)}
               <button
@@ -622,21 +645,17 @@
   </div>
 </Sheet>
 
-<Sheet open={filterOpen} title="Filter" onclose={() => (filterOpen = false)}>
+<FilterSheet
+  open={filterOpen}
+  {filter}
+  statuses={statusOptions}
+  sources={sourceOptions}
+  onclose={() => (filterOpen = false)}
+  onapply={(next) => settings.set("libraryFilter", next)}
+/>
+
+<Sheet open={displayOpen} title="Display" onclose={() => (displayOpen = false)}>
   <div class="rows">
-    <label class="row">
-      <span>Only unread</span>
-      <input type="checkbox" bind:checked={onlyUnread} />
-    </label>
-    <label class="row">
-      <span>Source</span>
-      <select class="field" value={onlySource ?? ""} onchange={(event) => (onlySource = event.currentTarget.value === "" ? null : event.currentTarget.value)}>
-        <option value="">Any source</option>
-        {#each sources as source (source)}
-          <option value={source}>{source}</option>
-        {/each}
-      </select>
-    </label>
     <label class="row">
       <span>Cover size</span>
       <input

@@ -9,6 +9,7 @@
 import type { Chapter, Page, Series } from "../../api/source";
 import type { InstalledExtension } from "../../api/dalvik";
 import { normaliseCategories, type Category } from "../categories";
+import type { LibraryFilter } from "../library/filter";
 import type { Database } from "./open";
 
 export interface ProgressRow {
@@ -75,6 +76,8 @@ export interface ViewStateRow {
   coverSize?: number;
   onlyUnread?: boolean;
   onlySource?: string | null;
+  /** The whole filter as one value; older rows only carry the two fields above. */
+  filter?: LibraryFilter;
   query?: string;
   scroll?: number;
   selectedSeriesId?: string | null;
