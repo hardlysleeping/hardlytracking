@@ -19,14 +19,15 @@
   import LibraryHeader from "../components/LibraryHeader.svelte";
   import OverflowSheet, { type LibraryStats } from "../components/OverflowSheet.svelte";
   import FilterSheet from "../components/FilterSheet.svelte";
+  import ChipRow from "../components/ChipRow.svelte";
   import { go, pathTo } from "../lib/nav";
   import { visibleCategories } from "../lib/categories";
   import { collectionBar, coverWidth, libraryLayout } from "../lib/layout-modes";
   import { viewport } from "../lib/layout.svelte";
   import { emptyFacts, runQuery, type QueryFacts } from "../lib/library/query";
-  import { EMPTY_FILTER, isEmptyFilter } from "../lib/library/filter";
+  import { EMPTY_FILTER, activeChips, countActive, isEmptyFilter, mergeFilter, withoutChip } from "../lib/library/filter";
   import { DEFAULT_SORT, type SortSpec } from "../lib/library/sort";
-  import type { SearchScope } from "../lib/library/search";
+  import { parseSearch, withoutOperator, type SearchScope } from "../lib/library/search";
   import { sourceLabel } from "../lib/titles";
   import SeriesPage from "./Series.svelte";
   import type { Series } from "../api/source";
@@ -295,6 +296,29 @@
   /** The providers as ids for the filter and names for the sheet. */
   const sourceOptions = $derived(sources.map((id) => ({ id, label: sourceLabel(id) })));
 
+  /** The filter the grid is actually answering: the sheet's, plus any operator in the box. */
+  const effectiveFilter = $derived(mergeFilter(filter, parseSearch(query).filter));
+
+  /** The number on the `Filter` button, and the chips under the tools row. */
+  const filterCount = $derived(countActive(effectiveFilter));
+  const filterChips = $derived(activeChips(effectiveFilter));
+
+  /** Clear is one tap: a filter the user cannot undo is a screen that looks broken. */
+  function clearFilters(): void {
+    settings.set("libraryFilter", { ...EMPTY_FILTER, statuses: [], sources: [] });
+  }
+
+  /**
+   * Take one chip back. A chip that came from the search box is removed from the box — the sheet
+   * never held it, so clearing the sheet's field would do nothing.
+   */
+  function removeChip(key: string): void {
+    const next = withoutChip(filter, key);
+    const wasInSheet = countActive(next) < countActive(filter);
+    settings.set("libraryFilter", next);
+    if (!wasInSheet) query = withoutOperator(query, key);
+  }
+
   /** The numbers the `⋯` sheet reports, from what the screen already counted. */
   const stats = $derived<LibraryStats>({
     series: library.library.length,
@@ -525,8 +549,28 @@
         </div>
         {/if}
 
+        {#if library.ready && selected === null && settings.showContinue && continuing.length > 0 && query.trim() === ""}
+          <section class="continue" aria-label="Continue reading">
+            <h2>Continue reading</h2>
+            <div class="strip">
+              {#each continuing as row (row.seriesId)}
+                <button class="cont" onclick={() => go(pathTo("read", row.seriesId, row.chapterId))}>
+                  <Cover series={{ title: row.title, ...(row.cover === undefined ? {} : { cover: row.cover }) }} size="row" />
+                  <span class="body">
+                    <span class="t">{row.title}</span>
+                    <span class="p">{row.chapterName === "" ? `page ${row.page + 1}` : `${row.chapterName} · page ${row.page + 1}`}</span>
+                    <span class="go">Continue</span>
+                  </span>
+                </button>
+              {/each}
+            </div>
+          </section>
+        {/if}
+
         <div class="tools">
-          <button class="btn ghost" onclick={() => (filterOpen = true)}>Filter</button>
+          <button class="btn ghost" onclick={() => (filterOpen = true)}>
+            Filter{filterCount > 0 ? ` (${filterCount})` : ""}
+          </button>
           <button class="btn ghost" onclick={() => (sortOpen = true)}>Sort · {SORT_LABELS[settings.librarySort]}</button>
           <button class="btn ghost" onclick={() => (displayOpen = true)}>Display</button>
           <div class="views" role="group" aria-label="Layout">
@@ -543,54 +587,43 @@
             {/each}
           </div>
         </div>
+
+        <ChipRow chips={filterChips} onremove={removeChip} />
         {/if}
 
         {#if !library.ready}
           <p class="empty">Opening the library…</p>
-        {:else}
-          {#if selected === null && settings.showContinue && continuing.length > 0 && query.trim() === ""}
-            <section class="continue" aria-label="Continue reading">
-              <h2>Continue reading</h2>
-              <div class="strip">
-                {#each continuing as row (row.seriesId)}
-                  <button class="cont" onclick={() => go(pathTo("read", row.seriesId, row.chapterId))}>
-                    <Cover series={{ title: row.title, ...(row.cover === undefined ? {} : { cover: row.cover }) }} size="row" />
-                    <span class="body">
-                      <span class="t">{row.title}</span>
-                      <span class="p">{row.chapterName === "" ? `page ${row.page + 1}` : `${row.chapterName} · page ${row.page + 1}`}</span>
-                      <span class="go">Continue</span>
-                    </span>
-                  </button>
-                {/each}
-              </div>
-            </section>
-          {/if}
-
-          {#if rows.length === 0 && library.library.length === 0}
-            <div class="blank">
-              <p class="blankline">Your library is empty.</p>
-              <p class="blanksub">Add a repository, install an extension, and the first series you keep lands here.</p>
-              <div class="blankacts">
-                <button class="btn primary" onclick={() => go("/extensions")}>Add a repository</button>
-                <button class="btn" onclick={() => go("/browse")}>Browse sources</button>
-              </div>
+        {:else if rows.length === 0 && library.library.length === 0}
+          <div class="blank">
+            <p class="blankline">Your library is empty.</p>
+            <p class="blanksub">Add a repository, install an extension, and the first series you keep lands here.</p>
+            <div class="blankacts">
+              <button class="btn primary" onclick={() => go("/extensions")}>Add a repository</button>
+              <button class="btn" onclick={() => go("/browse")}>Browse sources</button>
             </div>
-          {:else}
-            <SeriesGrid
-              series={rows}
-              view={settings.libraryView}
-              cover={cover}
-              empty={emptyMessage}
-              current={layout.mode === "split" ? picked : current}
-              {selection}
-              {unread}
-              onpick={pick}
-              onselect={onSelect}
-              onlongpress={(series) => {
-                selection = new Set([series.id]);
-              }}
-            />
-          {/if}
+          </div>
+        {:else if rows.length === 0 && !isEmptyFilter(filter)}
+          <div class="blank">
+            <p class="blankline">Nothing matches these filters.</p>
+            <div class="blankacts">
+              <button class="btn primary" onclick={clearFilters}>Clear filters</button>
+            </div>
+          </div>
+        {:else}
+          <SeriesGrid
+            series={rows}
+            view={settings.libraryView}
+            cover={cover}
+            empty={emptyMessage}
+            current={layout.mode === "split" ? picked : current}
+            {selection}
+            {unread}
+            onpick={pick}
+            onselect={onSelect}
+            onlongpress={(series) => {
+              selection = new Set([series.id]);
+            }}
+          />
         {/if}
       </div>
 
