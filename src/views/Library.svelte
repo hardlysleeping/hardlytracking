@@ -15,6 +15,7 @@
   import CategoryRail from "../components/CategoryRail.svelte";
   import SeriesGrid from "../components/SeriesGrid.svelte";
   import { cleanOrder, orderAfterMove } from "../lib/library/order";
+  import { applyCollection, collectionState, hiddenBy, selectAll } from "../lib/library/selection";
   import Sheet from "../components/Sheet.svelte";
   import LibraryHeader from "../components/LibraryHeader.svelte";
   import OverflowSheet, { type LibraryStats } from "../components/OverflowSheet.svelte";
@@ -54,6 +55,10 @@
   const filter = $derived(settings.libraryFilter);
 
   let selection = $state<Set<string> | null>(null);
+  /** The collection sheet's working set (category id -> ticked), applied once so Cancel cancels. */
+  let pendingCollections = $state<Record<string, boolean>>({});
+  /** The change a "these would be hidden" sheet was already answered for. */
+  let hiddenAcknowledged = $state<string | null>(null);
   let busy = $state<string | null>(null);
 
   // ---- the shape of this screen, and the pane that belongs to it -----------------------------
@@ -432,6 +437,81 @@
     selection = selection === null ? new Set() : null;
   }
 
+  /** Select All means the rows on screen, and the label says how many that is (§23). */
+  function selectEverything(): void {
+    selection = selectAll(rows);
+  }
+
+  /**
+   * Selected titles the current view no longer shows.
+   *
+   * A bulk action would still touch them while the user cannot see them, so the screen asks — once
+   * per change, not once per render.
+   */
+  const hiddenSelection = $derived(selection === null ? [] : hiddenBy(selection, rows));
+  const viewKey = $derived(`${selected ?? "all"}|${query}|${JSON.stringify(filter)}`);
+  const askAboutHidden = $derived(hiddenSelection.length > 0 && hiddenAcknowledged !== viewKey);
+
+  /** Keep the selection as it is: the ids stay, they are simply not on screen. */
+  function keepHiddenSelection(): void {
+    hiddenAcknowledged = viewKey;
+  }
+
+  /** Clear only what is no longer visible — the rows still on screen stay selected. */
+  function clearHiddenSelection(): void {
+    const visible = new Set(rows.map((row) => row.id));
+    selection = new Set([...(selection ?? [])].filter((id) => visible.has(id)));
+    hiddenAcknowledged = viewKey;
+  }
+
+  /** The selected rows, which is what a collection row is asked about. */
+  const selectedRows = $derived(selection === null ? [] : rows.filter((row) => selection?.has(row.id) === true));
+
+  /** A collection row's state: the selection's, with this sheet's unticked changes on top. */
+  function sheetState(categoryId: string): "all" | "some" | "none" {
+    const pending = pendingCollections[categoryId];
+    if (pending === undefined) return collectionState(selectedRows, categoryId);
+    return pending ? "all" : "none";
+  }
+
+  /** Ticking a row files every selected title there; unticking removes them all from it. */
+  function toggleCollection(categoryId: string): void {
+    const current = sheetState(categoryId) === "all";
+    pendingCollections = { ...pendingCollections, [categoryId]: !current };
+  }
+
+  /**
+   * Apply the ticked rows, then close.
+   *
+   * One write per title through the same store call the single-tap path uses: the sheet changes
+   * which categories, never how they are written. Untouched collections are not written at all.
+   */
+  async function applyCollections(): Promise<void> {
+    const store = library.profile?.store;
+    if (store === undefined || selection === null) return;
+    const changes = Object.entries(pendingCollections);
+    if (changes.length === 0) {
+      categoriesOpen = false;
+      return;
+    }
+    busy = "Filing…";
+    try {
+      for (const seriesId of selection) {
+        const series = library.library.find((row) => row.id === seriesId);
+        if (series === undefined) continue;
+        let next = series.categoryIds ?? [];
+        for (const [categoryId, want] of changes) next = applyCollection(next, categoryId, want);
+        await store.setSeriesCategories(seriesId, next);
+      }
+      await library.refreshLibrary();
+      categoriesOpen = false;
+      pendingCollections = {};
+      selection = null;
+    } finally {
+      busy = null;
+    }
+  }
+
   function onSelect(series: Series): void {
     if (selection === null) return;
     const next = new Set(selection);
@@ -456,25 +536,6 @@
         }
       }
       await recount();
-      selection = null;
-    } finally {
-      busy = null;
-    }
-  }
-
-  async function bulkCategory(categoryId: string): Promise<void> {
-    const store = library.profile?.store;
-    if (store === undefined || selection === null) return;
-    busy = "Filing…";
-    try {
-      for (const seriesId of selection) {
-        const series = library.library.find((row) => row.id === seriesId);
-        const current = series?.categoryIds ?? [];
-        if (current.includes(categoryId)) continue;
-        await store.setSeriesCategories(seriesId, [...current, categoryId]);
-      }
-      await library.refreshLibrary();
-      categoriesOpen = false;
       selection = null;
     } finally {
       busy = null;
@@ -642,9 +703,10 @@
     <div class="selection" class:pinned={layout.selectionBar === "pinned"} role="toolbar" aria-label="Selection actions">
       <span class="n">{busy ?? `${selection.size} selected`}</span>
       <div class="sacts">
+        <button class="btn ghost" onclick={selectEverything}>Select all {rows.length}</button>
         <button class="btn ghost" disabled={selection.size === 0} onclick={() => void bulkRead(true)}>Read</button>
         <button class="btn ghost" disabled={selection.size === 0} onclick={() => void bulkRead(false)}>Unread</button>
-        <button class="btn ghost" disabled={selection.size === 0} onclick={() => (categoriesOpen = true)}>Category</button>
+        <button class="btn ghost" disabled={selection.size === 0} onclick={() => { pendingCollections = {}; categoriesOpen = true; }}>Category</button>
         <button class="btn danger" disabled={selection.size === 0} onclick={() => void bulkRemove()}>Remove</button>
         <button class="btn ghost" onclick={() => (selection = null)}>Done</button>
       </div>
@@ -703,16 +765,26 @@
   {stats}
 />
 
-<Sheet open={categoriesOpen} title={selection === null ? "Categories" : "Add to category"} onclose={() => (categoriesOpen = false)}>
+<Sheet open={categoriesOpen} title={selection === null ? "Categories" : "Collections"} onclose={() => (categoriesOpen = false)}>
   {#if selection !== null}
-    <p class="muted">{selection.size} series will be added to:</p>
+    <p class="muted">{selection.size} selected — tick the collections they belong in.</p>
     <div class="picklist">
       {#each categories.items as category (category.id)}
-        <button class="chip" onclick={() => void bulkCategory(category.id)}>{category.name}</button>
+        {@const state = sheetState(category.id)}
+        <button
+          class="chip"
+          class:on={state !== "none"}
+          aria-pressed={state === "all" ? true : state === "some" ? "mixed" : false}
+          onclick={() => toggleCollection(category.id)}
+        >{state === "all" ? "✓" : state === "some" ? "–" : " "} {category.name}</button>
       {/each}
       {#if categories.items.length === 0}
         <p class="empty">No categories yet.</p>
       {/if}
+    </div>
+    <div class="sheetfoot">
+      <button class="btn ghost" onclick={() => { pendingCollections = {}; categoriesOpen = false; }}>Cancel</button>
+      <button class="btn primary" onclick={() => void applyCollections()}>Apply</button>
     </div>
   {:else}
     <CategoryRail
@@ -725,10 +797,26 @@
   {/if}
 </Sheet>
 
+<Sheet open={askAboutHidden} title="Selection would be hidden" onclose={keepHiddenSelection}>
+  <p>{hiddenSelection.length} selected {hiddenSelection.length === 1 ? "title is" : "titles are"} no longer in this view.</p>
+  <div class="sheetfoot">
+    <button class="btn ghost" onclick={keepHiddenSelection}>Keep selection</button>
+    <button class="btn primary" onclick={clearHiddenSelection}>Clear selection</button>
+  </div>
+</Sheet>
+
 <style>
   .view {
     padding: var(--s4) var(--s4) var(--s6);
     max-width: 1200px;
+  }
+
+  /* A sheet's footer: the two buttons sit at the end, Cancel first so Apply is the reach. */
+  .sheetfoot {
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--s2);
+    margin-top: var(--s4);
   }
 
   /* ---- the body: collections, the grid column, and the detail pane ------------------------- */
