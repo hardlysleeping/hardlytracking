@@ -76,12 +76,16 @@ export function identityOf(collection: Collection, row: Row): string {
   switch (collection) {
     case "series":
       return text("id");
+    case "chapters":
+      return text("id");
     case "categories":
       return text("id");
     case "progress":
       return text("chapterId");
     case "readState":
       return text("chapterId");
+    case "positions":
+      return text("seriesId");
     case "sessions":
       return text("id");
     case "history":
@@ -95,6 +99,8 @@ export function identityOf(collection: Collection, row: Row): string {
       return text("key");
     case "trackers":
       return `${text("service")}\u0000${text("seriesId")}`;
+    case "repos":
+      return text("url");
     case "tombstones":
       return `${text("kind")}\u0000${text("id")}`;
   }

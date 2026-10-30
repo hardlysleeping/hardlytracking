@@ -211,10 +211,14 @@ export class LibraryStore {
     return this.db.get<ProgressRow>("progress", chapterId);
   }
 
-  async setProgress(chapterId: string, page: number, total: number): Promise<void> {
+  /**
+   * Write a position. `at` is passed when a row arrives from a backup: the document knows when the
+   * reader was there, and stamping it "now" would make every restored position look freshly read.
+   */
+  async setProgress(chapterId: string, page: number, total: number, at = Date.now()): Promise<void> {
     const previous = await this.getProgress(chapterId);
     const completed = previous?.completed === true || (total > 0 && page >= total - 1);
-    const row: ProgressRow = { chapterId, page, total, at: Date.now(), completed };
+    const row: ProgressRow = { chapterId, page, total, at, completed };
     await this.db.put("progress", row as unknown as Record<string, unknown>);
   }
 
