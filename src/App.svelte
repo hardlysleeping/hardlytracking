@@ -27,6 +27,7 @@
   import { settings } from "./state/settings.svelte";
   import { downloads } from "./state/downloads.svelte";
   import { appearance } from "./lib/theme.svelte";
+  import { startChrome } from "./lib/chrome.svelte";
   import { viewport } from "./lib/layout.svelte";
   import { destinationOf } from "./lib/destinations";
   import { parseRoute, go } from "./lib/nav";
@@ -59,6 +60,7 @@
     // scheme, and pasting it into the field works here.
     registerProtocolHandler();
     appearance.start();
+    startChrome();
     const stopViewport = viewport.start();
     const onHash = () => (route = parseRoute(location.hash));
     addEventListener("hashchange", onHash);

@@ -7,6 +7,7 @@
  */
 import type { CategoryNavPreference, DensityPreference } from "../lib/layout-modes";
 import type { LibraryStore } from "../lib/db/store";
+import type { Margins, PanePreference } from "../lib/view-options";
 
 export type LibraryView = "grid" | "compact" | "list";
 export type Sort = "title" | "recent" | "source";
@@ -40,6 +41,14 @@ export interface Prefs {
   pinnedSources: string[];
   /** Global search defaults to the pinned sources when there are any. */
   searchPinnedOnly: boolean;
+  /** Room around the content: comfortable, compact, or none. */
+  contentMargins: Margins;
+  /** Remove comfort-only chrome (screen heading, Continue strip) so the grid keeps the pixels. */
+  maximizeSpace: boolean;
+  /** One pane or two, for the library. */
+  libraryPane: PanePreference;
+  /** One pane or two, for history. */
+  historyPane: PanePreference;
   /** Cover/page image cache ceiling, MB. */
   imageCacheLimitMb: number;
   /** Cache images at all. */
@@ -68,6 +77,10 @@ class Settings {
   historyRetentionDays = $state(0);
   pinnedSources = $state<string[]>([]);
   searchPinnedOnly = $state(true);
+  contentMargins = $state<Margins>("comfortable");
+  maximizeSpace = $state(false);
+  libraryPane = $state<PanePreference>("auto");
+  historyPane = $state<PanePreference>("auto");
   imageCacheLimitMb = $state(256);
   cacheImages = $state(true);
 
@@ -95,6 +108,10 @@ class Settings {
     this.historyRetentionDays = await read("historyRetentionDays", this.historyRetentionDays);
     this.pinnedSources = await read("pinnedSources", this.pinnedSources);
     this.searchPinnedOnly = await read("searchPinnedOnly", this.searchPinnedOnly);
+    this.contentMargins = await read("contentMargins", this.contentMargins);
+    this.maximizeSpace = await read("maximizeSpace", this.maximizeSpace);
+    this.libraryPane = await read("libraryPane", this.libraryPane);
+    this.historyPane = await read("historyPane", this.historyPane);
     this.imageCacheLimitMb = await read("imageCacheLimitMb", this.imageCacheLimitMb);
     this.cacheImages = await read("cacheImages", this.cacheImages);
     this.ready = true;

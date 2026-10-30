@@ -59,6 +59,9 @@
   --sidebar-w: 224px;
   --safe-b: env(safe-area-inset-bottom, 0px);
   --safe-t: env(safe-area-inset-top, 0px);
+  /* Content room, driven by the view options on <html> (see lib/view-options.ts). */
+  --pad-x: 16px;
+  --pad-y: 16px;
   --safe-l: env(safe-area-inset-left, 0px);
   --safe-r: env(safe-area-inset-right, 0px);
   --shadow-1: 0 1px 2px rgb(0 0 0 / 40%);
@@ -313,4 +316,48 @@ button.ghost:hover {
 button.ghost:disabled {
   opacity: 0.5;
   cursor: default;
+}
+
+
+/* ------------------------------------------------------------------------- *
+ * View options
+ *
+ * The margins setting is applied here, once, rather than in each screen: every view already uses
+ * the `.view` class, so one rule keeps them consistent, and the setting cannot drift screen by
+ * screen. `!important` is deliberate — a component's own padding is the thing being overridden.
+ * ------------------------------------------------------------------------- */
+:root[data-margins="compact"] {
+  --pad-x: 10px;
+  --pad-y: 12px;
+}
+
+:root[data-margins="none"] {
+  --pad-x: 4px;
+  --pad-y: 8px;
+}
+
+.view {
+  padding-left: var(--pad-x) !important;
+  padding-right: var(--pad-x) !important;
+  padding-top: var(--pad-y) !important;
+}
+
+/* Maximize space: the heading and the Continue strip are comfort, not navigation — everything they
+ * led to is still one tap away, so removing them costs no control. */
+:root[data-space="max"] .view > header,
+:root[data-space="max"] .view > .top {
+  display: none !important;
+}
+
+:root[data-space="max"] section.continue {
+  display: none !important;
+}
+
+/* Density reaches the gaps between cards, so "compact" is compact everywhere, not just in the grid. */
+:root[data-density="compact"] .view {
+  --pad-y: 10px;
+}
+
+:root[data-density="large"] .view {
+  --pad-y: 20px;
 }

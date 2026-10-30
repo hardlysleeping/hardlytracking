@@ -17,6 +17,7 @@
   import { hostInfo, hostToken, pairingLink, remoteHost, setHostToken, setRemoteHost, type HostInfo } from "../lib/host";
   import { imageCache } from "../lib/cache/images";
   import { CACHE_LIMIT_CHOICES, describeCache, formatBytes, type CacheEntry } from "../lib/cache/policy";
+  import { MARGIN_CHOICES, PANE_CHOICES } from "../lib/view-options";
 
   /** The slider shows the cover the library actually draws, not a value a preset overrides. */
   const cover = $derived(coverWidth(settings.libraryDensity, deviceClass(viewport.width), settings.coverSize));
@@ -185,12 +186,61 @@
       </select>
     </label>
     <label class="row">
+      <span>Library panes<em class="sub">Two panes put the series beside the shelf, like a tablet.</em></span>
+      <select
+        class="field"
+        value={settings.libraryPane}
+        onchange={(event) => settings.set("libraryPane", event.currentTarget.value as typeof settings.libraryPane)}
+      >
+        {#each PANE_CHOICES as choice (choice.id)}
+          <option value={choice.id}>{choice.label}</option>
+        {/each}
+      </select>
+    </label>
+    <label class="row">
       <span>Show “Continue reading”</span>
       <input type="checkbox" checked={settings.showContinue} onchange={(event) => settings.set("showContinue", event.currentTarget.checked)} />
     </label>
   </section>
 
   <section class="group">
+    <h2>Layout</h2>
+    <div class="row">
+      <span>Content margins<em class="sub">How much room the content leaves at the edges.</em></span>
+      <div class="chips">
+        {#each MARGIN_CHOICES as choice (choice.id)}
+          <button
+            class="chip"
+            class:on={settings.contentMargins === choice.id}
+            title={choice.hint}
+            onclick={() => settings.set("contentMargins", choice.id)}
+          >
+            {choice.label}
+          </button>
+        {/each}
+      </div>
+    </div>
+    <label class="row">
+      <span>Maximize space<em class="sub">Hides the screen heading and the Continue strip; every control stays one tap away.</em></span>
+      <input
+        type="checkbox"
+        checked={settings.maximizeSpace}
+        onchange={(event) => settings.set("maximizeSpace", event.currentTarget.checked)}
+      />
+    </label>
+    <label class="row">
+      <span>History panes<em class="sub">Two panes: the timeline on the left, the entry you pick on the right.</em></span>
+      <select
+        class="field"
+        value={settings.historyPane}
+        onchange={(event) => settings.set("historyPane", event.currentTarget.value as typeof settings.historyPane)}
+      >
+        {#each PANE_CHOICES as choice (choice.id)}
+          <option value={choice.id}>{choice.label}</option>
+        {/each}
+      </select>
+    </label>
+
     <h2>Reader</h2>
     <label class="row">
       <span>Reading mode</span>

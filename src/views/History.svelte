@@ -9,6 +9,9 @@
   import Cover from "../components/Cover.svelte";
   import { go, pathTo } from "../lib/nav";
   import { chapterLabel, seriesLabel } from "../lib/titles";
+  import { settings } from "../state/settings.svelte";
+  import { viewport } from "../lib/layout.svelte";
+  import { paneMode, paneRatio, squeezed } from "../lib/view-options";
 
   interface Row {
     seriesId: string;
@@ -22,6 +25,41 @@
 
   let rows = $state<Row[]>([]);
   let loading = $state(true);
+  /** The row shown in the detail pane when there is one. */
+  let picked = $state<string | null>(null);
+
+  const mode = $derived(paneMode(settings.historyPane, viewport.width));
+  const isSqueezed = $derived(squeezed(settings.historyPane, viewport.width));
+  const ratio = $derived(paneRatio(settings.splitRatio, viewport.width));
+  const pickedRow = $derived(rows.find((row) => row.chapterId === picked) ?? rows[0] ?? null);
+
+  /**
+   * The source as a reader names it, never as the runtime spells it.
+   *
+   * `dalvik` is an implementation word; the panel says "Black Clover from <extension name>" or, when
+   * the extension is not installed any more, "an extension you no longer have".
+   */
+  function sourceLabel(seriesId: string): string {
+    const [provider, ...rest] = seriesId.split(":");
+    if (provider === "dalvik") {
+      const sourceId = rest.join(":").split(":")[0];
+      const match = library.sources.find((source) => source.id === `dalvik:src:${sourceId}` || source.id.endsWith(`:${sourceId}`));
+      return match?.name ?? "an extension you no longer have";
+    }
+    if (provider === "mihon") return "Suwayomi";
+    if (provider === "komga") return "Komga";
+    if (provider === "local") return "This device";
+    return "Unknown source";
+  }
+
+  /** A row opens the reader everywhere except in the split, where it fills the pane. */
+  function open(row: Row): void {
+    if (mode === "split") {
+      picked = row.chapterId;
+      return;
+    }
+    go(pathTo("read", row.seriesId, row.chapterId));
+  }
 
   $effect(() => {
     void load();
@@ -128,29 +166,136 @@
       <button class="btn primary" onclick={() => go("/library")}>Go to the library</button>
     </div>
   {:else}
+    {#if isSqueezed}
+      <p class="squeeze">Two panes need a wider window — showing one until there is room.</p>
+    {/if}
+    <div class="panes" class:split={mode === "split"} style:--ratio={ratio}>
     {#each groups as group (group.label)}
       <section class="group">
         <h2>{group.label}</h2>
         <ul class="rows">
           {#each group.rows as row (row.chapterId)}
             <li>
-              <div class="row">
+              <div class="row" class:on={mode === "split" && pickedRow?.chapterId === row.chapterId}>
+                <button class="hit" aria-label={`${row.title} — ${row.chapterName}`} onclick={() => open(row)}></button>
                 <Cover series={{ title: row.title, cover: row.cover }} size="row" />
                 <div class="info">
                   <span class="t">{row.title}</span>
                   <span class="s">{row.chapterName} · page {row.page + 1} · {ago(row.at)}</span>
                 </div>
-                <button class="btn ghost" onclick={() => go(pathTo("read", row.seriesId, row.chapterId))}>Continue</button>
+                {#if mode !== "split"}
+                  <button class="btn ghost" onclick={() => open(row)}>Continue</button>
+                {/if}
               </div>
             </li>
           {/each}
         </ul>
       </section>
     {/each}
+
+    {#if mode === "split" && pickedRow !== null}
+      <aside class="detail" aria-label="Selected entry">
+        <div class="dcover">
+          <Cover series={{ title: pickedRow.title, cover: pickedRow.cover }} size="hero" />
+        </div>
+        <h2 class="dtitle">{pickedRow.title}</h2>
+        <p class="dsub">{pickedRow.chapterName}</p>
+        <dl class="dfacts">
+          <div><dt>Page</dt><dd>{pickedRow.page + 1}</dd></div>
+          <div><dt>Last read</dt><dd>{ago(pickedRow.at)}</dd></div>
+          <div><dt>Source</dt><dd>{sourceLabel(pickedRow.seriesId)}</dd></div>
+        </dl>
+        <button class="btn primary" onclick={() => go(pathTo("read", pickedRow.seriesId, pickedRow.chapterId))}>
+          Continue reading
+        </button>
+      </aside>
+    {/if}
+    </div>
   {/if}
 </section>
 
 <style>
+  .panes.split {
+    display: grid;
+    grid-template-columns: minmax(0, calc(var(--ratio) * 100% - 12px)) minmax(0, 1fr);
+    gap: 24px;
+    align-items: start;
+  }
+
+  .panes.split .rows {
+    min-width: 0;
+  }
+
+  .detail {
+    position: sticky;
+    top: var(--pad-y);
+    display: grid;
+    gap: var(--s3);
+    padding: var(--s4);
+    border: 1px solid var(--line);
+    border-radius: var(--r2);
+    background: var(--surface);
+  }
+
+  .detail .dcover {
+    max-width: 220px;
+  }
+
+  .dtitle {
+    font-size: var(--t-lg);
+    font-weight: 650;
+  }
+
+  .dsub {
+    color: var(--text-2);
+    font-size: var(--t-sm);
+  }
+
+  .dfacts {
+    display: grid;
+    gap: var(--s2);
+    margin: 0;
+    font-size: var(--t-sm);
+  }
+
+  .dfacts > div {
+    display: flex;
+    justify-content: space-between;
+    gap: var(--s3);
+  }
+
+  .dfacts dt {
+    color: var(--text-3);
+  }
+
+  .dfacts dd {
+    margin: 0;
+    color: var(--text-1);
+  }
+
+  .squeeze {
+    margin: 0 0 var(--s3);
+    font-size: var(--t-xs);
+    color: var(--text-3);
+  }
+
+  .row {
+    position: relative;
+  }
+
+  .row.on {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+    border-radius: var(--r2);
+  }
+
+  .hit {
+    all: unset;
+    position: absolute;
+    inset: 0;
+    cursor: pointer;
+  }
+
   .view {
     padding: var(--s4) var(--s4) var(--s7);
     max-width: 820px;
