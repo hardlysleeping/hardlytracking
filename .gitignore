@@ -17,10 +17,10 @@ ios/DerivedData/
 *.ipa
 
 # The embedded runtime: downloaded and linked by the pod's prepare_command on the Mac that builds the
-# app (pinned by SHA-256 in ios/MihonRuntime/PrepareEmbeddedRuntime.sh). Never committed — it is
-# hundreds of megabytes of someone else's binary.
-ios/MihonRuntime/Frameworks/
-ios/MihonRuntime/Runtime/
+# app (pinned by SHA-256 in plugins/mihon-runtime/ios/PrepareEmbeddedRuntime.sh). Never committed —
+# it is hundreds of megabytes of someone else's binary.
+plugins/mihon-runtime/ios/Frameworks/
+plugins/mihon-runtime/ios/Runtime/
 
 # a worktree symlink, never part of the tree
 node_modules

@@ -25,21 +25,25 @@ that knows a native runtime exists, and it answers `null` on every build that ha
 
 | Path | What it is |
 |---|---|
-| `ios/MihonRuntime/Classes/MihonRuntime.{h,mm}` | **ours**: the JNI host. Dedicated 8 MiB thread, `dlopen` with `RTLD_GLOBAL`, the VM options this runtime needs, the four bridge calls |
-| `ios/MihonRuntime/Classes/MihonRuntimePlugin.swift` | **ours**: the Capacitor plugin (`MihonRuntime`) and the background/resume lifecycle |
-| `ios/MihonRuntime/PrepareEmbeddedRuntime.sh` | **ours**: downloads the pinned JVM + server jar, checks SHA-256, links the device slice, assembles the Java home |
-| `ios/MihonRuntime/RuntimeSources/` | **ours**: framework `Info.plist`, exports shim, simulator stub, two `java.util.logging` stubs |
-| `ios/MihonRuntime/Frameworks/`, `Runtime/` | **not committed** (git-ignored): built by the script, hundreds of megabytes |
+| `plugins/mihon-runtime/ios/Classes/MihonRuntime.{h,mm}` | **ours**: the JNI host. Dedicated 8 MiB thread, `dlopen` with `RTLD_GLOBAL`, the VM options this runtime needs, the four bridge calls |
+| `plugins/mihon-runtime/ios/Classes/MihonRuntimePlugin.swift` | **ours**: the Capacitor plugin (`MihonRuntime`) and the background/resume lifecycle |
+| `plugins/mihon-runtime/ios/PrepareEmbeddedRuntime.sh` | **ours**: downloads the pinned JVM + server jar, checks SHA-256, links the device slice, assembles the Java home |
+| `plugins/mihon-runtime/ios/RuntimeSources/` | **ours**: framework `Info.plist`, exports shim, simulator stub, two `java.util.logging` stubs |
+| `plugins/mihon-runtime/ios/Frameworks/`, `Runtime/` | **not committed** (git-ignored): built by the script, hundreds of megabytes |
 | `MExtensionServer.jar` | **not ours**: M-Extension-Server, MPL-2.0, release `ios-runtime-v9` |
 | `OpenJDK.xcframework` + `java_bundle-device.zip` | **not ours**: OpenJDK Zero build, release `embedded-openjdk-ios13-v16` |
 
-Licences and why nothing upstream was copied are in `ios/MihonRuntime/THIRD_PARTY_NOTICES.md`. The
+Licences and why nothing upstream was copied are in `plugins/mihon-runtime/ios/THIRD_PARTY_NOTICES.md`. The
 upstream ObjC++ bridge lives in a Flutter plugin whose repository has no licence file, so it was not
 vendored; the host here was written against the server's published entry point
 (`mextensionserver.EmbeddedBridge`) and the JVM's JNI interface.
 
 ## Why the constraints are not preferences
 
+- **The plugin is a local npm package, not only a pod.** `cap sync` builds the app's
+  `packageClassList` by scanning the iOS source of every package in `package.json`; a pod alone
+  compiles into the app and is **never registered**, which presents as "the runtime does not start"
+  with nothing in the log. The workflow asserts the class is in that list before it archives.
 - **One thread, 8 MiB stack.** The Zero interpreter splits the current native stack between the Java
   operand stack and native frames, and the server's own threads inherit from whoever created the VM.
   A dispatch worker dies during `java.lang` bootstrap.

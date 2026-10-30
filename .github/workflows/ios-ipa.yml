@@ -45,6 +45,22 @@ jobs:
       - name: Copy the build into the iOS shell
         run: npx cap sync ios
 
+      - name: The plugin is registered, not just compiled
+        run: |
+          set -euo pipefail
+          # `cap sync` builds packageClassList by scanning the iOS source of every package in
+          # package.json. A plugin that is not in it compiles into the app and is never registered,
+          # which presents as "the runtime does not start" with nothing in the log.
+          node -e "
+            const config = require('./ios/App/App/capacitor.config.json');
+            const list = config.packageClassList || [];
+            if (!list.includes('MihonRuntimePlugin')) {
+              console.error('MihonRuntimePlugin is missing from packageClassList:', list.join(', '));
+              process.exit(1);
+            }
+            console.log('registered plugins:', list.join(', '));
+          "
+
       - name: Install pods (downloads and links the embedded JVM)
         working-directory: ios/App
         run: pod install --repo-update

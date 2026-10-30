@@ -1,0 +1,15 @@
+{
+  "name": "@hardlytracking/mihon-runtime",
+  "version": "0.1.0",
+  "description": "The on-device Mihon extension runtime for the HardlyTracking iOS shell.",
+  "private": true,
+  "license": "UNLICENSED",
+  "capacitor": {
+    "ios": {
+      "src": "ios"
+    }
+  },
+  "files": [
+    "ios"
+  ]
+}
