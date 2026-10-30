@@ -20,12 +20,16 @@ import type { ProviderKind } from "../../api/source";
 export const SYNC_FORMAT = "hardlytracking.sync";
 /**
  * 2 adds `sessions` — the reading log.
+ * 3 adds `chapters`, `positions` and `repos` — the lists an imported library needs to be
+ *   *readable* and re-installable, not just listed.
  *
  * Bumped rather than optional because a v1 document has no session list, and "missing list" is
- * refused here on purpose: an absent list is not an empty one. Nothing has shipped, so no v1
- * document exists outside tests.
+ * refused here on purpose: an absent list is not an empty one. The exception is a list a *later*
+ * version introduced: `COLLECTION_SINCE` records exactly which version added which list, so a
+ * v2 document is read with three empty lists instead of being refused — we know what v2 meant,
+ * so nothing is guessed and nothing is dropped.
  */
-export const SYNC_VERSION = 2;
+export const SYNC_VERSION = 3;
 
 /** One row of the library, as it travels. `addedAt` is local bookkeeping and stays home. */
 export interface SyncSeries {
@@ -49,6 +53,48 @@ export interface SyncCategory {
   /** The eye's mark and the pin's mark — the owner's two features, synced as state. */
   hidden: boolean;
   pinned: boolean;
+  at: number;
+  device: string;
+}
+
+/**
+ * One chapter of a series, as it travels.
+ *
+ * `read` is deliberately absent: a read mark is a `readState` row, and carrying a second copy of
+ * it inside the chapter would give the same fact two writers. `pageCount` and `number` are here
+ * because they are what a chapter list draws; the pages themselves stay on the device.
+ */
+export interface SyncChapter {
+  id: string;
+  seriesId: string;
+  name: string;
+  number: number;
+  pageCount: number;
+  uploadedAt?: number;
+  at: number;
+  device: string;
+}
+
+/** Where the reader was in a series — one row per series, so Continue Reading survives a restore. */
+export interface SyncPosition {
+  seriesId: string;
+  chapterId: string;
+  page: number;
+  at: number;
+  device: string;
+}
+
+/**
+ * An extension repository this device has added.
+ *
+ * A URL, its index and a label — never the index itself and never an APK. That is enough for an
+ * import screen to offer "add these repositories" instead of silently importing series that no
+ * installed extension can open.
+ */
+export interface SyncRepo {
+  url: string;
+  indexUrl: string;
+  name: string;
   at: number;
   device: string;
 }
@@ -189,9 +235,11 @@ export interface SyncMeta {
 export interface SyncDocument {
   meta: SyncMeta;
   series: SyncSeries[];
+  chapters: SyncChapter[];
   categories: SyncCategory[];
   progress: SyncProgress[];
   readState: SyncReadState[];
+  positions: SyncPosition[];
   history: SyncHistory[];
   sessions: SyncSession[];
   bookmarks: SyncBookmark[];
@@ -199,15 +247,18 @@ export interface SyncDocument {
   extensions: SyncExtension[];
   preferences: SyncPreference[];
   trackers: SyncTrackerMapping[];
+  repos: SyncRepo[];
   tombstones: SyncTombstone[];
 }
 
 /** Every collection, so validation and canonical ordering cannot drift apart. */
 export const COLLECTIONS = [
   "series",
+  "chapters",
   "categories",
   "progress",
   "readState",
+  "positions",
   "history",
   "sessions",
   "bookmarks",
@@ -215,10 +266,24 @@ export const COLLECTIONS = [
   "extensions",
   "preferences",
   "trackers",
+  "repos",
   "tombstones",
 ] as const;
 
 export type Collection = (typeof COLLECTIONS)[number];
+
+/**
+ * The version that introduced each collection.
+ *
+ * A list added in v3 is absent from a v2 file *by definition*, so reading it as empty is not a
+ * guess — it is what that version meant. A list that has always existed is still refused when it
+ * is missing, because there an absent list really could be a truncated file.
+ */
+const COLLECTION_SINCE: Partial<Record<Collection, number>> = {
+  chapters: 3,
+  positions: 3,
+  repos: 3,
+};
 
 export type SyncErrorReason =
   | "not-json"
@@ -244,12 +309,16 @@ function keyOf(collection: Collection, row: Record<string, unknown>): string {
   switch (collection) {
     case "series":
       return text("id");
+    case "chapters":
+      return text("id");
     case "categories":
       return text("id");
     case "progress":
       return text("chapterId");
     case "readState":
       return text("chapterId");
+    case "positions":
+      return text("seriesId");
     case "sessions":
       return text("id");
     case "history":
@@ -263,6 +332,8 @@ function keyOf(collection: Collection, row: Record<string, unknown>): string {
       return text("key");
     case "trackers":
       return `${text("service")}\u0000${text("seriesId")}`;
+    case "repos":
+      return text("url");
     case "tombstones":
       return `${text("kind")}\u0000${text("id")}`;
   }
@@ -319,9 +390,11 @@ export function emptyDocument(device: string, at: number = Date.now()): SyncDocu
       revision: 1,
     },
     series: [],
+    chapters: [],
     categories: [],
     progress: [],
     readState: [],
+    positions: [],
     history: [],
     sessions: [],
     bookmarks: [],
@@ -329,6 +402,7 @@ export function emptyDocument(device: string, at: number = Date.now()): SyncDocu
     extensions: [],
     preferences: [],
     trackers: [],
+    repos: [],
     tombstones: [],
   };
 }
@@ -380,6 +454,8 @@ export function validateSyncDocument(raw: unknown): SyncDocument {
   for (const collection of COLLECTIONS) {
     const rows = source[collection];
     if (!Array.isArray(rows)) {
+      // A list this document's own version did not have: empty is the only honest reading.
+      if (version < (COLLECTION_SINCE[collection] ?? 0)) continue;
       throw new SyncFormatError(
         "missing-collection",
         `sync document is missing the "${collection}" list — a missing list is not an empty one`,
@@ -446,6 +522,20 @@ function normaliseRow(collection: Collection, raw: unknown, index: number): Reco
         pinned: bool("pinned"),
         ...stamp,
       };
+    case "chapters": {
+      const uploadedAt = typeof row.uploadedAt === "number" && Number.isFinite(row.uploadedAt) ? row.uploadedAt : undefined;
+      return {
+        id: need("id"),
+        seriesId: need("seriesId"),
+        name: str(row.name) ?? "",
+        number: num("number"),
+        pageCount: num("pageCount"),
+        ...(uploadedAt === undefined ? {} : { uploadedAt }),
+        ...stamp,
+      };
+    }
+    case "positions":
+      return { seriesId: need("seriesId"), chapterId: need("chapterId"), page: num("page"), ...stamp };
     case "progress":
       return {
         chapterId: need("chapterId"),
@@ -509,9 +599,23 @@ function normaliseRow(collection: Collection, raw: unknown, index: number): Reco
         remoteId: need("remoteId"),
         ...stamp,
       };
+    case "repos":
+      return {
+        url: need("url"),
+        indexUrl: str(row.indexUrl) ?? "",
+        name: str(row.name) ?? "",
+        ...stamp,
+      };
     case "tombstones": {
       const kind = str(row.kind);
-      if (kind !== "series" && kind !== "category" && kind !== "history" && kind !== "bookmark" && kind !== "extension") {
+      if (
+        kind !== "series" &&
+        kind !== "category" &&
+        kind !== "history" &&
+        kind !== "session" &&
+        kind !== "bookmark" &&
+        kind !== "extension"
+      ) {
         throw new SyncFormatError("bad-entry", `tombstones[${index}] has no known kind`);
       }
       return { kind, id: need("id"), ...stamp };
@@ -522,6 +626,9 @@ function normaliseRow(collection: Collection, raw: unknown, index: number): Reco
 /** The bytes that go to the cloud: canonical, sorted, newline-terminated. */
 export function serializeSync(doc: SyncDocument): string {
   const normalised = validateSyncDocument(JSON.parse(JSON.stringify(doc)));
+  // The bytes carry every collection this build knows, so they declare this build's version. A v2
+  // header over v3 lists would be a claim a v2 reader would act on and get wrong.
+  normalised.meta.version = SYNC_VERSION;
   return `${canonicalJson(normalised)}\n`;
 }
 
