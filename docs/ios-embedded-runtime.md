@@ -25,6 +25,7 @@ that knows a native runtime exists, and it answers `null` on every build that ha
 
 | Path | What it is |
 |---|---|
+| `plugins/mihon-runtime/MihonRuntime.podspec` | **ours**: the pod. It sits at the package root because `cap sync` resolves `plugins/mihon-runtime` from the package name |
 | `plugins/mihon-runtime/ios/Classes/MihonRuntime.{h,mm}` | **ours**: the JNI host. Dedicated 8 MiB thread, `dlopen` with `RTLD_GLOBAL`, the VM options this runtime needs, the four bridge calls |
 | `plugins/mihon-runtime/ios/Classes/MihonRuntimePlugin.swift` | **ours**: the Capacitor plugin (`MihonRuntime`) and the background/resume lifecycle |
 | `plugins/mihon-runtime/ios/PrepareEmbeddedRuntime.sh` | **ours**: downloads the pinned JVM + server jar, checks SHA-256, links the device slice, assembles the Java home |
@@ -40,10 +41,12 @@ vendored; the host here was written against the server's published entry point
 
 ## Why the constraints are not preferences
 
-- **The plugin is a local npm package, not only a pod.** `cap sync` builds the app's
-  `packageClassList` by scanning the iOS source of every package in `package.json`; a pod alone
-  compiles into the app and is **never registered**, which presents as "the runtime does not start"
-  with nothing in the log. The workflow asserts the class is in that list before it archives.
+- **The plugin is a local npm package, and its podspec sits at the package root.** `cap sync` builds the app's
+  `packageClassList` by scanning the iOS source of every package in `package.json`, and writes the
+  `pod 'MihonRuntime', :path => '…/plugins/mihon-runtime'` line itself (pod name = package name). A
+  pod outside a package compiles into the app and is **never registered**, which presents as "the
+  runtime does not start" with nothing in the log; a second hand-written pod line fails `pod install`.
+  The workflow asserts the class is in `packageClassList` before it archives.
 - **One thread, 8 MiB stack.** The Zero interpreter splits the current native stack between the Java
   operand stack and native frames, and the server's own threads inherit from whoever created the VM.
   A dispatch worker dies during `java.lang` bootstrap.

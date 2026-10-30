@@ -16,11 +16,10 @@ end
 
 target 'App' do
   capacitor_pods
-  # The on-device extension runtime: an OpenJDK Zero VM in this process, serving /dalvik on loopback.
-  # It is a local npm package (plugins/mihon-runtime) as well as a pod, because `cap sync` only
-  # discovers a plugin class by scanning the iOS source of a package in package.json — a pod alone
-  # compiles and is never registered, which looks exactly like a runtime that does not start.
-  pod 'MihonRuntime', :path => '../../plugins/mihon-runtime/ios'
+  # The on-device extension runtime is added here by `cap sync` itself, from the local package
+  # `mihon-runtime` in package.json: it writes `pod 'MihonRuntime', :path => '…/plugins/mihon-runtime'`
+  # and resolves plugins/mihon-runtime/MihonRuntime.podspec. Do not add it by hand as well — a second
+  # line makes `pod install` fail on a duplicate, and a hand-written path drifts from the package.
 end
 
 post_install do |installer|
