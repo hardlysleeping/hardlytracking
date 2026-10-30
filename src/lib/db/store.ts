@@ -7,6 +7,7 @@
  * decided per provider (`SourceProvider.ownsProgress`), never here.
  */
 import type { Chapter, Page, Series } from "../../api/source";
+import type { PrefField } from "../extensions/prefs";
 import type { InstalledExtension } from "../../api/dalvik";
 import type { TrackerAccountRow, TrackerRow } from "../trackers/types";
 import { normaliseCategories, type Category } from "../categories";
@@ -554,6 +555,20 @@ export class LibraryStore {
 
   async setExtensionPref<T>(extensionId: string, key: string, value: T): Promise<void> {
     await this.db.put("extensionPrefs", { key: `${extensionId}:${key}`, value });
+  }
+
+  /**
+   * A source's settings screen, as the user left it.
+   *
+   * Stored as fields (key, kind, value) rather than as bare values: a call has to be able to turn
+   * them back into the runtime's typed wire shape, and `"false"` is not `false` to an extension.
+   */
+  async getSourcePrefs(sourceId: string): Promise<PrefField[] | undefined> {
+    return this.getExtensionPref<PrefField[]>("prefs", sourceId);
+  }
+
+  async setSourcePrefs(sourceId: string, fields: PrefField[]): Promise<void> {
+    await this.setExtensionPref("prefs", sourceId, fields);
   }
 
   /** A cached source search answer, so a repeated query paints before the network does. */

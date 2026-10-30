@@ -33,7 +33,12 @@ test("a protobuf index link tries its JSON siblings before giving up", () => {
 });
 
 test("a JSON index URL is taken at its word, a root gets both names", () => {
-  assert.deepEqual(candidateIndexUrls("https://example.test/repo/index.min.json"), ["https://example.test/repo/index.min.json"]);
+  // `index.min.json` is the exception: live repositories publish it as an "outdated app" stub, so
+  // the sibling that actually lists the extensions is tried first.
+  assert.deepEqual(candidateIndexUrls("https://example.test/repo/index.min.json"), [
+    "https://example.test/repo/index.json",
+    "https://example.test/repo/index.min.json",
+  ]);
   assert.deepEqual(candidateIndexUrls("https://example.test/repo/"), [
     "https://example.test/repo/index.json",
     "https://example.test/repo/index.min.json",

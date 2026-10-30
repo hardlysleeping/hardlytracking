@@ -11,6 +11,7 @@
   import { needsLogin } from "../api/mihon-bridge";
   import type { Series } from "../api/source";
   import SeriesGrid from "../components/SeriesGrid.svelte";
+  import SourceSettings from "../components/SourceSettings.svelte";
   import { go } from "../lib/nav";
 
   interface Props {
@@ -31,6 +32,12 @@
   let loginState = $state<"idle" | "busy" | "done">("idle");
 
   const source = $derived(library.sources.find((row) => row.id === sourceId) ?? null);
+  /**
+   * Only a source from the extension runtime has a settings screen of its own. Showing a gear on
+   * archive.org or the device library would promise a page that does not exist.
+   */
+  const configurable = $derived(source?.id.startsWith("dalvik:") === true);
+  let settingsOpen = $state(false);
 
   $effect(() => {
     // A new source resets the grid: keeping the old rows while the next fetch runs is how a
@@ -119,6 +126,11 @@
       <h1>{source?.name ?? "Source"}</h1>
       {#if source?.lang}<span class="lang">{source.lang}</span>{/if}
     </div>
+    {#if configurable}
+      <button class="btn ghost icon" aria-label="Source settings" onclick={() => (settingsOpen = true)}>
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" /><path d="M12 3v2m0 14v2M3 12h2m14 0h2M5.6 5.6l1.4 1.4m10 10l1.4 1.4m0-12.8l-1.4 1.4m-10 10l-1.4 1.4" /></svg>
+      </button>
+    {/if}
   </header>
 
   <form
@@ -155,6 +167,10 @@
     <button class="btn more" disabled={busy} onclick={() => void run(page + 1)}>{busy ? "Loading…" : "Load more"}</button>
   {/if}
 </section>
+
+{#if configurable}
+  <SourceSettings open={settingsOpen} {sourceId} onclose={() => (settingsOpen = false)} />
+{/if}
 
 <style>
   .view {

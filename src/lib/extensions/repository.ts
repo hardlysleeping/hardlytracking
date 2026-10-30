@@ -109,6 +109,13 @@ export function parseInstallLink(input: string): string {
 export function candidateIndexUrls(input: string): string[] {
   const url = parseInstallLink(input);
   if (url === "") return [];
+  // `index.min.json` is not the small twin of `index.json` any more: the live repositories publish
+  // it as a two-entry stub that only says "your app is outdated", so a user who pastes that name
+  // gets a store with two unusable rows. Its sibling is tried first, and the name they pasted is
+  // still honoured if the sibling is missing.
+  if (/\/index\.min\.json$/i.test(url)) {
+    return [url.replace(/index\.min\.json$/i, "index.json"), url];
+  }
   // An index file named outright: `.json` is read as-is, `.pb` is a protobuf index we do not parse,
   // so its JSON siblings in the same directory are tried first and the `.pb` itself is last (it
   // fails with a message that says so, rather than pretending the repository is empty).

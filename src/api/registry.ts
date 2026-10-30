@@ -19,6 +19,7 @@ import { DalvikClient, createDalvikProvider, type DalvikCapabilities, type Insta
 import { splitId, type SourceProvider } from "./source";
 import type { LibraryStore } from "../lib/db/store";
 import type { CookieJar } from "../lib/webview/store";
+import { wirePreferences } from "../lib/extensions/prefs";
 
 export interface RegistryConfig {
   store: LibraryStore;
@@ -102,6 +103,13 @@ export async function createProviders(config: RegistryConfig): Promise<ProviderS
           ...(config.cookies === undefined ? {} : { cookies: config.cookies }),
           ...(config.userAgent === undefined ? {} : { userAgent: config.userAgent }),
           ...(config.webviewPort === undefined ? {} : { webviewPort: config.webviewPort }),
+          // A source's saved settings ride on every call, because the runtime's own store is
+          // memory-only: a restart would otherwise forget the address that makes a self-hosted
+          // source reachable at all.
+          preferences: async (sourceId) => {
+            const saved = await config.store.getSourcePrefs(sourceId);
+            return saved === undefined ? undefined : wirePreferences(saved);
+          },
           // The host keeps no read state, so the marks are ours: the same store the local
           // provider writes to, which is what `ownsProgress: true` promises.
           readState: {

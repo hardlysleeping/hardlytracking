@@ -324,6 +324,19 @@ export class DalvikClient {
   }
 
   /**
+   * The source's settings screen, as data.
+   *
+   * The runtime builds it by running the extension's own `setupPreferenceScreen`, so this can fail
+   * where every other call succeeds: some extension builds trip the runtime's bytecode verifier
+   * while the screen is constructed. The error is the runtime's, and the caller decides what to
+   * offer instead — it is never swallowed into an empty list, which would look like "no settings".
+   */
+  async preferences(extensionId: string, sourceId: string): Promise<unknown> {
+    const result = await this.call<unknown>({ method: "preferencesManga", extensionId, sourceId });
+    return result.body;
+  }
+
+  /**
    * `/image/<uuid>` is relative to the host that minted it; make it loadable.
    *
    * Two shapes arrive. A path (`/image/abc`) is joined to the base. A full address is what
@@ -458,6 +471,13 @@ export interface DalvikProviderOptions {
   userAgent?: () => string | undefined;
   /** Loopback port of the app's webview bridge, for challenge pages the extension opens. */
   webviewPort?: () => number | undefined;
+  /**
+   * The source's saved settings, as the runtime applies them, read on every call.
+   *
+   * Read per call and not once, for the same reason cookies are: a user can open a source's
+   * settings and change its address mid-session, and the next page must go to the new one.
+   */
+  preferences?: (sourceId: string) => Promise<Array<Record<string, unknown>> | undefined>;
 }
 
 /** The device's own read marks, as the provider needs them. */
@@ -554,7 +574,14 @@ export function createDalvikProvider(options: DalvikProviderOptions): SourceProv
    */
   async function invoke<T>(call: DalvikCall, sourceBaseUrl: string | undefined): Promise<DalvikResult<T>> {
     const auth = await authFor(sourceBaseUrl);
-    const result = await client.call<T>(call, { auth });
+    const settings =
+      options.preferences === undefined || call.sourceId === undefined
+        ? undefined
+        : await options.preferences(call.sourceId);
+    const result = await client.call<T>(
+      settings === undefined || settings.length === 0 ? call : { ...call, preferences: settings },
+      { auth },
+    );
     if (result.setCookie.length > 0 && options.cookies !== undefined) {
       const host = sourceBaseUrl === undefined ? null : hostOf(sourceBaseUrl);
       if (host !== null) await options.cookies.remember(host, result.setCookie);

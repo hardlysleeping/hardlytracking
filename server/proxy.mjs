@@ -20,6 +20,7 @@
  * `http://127.0.0.1:<port>/image/…` addresses it mints.
  */
 import { createServer } from "node:http";
+import { upstreamPath } from "./upstream-path.mjs";
 import { networkInterfaces } from "node:os";
 import { readFile } from "node:fs/promises";
 import { extname, join, normalize } from "node:path";
@@ -72,9 +73,9 @@ async function body(request) {
   return Buffer.concat(chunks);
 }
 
-async function proxy(request, response, upstreamBase, prefix) {
+async function proxy(request, response, upstreamBase, prefix, replacement = "") {
   const incoming = new URL(request.url ?? "/", "http://localhost");
-  const target = `${upstreamBase}${incoming.pathname.replace(prefix, "")}${incoming.search}`;
+  const target = `${upstreamBase}${upstreamPath(incoming.pathname, prefix, replacement)}${incoming.search}`;
   const headers = {};
   for (const [key, value] of Object.entries(request.headers)) {
     if (!HOP_BY_HOP.has(key) && typeof value === "string") headers[key] = value;
@@ -357,7 +358,7 @@ const server = createServer((request, response) => {
     : path.startsWith("/api/dalvik/")
     ? (req, res) => proxy(req, res, DALVIK, /^\/api\/dalvik/)
     : path.startsWith("/api/mihon/")
-      ? (req, res) => proxy(req, res, RUNTIME, /^\/api\/mihon/)
+      ? (req, res) => proxy(req, res, RUNTIME, /^\/api\/mihon/, "/api")
       : serveStatic;
   handler(request, response).catch((error) => {
     response.writeHead(500, { "Content-Type": "text/plain; charset=utf-8" });
