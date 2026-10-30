@@ -14,15 +14,24 @@
   import { viewStateKey } from "../lib/history";
   import CategoryRail from "../components/CategoryRail.svelte";
   import SeriesGrid from "../components/SeriesGrid.svelte";
-  import Cover from "../components/Cover.svelte";
   import Sheet from "../components/Sheet.svelte";
+  import LibraryHeader from "../components/LibraryHeader.svelte";
+  import OverflowSheet, { type LibraryStats } from "../components/OverflowSheet.svelte";
+  import FilterSheet from "../components/FilterSheet.svelte";
+  import ChipRow from "../components/ChipRow.svelte";
+  import CollectionTabs from "../components/CollectionTabs.svelte";
+  import ContinueRail from "../components/ContinueRail.svelte";
+  import SortSheet from "../components/SortSheet.svelte";
   import { go, pathTo } from "../lib/nav";
   import { visibleCategories } from "../lib/categories";
-  import { collectionBar, coverWidth, libraryLayout } from "../lib/layout-modes";
+  import { coverWidth, libraryLayout } from "../lib/layout-modes";
   import { viewport } from "../lib/layout.svelte";
   import { emptyFacts, runQuery, type QueryFacts } from "../lib/library/query";
-  import { EMPTY_FILTER } from "../lib/library/filter";
-  import { DEFAULT_SORT, type SortSpec } from "../lib/library/sort";
+  import { EMPTY_FILTER, activeChips, countActive, isEmptyFilter, mergeFilter, withoutChip } from "../lib/library/filter";
+  import { SORT_OPTIONS, sortKeyOf, type SortSpec } from "../lib/library/sort";
+  import { parseSearch, withoutOperator, type SearchScope } from "../lib/library/search";
+  import { eligible } from "../lib/library/continue";
+  import { sourceLabel } from "../lib/titles";
   import SeriesPage from "./Series.svelte";
   import type { Series } from "../api/source";
 
@@ -32,13 +41,16 @@
   let selected = $state<string | null>(null);
   let query = $state("");
   let searching = $state(false);
+  /** `This collection` narrows the tab you are on; `All library` looks past it (§29). */
+  let searchScope = $state<SearchScope>("category");
   let filterOpen = $state(false);
   let sortOpen = $state(false);
   let categoriesOpen = $state(false);
+  /** Display knobs (cover size, continue strip) — the settings that are not a filter. */
+  let displayOpen = $state(false);
 
-  /** filter sheet state, applied when the sheet closes with Apply */
-  let onlyUnread = $state(false);
-  let onlySource = $state<string | null>(null);
+  /** The applied filter is a setting, not component state: a reload must keep it. */
+  const filter = $derived(settings.libraryFilter);
 
   let selection = $state<Set<string> | null>(null);
   let busy = $state<string | null>(null);
@@ -53,7 +65,8 @@
   let picked = $state<string | null>(null);
   /** The split ratio while the divider is being dragged; committed to `settings` on release. */
   let dragRatio = $state<number | null>(null);
-  let overflowOpen = $state(false);
+  /** The `⋯` sheet: refresh, select, categories, settings, statistics. */
+  let menuOpen = $state(false);
   let panes = $state<HTMLElement | null>(null);
 
   // ---- what this collection looked like when it was last left -------------------------------
@@ -75,8 +88,15 @@
       sort: settings.librarySort,
       view: settings.libraryView,
       coverSize: settings.coverSize,
-      onlyUnread,
-      onlySource,
+      // The two old fields are still written, so a row saved by an older build restores.
+      onlyUnread: settings.libraryFilter.unread === "unread",
+      onlySource: settings.libraryFilter.sources[0] ?? null,
+      // A plain copy: the database refuses a `$state` proxy (DataCloneError).
+      filter: {
+        ...settings.libraryFilter,
+        statuses: [...settings.libraryFilter.statuses],
+        sources: [...settings.libraryFilter.sources],
+      },
       query,
       scroll: typeof window === "undefined" ? 0 : window.scrollY,
       selectedSeriesId: null as string | null,
@@ -102,11 +122,18 @@
       return;
     }
     // A remembered view is applied, not merely stored: the point is that it looks the same.
-    if (row.sort !== undefined) settings.set("librarySort", row.sort as typeof settings.librarySort);
     if (row.view !== undefined) settings.set("libraryView", row.view as typeof settings.libraryView);
     if (row.coverSize !== undefined) settings.set("coverSize", row.coverSize);
-    if (row.onlyUnread !== undefined) onlyUnread = row.onlyUnread;
-    if (row.onlySource !== undefined) onlySource = row.onlySource;
+    if (row.filter !== undefined) {
+      settings.set("libraryFilter", row.filter);
+    } else if (row.onlyUnread !== undefined || row.onlySource !== undefined) {
+      // A row written before the filter was one value: rebuild the filter it meant.
+      settings.set("libraryFilter", {
+        ...EMPTY_FILTER,
+        unread: row.onlyUnread === true ? "unread" : "any",
+        sources: row.onlySource == null ? [] : [row.onlySource],
+      });
+    }
     if (row.query !== undefined) {
       query = row.query;
       searching = row.query.trim() !== "";
@@ -151,7 +178,7 @@
 
   // Any change to how the collection is shown is remembered, without waiting for navigation.
   $effect(() => {
-    void [settings.librarySort, settings.libraryView, settings.coverSize, onlyUnread, onlySource, query];
+    void [settings.librarySort, settings.libraryView, settings.coverSize, settings.libraryFilter, query];
     saveViewSoon();
   });
 
@@ -171,18 +198,8 @@
     }),
   );
 
-  /** The bar's collections, and the ones behind `+N`; empty when the list is a sidebar. */
-  const collections = $derived(collectionBar(shownCategories, layout.categoryNav));
-
   /** Auto is the device class's density, Custom is the slider, a preset wins over both. */
   const cover = $derived(coverWidth(settings.libraryDensity, layout.device, settings.coverSize));
-
-  /** A collection picked from `+N` still shows as the current chip. */
-  const selectedCategory = $derived(
-    selected === null ? null : shownCategories.find((category) => category.id === selected) ?? null,
-  );
-
-  const SORT_LABELS = { title: "Title", recent: "Recently read", source: "Source" } as const;
 
   const VIEWS = [
     { id: "grid", icon: "M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z" },
@@ -259,19 +276,75 @@
   let continuing = $state<Array<{ seriesId: string; chapterId: string; page: number; title: string; cover?: string; chapterName: string }>>([]);
   $effect(() => {
     if (library.profile === null) return;
-    void library.continueReading().then((rows) => (continuing = rows));
+    void library.continueReading(20).then((rows) => (continuing = rows));
   });
+
+  /** The strip's rows: dismissed titles dropped, capped at the setting, order kept. */
+  const continueRows = $derived(eligible(continuing, new Set(settings.continueDismissed), settings.continueMax));
+
+  /** Drawn only on the whole shelf, with nothing typed, when the setting is on. */
+  const continueVisible = $derived(
+    library.ready && selected === null && settings.showContinue && continueRows.length > 0 && query.trim() === "",
+  );
 
   const sources = $derived([...new Set(library.library.map((series) => series.provider))]);
 
-  /** The sort the old preference means, until T-L7 gives each collection its own spec. */
-  const sortSpec = $derived<SortSpec>(
-    settings.librarySort === "recent"
-      ? { key: "lastRead", dir: "desc" }
-      : settings.librarySort === "source"
-        ? { key: "source", dir: "asc" }
-        : DEFAULT_SORT,
-  );
+  /** The statuses the filter can offer: the ones this library actually contains. */
+  const statusOptions = $derived([...new Set([...counts.status.values()])].sort());
+
+  /** The providers as ids for the filter and names for the sheet. */
+  const sourceOptions = $derived(sources.map((id) => ({ id, label: sourceLabel(id) })));
+
+  /** The filter the grid is actually answering: the sheet's, plus any operator in the box. */
+  const effectiveFilter = $derived(mergeFilter(filter, parseSearch(query).filter));
+
+  /** The number on the `Filter` button, and the chips under the tools row. */
+  const filterCount = $derived(countActive(effectiveFilter));
+  const filterChips = $derived(activeChips(effectiveFilter));
+
+  /** Clear is one tap: a filter the user cannot undo is a screen that looks broken. */
+  function clearFilters(): void {
+    settings.set("libraryFilter", { ...EMPTY_FILTER, statuses: [], sources: [] });
+  }
+
+  /**
+   * Take one chip back. A chip that came from the search box is removed from the box — the sheet
+   * never held it, so clearing the sheet's field would do nothing.
+   */
+  function removeChip(key: string): void {
+    const next = withoutChip(filter, key);
+    const wasInSheet = countActive(next) < countActive(filter);
+    settings.set("libraryFilter", next);
+    if (!wasInSheet) query = withoutOperator(query, key);
+  }
+
+  /** The numbers the `⋯` sheet reports, from what the screen already counted. */
+  const stats = $derived<LibraryStats>({
+    series: library.library.length,
+    unread: [...counts.unread.values()].reduce((sum, count) => sum + count, 0),
+    downloaded: downloads.rows.length,
+    categories: categories.items.map((category) => ({
+      name: category.name,
+      count: visible.filter((row) => (row.categoryIds ?? []).includes(category.id)).length,
+    })),
+  });
+
+  /** A refresh re-reads the shelf and asks the sources again; a source that is down is a note. */
+  async function refreshLibrary(): Promise<void> {
+    await library.refreshLibrary();
+    await library.loadSources();
+    await recount();
+  }
+
+  /** Each collection remembers its own key and direction; All is the fallback. */
+  const sortSpec = $derived<SortSpec>(sortKeyOf(settings.sortByCollection, selected));
+
+  const sortLabel = $derived(SORT_OPTIONS.find((option) => option.key === sortSpec.key)?.label ?? "Title");
+
+  /** Applying a sort writes only the collection it was applied to. */
+  function setSort(spec: SortSpec): void {
+    settings.set("sortByCollection", { ...settings.sortByCollection, [selected ?? "all"]: spec });
+  }
 
   /** Every row this screen shows, through the one query model. */
   const rows = $derived(
@@ -279,8 +352,8 @@
       { series: visible, categories: categories.items, marks: { hiddenView: categories.hiddenView, pinView: categories.pinView } },
       {
         collection: selected,
-        filter: { ...EMPTY_FILTER, unread: onlyUnread ? "unread" : "any", sources: onlySource === null ? [] : [onlySource] },
-        search: { text: query, scope: "category" },
+        filter,
+        search: { text: query, scope: searchScope },
         sort: sortSpec,
       },
       facts,
@@ -291,7 +364,7 @@
     if (library.library.length === 0) return "Your library is empty.";
     if (query.trim() !== "") return `Nothing matches “${query.trim()}”.`;
     if (selected !== null) return "Nothing in this category yet.";
-    if (onlyUnread || onlySource !== null) return "Nothing matches these filters.";
+    if (!isEmptyFilter(filter)) return "Nothing matches these filters.";
     if (categories.hiddenView === "only") return "No hidden category has anything in it.";
     return "Every row here is filed under a hidden category. Reveal it in Categories to see them.";
   });
@@ -402,37 +475,24 @@
 </script>
 
 <section class="view">
-  <header class="top">
-    <div class="titles">
-      <h1>Library</h1>
-      {#if library.library.length > 0}
-        <span class="count">{rows.length}{rows.length !== library.library.length ? ` of ${library.library.length}` : ""}</span>
-      {/if}
-    </div>
-    {#if library.library.length > 0}
-    <div class="acts">
-      <button class="btn ghost icon" aria-label="Search the library" aria-pressed={searching} onclick={() => (searching = !searching)}>
-        <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5" /><path d="m16 16 4 4" /></svg>
-      </button>
-      <button class="btn ghost icon" aria-label="Select series" aria-pressed={selection !== null} onclick={toggleSelection}>
-        <svg viewBox="0 0 24 24"><path d="M4 7h10M4 12h10M4 17h7M17 15l2 2 3-3" /></svg>
-      </button>
-      <button class="btn ghost icon" aria-label="Refresh" onclick={() => void library.refreshLibrary().then(recount)}>
-        <svg viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.3-5.7M20 4v4h-4" /></svg>
-      </button>
-    </div>
-    {/if}
-  </header>
-
-  {#if searching}
-    <input
-      class="field search"
-      type="search"
-      placeholder="Search this library"
-      bind:value={query}
-      aria-label="Search this library"
-    />
-  {/if}
+  <LibraryHeader
+    count={rows.length}
+    total={library.library.length}
+    {searching}
+    text={query}
+    scope={searchScope}
+    selecting={selection !== null}
+    onsearch={() => (searching = !searching)}
+    onclosesearch={() => {
+      searching = false;
+      query = "";
+    }}
+    onselect={toggleSelection}
+    onrefresh={() => void refreshLibrary()}
+    onoverflow={() => (menuOpen = true)}
+    ontext={(value) => (query = value)}
+    onscope={(scope) => (searchScope = scope)}
+  />
 
   <div class="body">
     {#if layout.categoryNav.mode === "sidebar"}
@@ -459,41 +519,25 @@
       <div class="column">
         {#if library.library.length > 0}
         {#if layout.categoryNav.mode !== "sidebar"}
-        <div class="chips" role="tablist" aria-label="Categories">
-          <button class="chip" class:on={selected === null} role="tab" aria-selected={selected === null} onclick={() => (selected = null)}>
-            All
-          </button>
-          {#each collections.shown as category (category.id)}
-            <button
-              class="chip"
-              class:on={selected === category.id}
-              class:pinned={category.pinned}
-              role="tab"
-              aria-selected={selected === category.id}
-              onclick={() => (selected = category.id)}
-            >
-              {category.name}
-            </button>
-          {/each}
-          {#if selectedCategory !== null && !collections.shown.some((category) => category.id === selectedCategory.id)}
-            <button class="chip on" class:pinned={selectedCategory.pinned} role="tab" aria-selected="true" onclick={() => (selected = selectedCategory.id)}>
-              {selectedCategory.name}
-            </button>
-          {/if}
-          {#if collections.overflow.length > 0}
-            <button class="chip" aria-label={`${collections.overflow.length} more collections`} onclick={() => (overflowOpen = true)}>
-              +{collections.overflow.length}
-            </button>
-          {/if}
-          <button class="chip" onclick={() => (categoriesOpen = true)}>Categories…</button>
-        </div>
+        <CollectionTabs
+          categories={categories.items}
+          visible={shownCategories}
+          {selected}
+          onselect={(id) => (selected = id)}
+          onedit={() => (categoriesOpen = true)}
+        />
+        {/if}
+
+        {#if continueVisible && settings.continuePosition === "above"}
+          <ContinueRail rows={continueRows} size={settings.continueSize} />
         {/if}
 
         <div class="tools">
           <button class="btn ghost" onclick={() => (filterOpen = true)}>
-            Filter{onlyUnread || onlySource !== null ? " •" : ""}
+            Filter{filterCount > 0 ? ` (${filterCount})` : ""}
           </button>
-          <button class="btn ghost" onclick={() => (sortOpen = true)}>Sort · {SORT_LABELS[settings.librarySort]}</button>
+          <button class="btn ghost" onclick={() => (sortOpen = true)}>Sort · {sortLabel}</button>
+          <button class="btn ghost" onclick={() => (displayOpen = true)}>Display</button>
           <div class="views" role="group" aria-label="Layout">
             {#each VIEWS as view (view.id)}
               <button
@@ -508,54 +552,47 @@
             {/each}
           </div>
         </div>
+
+        <ChipRow chips={filterChips} onremove={removeChip} />
+
+        {#if continueVisible && settings.continuePosition === "below"}
+          <ContinueRail rows={continueRows} size={settings.continueSize} />
+        {/if}
         {/if}
 
         {#if !library.ready}
           <p class="empty">Opening the library…</p>
-        {:else}
-          {#if selected === null && settings.showContinue && continuing.length > 0 && query.trim() === ""}
-            <section class="continue" aria-label="Continue reading">
-              <h2>Continue reading</h2>
-              <div class="strip">
-                {#each continuing as row (row.seriesId)}
-                  <button class="cont" onclick={() => go(pathTo("read", row.seriesId, row.chapterId))}>
-                    <Cover series={{ title: row.title, ...(row.cover === undefined ? {} : { cover: row.cover }) }} size="row" />
-                    <span class="body">
-                      <span class="t">{row.title}</span>
-                      <span class="p">{row.chapterName === "" ? `page ${row.page + 1}` : `${row.chapterName} · page ${row.page + 1}`}</span>
-                      <span class="go">Continue</span>
-                    </span>
-                  </button>
-                {/each}
-              </div>
-            </section>
-          {/if}
-
-          {#if rows.length === 0 && library.library.length === 0}
-            <div class="blank">
-              <p class="blankline">Your library is empty.</p>
-              <p class="blanksub">Add a repository, install an extension, and the first series you keep lands here.</p>
-              <div class="blankacts">
-                <button class="btn primary" onclick={() => go("/extensions")}>Add a repository</button>
-                <button class="btn" onclick={() => go("/browse")}>Browse sources</button>
-              </div>
+        {:else if rows.length === 0 && library.library.length === 0}
+          <div class="blank">
+            <p class="blankline">Your library is empty.</p>
+            <p class="blanksub">Add a repository, install an extension, and the first series you keep lands here.</p>
+            <div class="blankacts">
+              <button class="btn primary" onclick={() => go("/extensions")}>Add a repository</button>
+              <button class="btn" onclick={() => go("/browse")}>Browse sources</button>
             </div>
-          {:else}
-            <SeriesGrid
-              series={rows}
-              view={settings.libraryView}
-              cover={cover}
-              empty={emptyMessage}
-              current={layout.mode === "split" ? picked : current}
-              {selection}
-              {unread}
-              onpick={pick}
-              onselect={onSelect}
-              onlongpress={(series) => {
-                selection = new Set([series.id]);
-              }}
-            />
-          {/if}
+          </div>
+        {:else if rows.length === 0 && !isEmptyFilter(filter)}
+          <div class="blank">
+            <p class="blankline">Nothing matches these filters.</p>
+            <div class="blankacts">
+              <button class="btn primary" onclick={clearFilters}>Clear filters</button>
+            </div>
+          </div>
+        {:else}
+          <SeriesGrid
+            series={rows}
+            view={settings.libraryView}
+            cover={cover}
+            empty={emptyMessage}
+            current={layout.mode === "split" ? picked : current}
+            {selection}
+            {unread}
+            onpick={pick}
+            onselect={onSelect}
+            onlongpress={(series) => {
+              selection = new Set([series.id]);
+            }}
+          />
         {/if}
       </div>
 
@@ -592,39 +629,25 @@
   {/if}
 </section>
 
-<Sheet open={sortOpen} title="Sort by" onclose={() => (sortOpen = false)}>
-  <div class="menu-list">
-    {#each Object.entries(SORT_LABELS) as [id, label] (id)}
-      <button
-        class="menu-item"
-        class:on={settings.librarySort === id}
-        onclick={() => {
-          settings.set("librarySort", id as typeof settings.librarySort);
-          sortOpen = false;
-        }}
-      >
-        <span>{label}</span>
-        {#if settings.librarySort === id}<span aria-hidden="true">✓</span>{/if}
-      </button>
-    {/each}
-  </div>
-</Sheet>
+<SortSheet
+  open={sortOpen}
+  spec={sortSpec}
+  collection={selected === null ? "All" : shownCategories.find((category) => category.id === selected)?.name ?? "All"}
+  onclose={() => (sortOpen = false)}
+  onapply={setSort}
+/>
 
-<Sheet open={filterOpen} title="Filter" onclose={() => (filterOpen = false)}>
+<FilterSheet
+  open={filterOpen}
+  {filter}
+  statuses={statusOptions}
+  sources={sourceOptions}
+  onclose={() => (filterOpen = false)}
+  onapply={(next) => settings.set("libraryFilter", next)}
+/>
+
+<Sheet open={displayOpen} title="Display" onclose={() => (displayOpen = false)}>
   <div class="rows">
-    <label class="row">
-      <span>Only unread</span>
-      <input type="checkbox" bind:checked={onlyUnread} />
-    </label>
-    <label class="row">
-      <span>Source</span>
-      <select class="field" value={onlySource ?? ""} onchange={(event) => (onlySource = event.currentTarget.value === "" ? null : event.currentTarget.value)}>
-        <option value="">Any source</option>
-        {#each sources as source (source)}
-          <option value={source}>{source}</option>
-        {/each}
-      </select>
-    </label>
     <label class="row">
       <span>Cover size</span>
       <input
@@ -647,31 +670,15 @@
   </div>
 </Sheet>
 
-<Sheet open={overflowOpen} title="Collections" onclose={() => (overflowOpen = false)}>
-  <div class="picklist">
-    {#each collections.overflow as category (category.id)}
-      <button
-        class="chip"
-        class:on={selected === category.id}
-        onclick={() => {
-          selected = category.id;
-          overflowOpen = false;
-        }}
-      >
-        {category.name}
-      </button>
-    {/each}
-  </div>
-  <button
-    class="menu-item"
-    onclick={() => {
-      overflowOpen = false;
-      categoriesOpen = true;
-    }}
-  >
-    <span>Edit collections…</span>
-  </button>
-</Sheet>
+<OverflowSheet
+  open={menuOpen}
+  onclose={() => (menuOpen = false)}
+  onrefresh={() => void refreshLibrary()}
+  onselect={() => (selection = new Set())}
+  oncategories={() => (categoriesOpen = true)}
+  onsettings={() => go("/settings")}
+  {stats}
+/>
 
 <Sheet open={categoriesOpen} title={selection === null ? "Categories" : "Add to category"} onclose={() => (categoriesOpen = false)}>
   {#if selection !== null}
@@ -815,37 +822,6 @@
     color: var(--text-3);
   }
 
-  .top {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--s3);
-    margin-bottom: var(--s3);
-  }
-
-  .titles {
-    display: flex;
-    align-items: baseline;
-    gap: var(--s2);
-    min-width: 0;
-  }
-
-  h1 {
-    font-size: var(--t-2xl);
-    font-weight: 650;
-  }
-
-  .count {
-    font-size: var(--t-sm);
-    color: var(--text-3);
-  }
-
-  .acts {
-    display: flex;
-    gap: 2px;
-  }
-
-  .acts svg,
   .views svg {
     width: 18px;
     height: 18px;
@@ -861,30 +837,6 @@
     background: var(--surface-2);
   }
 
-  .search {
-    width: 100%;
-    margin-bottom: var(--s3);
-    min-height: 38px;
-  }
-
-  .chips {
-    display: flex;
-    gap: var(--s2);
-    overflow-x: auto;
-    padding-bottom: var(--s1);
-    margin-bottom: var(--s3);
-    scrollbar-width: none;
-  }
-
-  .chips::-webkit-scrollbar {
-    display: none;
-  }
-
-  .chip.pinned {
-    border-color: color-mix(in srgb, var(--tone-pinned) 55%, var(--line));
-    color: var(--text-1);
-  }
-
   .tools {
     display: flex;
     align-items: center;
@@ -898,80 +850,7 @@
     gap: 2px;
   }
 
-  .continue {
-    margin-bottom: var(--s5);
-  }
-
-  .continue h2 {
-    font-size: var(--t-xs);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    color: var(--text-3);
-    margin-bottom: var(--s2);
-  }
-
-  .strip {
-    display: flex;
-    gap: var(--s2);
-    overflow-x: auto;
-  }
-
-  .cont {
-    all: unset;
-    cursor: pointer;
-    display: grid;
-    grid-template-columns: auto minmax(0, 1fr);
-    align-items: center;
-    gap: var(--s3);
-    min-width: 208px;
-    max-width: 268px;
-    padding: var(--s3);
-    border-radius: var(--r2);
-    border: 1px solid var(--line);
-    background: var(--surface);
-  }
-
-  .cont .body {
-    display: grid;
-    gap: 2px;
-    min-width: 0;
-  }
-
-  .cont .t {
-    font-weight: 600;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .cont .go {
-    font-size: var(--t-xs);
-    color: var(--accent);
-  }
-
-  .cont:hover {
-    border-color: var(--line-strong);
-  }
-
-  .cont .t {
-    font-size: var(--t-sm);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  .cont .p {
-    font-size: var(--t-xs);
-    color: var(--text-3);
-  }
-
-  .cont .go {
-    font-size: var(--t-xs);
-    color: var(--accent);
-    margin-top: var(--s1);
-  }
-
-  .blank {
+    .blank {
     display: grid;
     gap: var(--s2);
     padding-top: var(--s6);
@@ -1043,30 +922,6 @@
     gap: var(--s3);
     font-size: var(--t-md);
     min-height: 36px;
-  }
-
-  .menu-list {
-    display: grid;
-    gap: 2px;
-  }
-
-  .menu-item {
-    all: unset;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--s3);
-    padding: var(--s3);
-    border-radius: var(--r2);
-    min-height: 44px;
-    box-sizing: border-box;
-    font-size: var(--t-md);
-  }
-
-  .menu-item:hover,
-  .menu-item.on {
-    background: var(--surface-2);
   }
 
   .picklist {

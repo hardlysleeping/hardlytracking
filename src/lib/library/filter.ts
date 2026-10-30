@@ -125,3 +125,64 @@ export function mergeFilter(base: LibraryFilter, extra: Partial<LibraryFilter>):
   if (extra.tracked !== undefined && extra.tracked !== "any") merged.tracked = extra.tracked;
   return merged;
 }
+
+/** One removable chip: the key `withoutChip` takes back, and the words the row shows. */
+export interface FilterChip {
+  key: string;
+  label: string;
+}
+
+/** The chip key for a status or a source, so the row and the removal cannot disagree. */
+export const STATUS_PREFIX = "status:";
+export const SOURCE_PREFIX = "source:";
+
+/**
+ * The chips the filter row draws, in the order it draws them.
+ *
+ * A chip is a *question*, not a checkbox: ticking both download boxes is one contradictory
+ * question ("downloaded and not downloaded"), so it is one chip that keeps nothing — which is
+ * easier to see and to remove than two chips that silently cancel each other.
+ */
+export function activeChips(filter: LibraryFilter): FilterChip[] {
+  const chips: FilterChip[] = [];
+  if (filter.unread === "unread") chips.push({ key: "unread", label: "Has unread" });
+  if (filter.unread === "read") chips.push({ key: "unread", label: "Fully read" });
+  if (filter.downloaded && filter.notDownloaded) {
+    chips.push({ key: "downloads", label: "Downloaded and not downloaded" });
+  } else if (filter.downloaded) {
+    chips.push({ key: "downloaded", label: "Downloaded" });
+  } else if (filter.notDownloaded) {
+    chips.push({ key: "notDownloaded", label: "Not downloaded" });
+  }
+  for (const status of filter.statuses) chips.push({ key: STATUS_PREFIX + status, label: status });
+  for (const source of filter.sources) chips.push({ key: SOURCE_PREFIX + source, label: source });
+  if (filter.tracked === "tracked") chips.push({ key: "tracked", label: "Tracked" });
+  if (filter.tracked === "untracked") chips.push({ key: "tracked", label: "Untracked" });
+  return chips;
+}
+
+/** How many chips the row draws — the number on the `Filter` button. */
+export function countActive(filter: LibraryFilter): number {
+  return activeChips(filter).length;
+}
+
+/**
+ * Take one chip back. An unknown key returns the filter unchanged, so a stale chip (a source that
+ * was uninstalled) can be pressed without throwing.
+ */
+export function withoutChip(filter: LibraryFilter, key: string): LibraryFilter {
+  if (key === "unread") return { ...filter, unread: "any" };
+  if (key === "downloaded") return { ...filter, downloaded: false };
+  if (key === "notDownloaded") return { ...filter, notDownloaded: false };
+  if (key === "downloads") return { ...filter, downloaded: false, notDownloaded: false };
+  if (key === "tracked") return { ...filter, tracked: "any" };
+  if (key.startsWith(STATUS_PREFIX)) {
+    const status = key.slice(STATUS_PREFIX.length);
+    return { ...filter, statuses: filter.statuses.filter((row) => row !== status) };
+  }
+  if (key.startsWith(SOURCE_PREFIX)) {
+    const source = key.slice(SOURCE_PREFIX.length);
+    return { ...filter, sources: filter.sources.filter((row) => row !== source) };
+  }
+  return { ...filter };
+}

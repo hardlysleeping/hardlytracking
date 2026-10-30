@@ -120,3 +120,15 @@ export function sortSeries(rows: Series[], spec: SortSpec, facts: QueryFacts, ma
 export function sortKeyOf(prefs: Record<string, SortSpec>, collection: string | null): SortSpec {
   return prefs[collection ?? "all"] ?? prefs.all ?? DEFAULT_SORT;
 }
+
+/**
+ * The spec an old `librarySort` preference means.
+ *
+ * `librarySort` was a three-value string before each collection remembered its own key; reading it
+ * once on load is what keeps a user's existing choice instead of resetting them to Title.
+ */
+export function sortSpecOfLegacy(sort: string | undefined): SortSpec {
+  if (sort === "recent") return { key: "lastRead", dir: "desc" };
+  if (sort === "source") return { key: "source", dir: "asc" };
+  return DEFAULT_SORT;
+}

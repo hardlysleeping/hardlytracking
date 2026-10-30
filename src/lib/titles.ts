@@ -30,3 +30,31 @@ export function chapterLabel(name: string | undefined | null): string {
 export function seriesLabel(name: string | undefined | null): string {
   return readableName(name, "Unknown title");
 }
+
+/**
+ * The source as a reader names it, never as the runtime spells it.
+ *
+ * `mihon` and `dalvik` are implementation words — one is the Suwayomi runtime, the other an
+ * extension host — so a card that said `dalvik` would be showing an id where a name belongs.
+ * An extension's own name is better still when the caller knows it; this is the floor.
+ */
+export function sourceLabel(provider: string | undefined | null): string {
+  switch ((provider ?? "").trim().toLowerCase()) {
+    case "mihon":
+      return "Suwayomi";
+    case "dalvik":
+      return "Extension";
+    case "komga":
+      return "Komga";
+    case "local":
+      return "This device";
+    default:
+      return "Unknown source";
+  }
+}
+
+/** `2 unread`, `1 unread`, or nothing at all — never `0 unread`. */
+export function unreadLabel(count: number): string {
+  if (count <= 0) return "";
+  return count === 1 ? "1 unread" : `${count} unread`;
+}

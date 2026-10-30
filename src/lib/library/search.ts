@@ -12,10 +12,13 @@ import type { Series } from "../../api/source";
 import { scoreRow } from "../search/index";
 import type { LibraryFilter } from "./filter";
 
+/** Where the search box looks. `category` is the default: narrow what you are looking at. */
+export type SearchScope = "category" | "all";
+
 export interface SearchState {
   text: string;
   /** `category` narrows the collection you are in; `all` looks through the whole library. */
-  scope: "category" | "all";
+  scope: SearchScope;
 }
 
 export const EMPTY_SEARCH: SearchState = { text: "", scope: "category" };
@@ -117,4 +120,29 @@ export function searchScore(parsed: ParsedSearch, series: Series): number {
   let score = 0;
   for (const term of parsed.terms) score += scoreRow(series, term);
   return score;
+}
+
+/**
+ * Remove the operator behind one chip, leaving every other word alone.
+ *
+ * Used when a chip in the row came from the box rather than from the sheet: the chip's `×` has to
+ * take the operator out of the text, or pressing it would look like it did nothing.
+ */
+export function withoutOperator(text: string, key: string): string {
+  const match = (word: string): boolean => {
+    const at = word.indexOf(":");
+    if (at <= 0) return false;
+    const name = word.slice(0, at).toLowerCase();
+    const value = word.slice(at + 1);
+    if (key.startsWith("status:")) return name === "status" && value === key.slice(7);
+    if (key.startsWith("source:")) return name === "source" && value.toLowerCase() === key.slice(7);
+    if (key === "unread") return name === "unread";
+    if (key === "downloaded" || key === "notDownloaded" || key === "downloads") return name === "downloaded";
+    if (key === "tracked") return name === "tracked";
+    return false;
+  };
+  // `words()` keeps quoted phrases whole; the quotes are not needed to rejoin the text.
+  return words(text)
+    .filter((word) => !match(word))
+    .join(" ");
 }

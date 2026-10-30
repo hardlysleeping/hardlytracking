@@ -7,6 +7,8 @@
  */
 import type { CategoryNavPreference, DensityPreference } from "../lib/layout-modes";
 import type { LibraryStore } from "../lib/db/store";
+import { EMPTY_FILTER, type LibraryFilter } from "../lib/library/filter";
+import { sortSpecOfLegacy, type SortSpec } from "../lib/library/sort";
 import type { Margins, PanePreference } from "../lib/view-options";
 import { DEFAULT_CPU_LEVEL, type CpuLevel } from "../lib/performance";
 
@@ -27,8 +29,26 @@ export interface Prefs {
   categoryNav: CategoryNavPreference;
   /** The grid/detail split, remembered after the divider is dragged. */
   splitRatio: number;
+  /** The old three-value sort, kept readable; `sortByCollection` is what the library uses. */
   librarySort: Sort;
+  /** One sort per collection, keyed by category id, `"all"` for the whole library. */
+  sortByCollection: Record<string, SortSpec>;
+  /** The filter the sheet last applied. A durable field, so an export carries it. */
+  libraryFilter: LibraryFilter;
+  /**
+   * The Continue strip's on/off. `showContinue` is the storage key, kept from the first build so
+   * the owner's existing choice survives the upgrade — the strip's `continueShow` is this field.
+   */
   showContinue: boolean;
+  /** Where the strip sits relative to the tools row. */
+  continuePosition: "above" | "below";
+  /** How many cards the strip draws, 1–20. */
+  continueMax: number;
+  continueSize: "small" | "medium";
+  /** After finishing a chapter: point at the next unread one, or stay put. */
+  continueAfterFinish: "next-unread" | "hold";
+  /** Series taken off the strip. Their position, library and history rows are untouched. */
+  continueDismissed: string[];
   readerMode: ReaderMode;
   readerFit: Fit;
   pageGap: number;
@@ -67,7 +87,14 @@ class Settings {
   categoryNav = $state<CategoryNavPreference>("automatic");
   splitRatio = $state(0.58);
   librarySort = $state<Sort>("title");
+  sortByCollection = $state<Record<string, SortSpec>>({});
+  libraryFilter = $state<LibraryFilter>({ ...EMPTY_FILTER, statuses: [], sources: [] });
   showContinue = $state(true);
+  continuePosition = $state<"above" | "below">("above");
+  continueMax = $state(10);
+  continueSize = $state<"small" | "medium">("small");
+  continueAfterFinish = $state<"next-unread" | "hold">("next-unread");
+  continueDismissed = $state<string[]>([]);
 
   readerMode = $state<ReaderMode>("vertical");
   readerFit = $state<Fit>("width");
@@ -102,7 +129,19 @@ class Settings {
     this.categoryNav = await read("categoryNav", this.categoryNav);
     this.splitRatio = await read("splitRatio", this.splitRatio);
     this.librarySort = await read("librarySort", this.librarySort);
+    this.sortByCollection = await read("sortByCollection", this.sortByCollection);
+    // One-time migration: an existing three-value choice becomes the library's own spec, so the
+    // upgrade does not silently re-sort the shelf the user has been looking at.
+    if (Object.keys(this.sortByCollection).length === 0) {
+      this.sortByCollection = { all: sortSpecOfLegacy(this.librarySort) };
+    }
+    this.libraryFilter = await read("libraryFilter", this.libraryFilter);
     this.showContinue = await read("showContinue", this.showContinue);
+    this.continuePosition = await read("continuePosition", this.continuePosition);
+    this.continueMax = await read("continueMax", this.continueMax);
+    this.continueSize = await read("continueSize", this.continueSize);
+    this.continueAfterFinish = await read("continueAfterFinish", this.continueAfterFinish);
+    this.continueDismissed = await read("continueDismissed", this.continueDismissed);
     this.readerMode = await read("readerMode", this.readerMode);
     this.readerFit = await read("readerFit", this.readerFit);
     this.pageGap = await read("pageGap", this.pageGap);
@@ -127,10 +166,14 @@ class Settings {
    *
    * The assignment happens first and the save is fire-and-forget: a UI toggle must not wait for
    * IndexedDB, and a failed save is not worth an error banner on a preference.
+   *
+   * The value is snapshotted before it is stored: IndexedDB's structured clone refuses a Svelte
+   * `$state` proxy (`DataCloneError`), and a filter or a sort spec is an object.
    */
   set<K extends keyof Prefs>(key: K, value: Prefs[K]): void {
-    (this as unknown as Record<string, unknown>)[key] = value;
-    void this.store?.setPref(KEY + key, value).catch(() => {});
+    const plain = $state.snapshot(value) as Prefs[K];
+    (this as unknown as Record<string, unknown>)[key] = plain;
+    void this.store?.setPref(KEY + key, plain).catch(() => {});
   }
 }
 

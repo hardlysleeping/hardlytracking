@@ -11,6 +11,7 @@ import { downloadApk, loadRepository, type Repository } from "../lib/extensions/
 import type { ExtensionEntry } from "../lib/extensions/index";
 import type { RepoRow, ViewStateRow } from "../lib/db/store";
 import { BACKGROUND_GRACE_MS, viewStateKey } from "../lib/history";
+import { nextUnread } from "../lib/library/continue";
 import { settings } from "./settings.svelte";
 import { imageCache } from "../lib/cache/images";
 import type { Chapter, Page, Series, Source } from "../api/source";
@@ -355,6 +356,21 @@ class LibraryState {
       ...(covers.get(row.seriesId) === undefined ? {} : { cover: covers.get(row.seriesId) }),
       chapterName: chapterNames.get(row.chapterId) ?? "",
     }));
+  }
+
+  /**
+   * Point a series at its next unread chapter after one is finished (§7).
+   *
+   * The position row is ours, so this is a local write — nothing goes to the runtime. When there
+   * is no next unread chapter it does nothing at all: the finished chapter stays the bookmark,
+   * which is honest, and a wrap to chapter 1 would lose the reader's place.
+   */
+  async advance(seriesId: string, chapterId: string): Promise<void> {
+    const store = this.profile?.store;
+    if (store === undefined) return;
+    const next = nextUnread(await store.listChapters(seriesId), chapterId);
+    if (next === null) return;
+    await store.setPosition(seriesId, next.id, 0);
   }
 
   /**
