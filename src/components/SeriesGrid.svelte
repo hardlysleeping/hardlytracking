@@ -25,6 +25,10 @@
     onpick?: (series: Series) => void;
     onselect?: (series: Series) => void;
     onlongpress?: (series: Series) => void;
+    /** Sort = Manual: a hold arms a drag, and releasing in place still selects. */
+    reorderable?: boolean;
+    /** A drag that ended on another tile, by id. */
+    onmove?: (fromId: string, toId: string) => void;
   }
   let {
     series,
@@ -37,23 +41,68 @@
     onpick,
     onselect,
     onlongpress,
+    reorderable = false,
+    onmove,
   }: Props = $props();
 
   let pressTimer: ReturnType<typeof setTimeout> | null = null;
+  /** The tile under a held finger, and whether that hold has turned into a drag. */
+  let heldId = $state<string | null>(null);
+  let dragId = $state<string | null>(null);
+  let startX = 0;
+  let startY = 0;
 
+  /**
+   * Two gestures share one press (§22).
+   *
+   * With `reorderable` on (sort = Manual) a hold only *arms* the tile: moving more than 8px makes it
+   * a drag, releasing without moving still means selection. Everywhere else a hold is selection
+   * immediately, exactly as before — a long press must never do nothing because the sort key changed.
+   */
   function down(event: PointerEvent, item: Series) {
     if (event.pointerType === "mouse") return; // long-press is a touch gesture
+    startX = event.clientX;
+    startY = event.clientY;
+    if (!reorderable) {
+      pressTimer = setTimeout(() => {
+        pressTimer = null;
+        onlongpress?.(item);
+      }, 450);
+      return;
+    }
     pressTimer = setTimeout(() => {
       pressTimer = null;
-      onlongpress?.(item);
+      heldId = item.id;
     }, 450);
   }
 
-  function up() {
+  function moved(event: PointerEvent) {
+    if (heldId === null || dragId !== null) return;
+    if (Math.hypot(event.clientX - startX, event.clientY - startY) > 8) dragId = heldId;
+  }
+
+  /** The id of the tile under a point, so a drop lands on what the finger is over. */
+  function tileAt(x: number, y: number): string | null {
+    const hit = document.elementFromPoint(x, y)?.closest("[data-series-id]");
+    return hit instanceof HTMLElement ? hit.dataset.seriesId ?? null : null;
+  }
+
+  function up(event: PointerEvent, item: Series) {
     if (pressTimer !== null) {
       clearTimeout(pressTimer);
       pressTimer = null;
     }
+    const wasHeld = heldId !== null;
+    const from = dragId;
+    heldId = null;
+    dragId = null;
+    if (from !== null) {
+      const to = tileAt(event.clientX, event.clientY);
+      if (to !== null && to !== from) onmove?.(from, to);
+      return;
+    }
+    // Held and released in place: that is the selection gesture, not a reorder.
+    if (wasHeld) onlongpress?.(item);
   }
 
   function pick(item: Series) {
@@ -79,12 +128,16 @@
         class="tile"
         class:current={current === item.id}
         class:marked={selection?.has(item.id) === true}
+        class:held={heldId === item.id}
+        class:dragging={dragId === item.id}
+        data-series-id={item.id}
         aria-pressed={selection === null ? undefined : selection.has(item.id)}
         onclick={() => pick(item)}
         onpointerdown={(event) => down(event, item)}
-        onpointerup={up}
-        onpointercancel={up}
-        onpointerleave={up}
+        onpointermove={moved}
+        onpointerup={(event) => up(event, item)}
+        onpointercancel={(event) => up(event, item)}
+        onpointerleave={(event) => up(event, item)}
         oncontextmenu={(event) => {
           if (selection !== null) return;
           event.preventDefault();
@@ -166,6 +219,21 @@
   }
   .tile.marked :global(.cover) {
     outline: 2px solid var(--accent);
+  }
+  /* A held tile says so, because a hold now waits to learn whether it is a drag or a selection. */
+  .tile.held {
+    transform: scale(1.03);
+    filter: drop-shadow(0 6px 14px rgb(0 0 0 / 35%));
+    transition: transform 120ms ease;
+  }
+  .tile.dragging {
+    opacity: 0.55;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .tile.held {
+      transform: none;
+      transition: none;
+    }
   }
 
   .badge {

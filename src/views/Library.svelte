@@ -14,6 +14,7 @@
   import { viewStateKey } from "../lib/history";
   import CategoryRail from "../components/CategoryRail.svelte";
   import SeriesGrid from "../components/SeriesGrid.svelte";
+  import { cleanOrder, orderAfterMove } from "../lib/library/order";
   import Sheet from "../components/Sheet.svelte";
   import LibraryHeader from "../components/LibraryHeader.svelte";
   import OverflowSheet, { type LibraryStats } from "../components/OverflowSheet.svelte";
@@ -346,6 +347,10 @@
     settings.set("sortByCollection", { ...settings.sortByCollection, [selected ?? "all"]: spec });
   }
 
+  /** This collection's manual order, and the key its list is stored under. */
+  const orderKey = $derived(selected ?? "all");
+  const manualOrder = $derived(cleanOrder(settings.manualOrder[orderKey]));
+
   /** Every row this screen shows, through the one query model. */
   const rows = $derived(
     runQuery(
@@ -355,10 +360,26 @@
         filter,
         search: { text: query, scope: searchScope },
         sort: sortSpec,
+        manual: manualOrder,
       },
       facts,
     ),
   );
+
+  /**
+   * A drag writes the order the shelf was drawing, minus the drag.
+   *
+   * Written to this collection only, and only when the sort is Manual: every other key decides its
+   * own order, so storing one there would be a preference that silently does nothing.
+   */
+  function moveRow(fromId: string, toId: string): void {
+    const next = orderAfterMove(
+      rows.map((row) => row.id),
+      fromId,
+      toId,
+    );
+    settings.set("manualOrder", { ...settings.manualOrder, [orderKey]: next });
+  }
 
   const emptyMessage = $derived.by(() => {
     if (library.library.length === 0) return "Your library is empty.";
@@ -589,6 +610,8 @@
             {unread}
             onpick={pick}
             onselect={onSelect}
+            reorderable={sortSpec.key === "manual"}
+            onmove={moveRow}
             onlongpress={(series) => {
               selection = new Set([series.id]);
             }}

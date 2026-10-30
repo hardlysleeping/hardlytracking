@@ -33,6 +33,14 @@ export interface Prefs {
   librarySort: Sort;
   /** One sort per collection, keyed by category id, `"all"` for the whole library. */
   sortByCollection: Record<string, SortSpec>;
+  /**
+   * Manual order, one id list per collection (`"all"` for the whole library).
+   *
+   * Ids, not rows: a series row is rebuilt from the runtime on every add, so an order field on the
+   * row would be dropped on the next save. A list that names ids we no longer have is harmless —
+   * they are ignored, and anything unlisted goes last in title order.
+   */
+  manualOrder: Record<string, string[]>;
   /** The filter the sheet last applied. A durable field, so an export carries it. */
   libraryFilter: LibraryFilter;
   /**
@@ -88,6 +96,7 @@ class Settings {
   splitRatio = $state(0.58);
   librarySort = $state<Sort>("title");
   sortByCollection = $state<Record<string, SortSpec>>({});
+  manualOrder = $state<Record<string, string[]>>({});
   libraryFilter = $state<LibraryFilter>({ ...EMPTY_FILTER, statuses: [], sources: [] });
   showContinue = $state(true);
   continuePosition = $state<"above" | "below">("above");
@@ -130,6 +139,7 @@ class Settings {
     this.splitRatio = await read("splitRatio", this.splitRatio);
     this.librarySort = await read("librarySort", this.librarySort);
     this.sortByCollection = await read("sortByCollection", this.sortByCollection);
+    this.manualOrder = await read("manualOrder", this.manualOrder);
     // One-time migration: an existing three-value choice becomes the library's own spec, so the
     // upgrade does not silently re-sort the shelf the user has been looking at.
     if (Object.keys(this.sortByCollection).length === 0) {
