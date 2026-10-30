@@ -403,11 +403,27 @@
     })),
   });
 
-  /** A refresh re-reads the shelf and asks the sources again; a source that is down is a note. */
+  /**
+   * A refresh re-reads the shelf and asks the sources again. A failed check is a note, never an
+   * empty library: everything on this screen — the rows, the covers already cached, the collections,
+   * the progress, the unread marks, the download badges — comes from the local store, so being
+   * offline changes exactly one line of text.
+   */
+  const OFFLINE_NOTE = "Your Library is available offline. Some source updates could not be checked.";
+  let offline = $state(false);
+
   async function refreshLibrary(): Promise<void> {
-    await library.refreshLibrary();
-    await library.loadSources();
-    await recount();
+    try {
+      await library.refreshLibrary();
+      await library.loadSources();
+      await recount();
+      offline = false;
+    } catch {
+      offline = true;
+    }
+    // `loadSources` reports a dead provider into `library.error` rather than throwing, so a refresh
+    // that "succeeded" with no sources at all is the same situation as one that threw.
+    if (library.error !== null) offline = true;
   }
 
   /** Each collection remembers its own key and direction; All is the fallback. */
@@ -682,6 +698,10 @@
     onscope={(scope) => (libraryMemory.scope = scope)}
   />
 
+  {#if offline}
+    <p class="offline" role="status">{OFFLINE_NOTE}</p>
+  {/if}
+
   <div class="body">
     {#if layout.categoryNav.mode === "sidebar"}
       <aside class="collections" style:width={`${layout.sidebarWidth}px`} aria-label="Collections">
@@ -941,6 +961,17 @@
 </Sheet>
 
 <style>
+  /* One line, in place: no dialog, no empty screen, nothing else on this page changes. */
+  .offline {
+    margin: 0 var(--s3) var(--s2);
+    padding: var(--s2) var(--s3);
+    border: 1px solid var(--line);
+    border-radius: var(--r2);
+    background: var(--surface-2);
+    color: var(--muted);
+    font-size: 13px;
+    line-height: 1.35;
+  }
   .view {
     padding: var(--s4) var(--s4) var(--s6);
     max-width: 1200px;

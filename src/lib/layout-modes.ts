@@ -108,10 +108,20 @@ export function defaultDensity(device: DeviceClass): Density {
   return device === "phone" ? "large" : "comfortable";
 }
 
+/**
+ * The cover width `auto` draws, per device class.
+ *
+ * Not the named densities: a 900 px tablet at the phone's "comfortable" 112 fits seven columns,
+ * which is a wall of thumbnails, not a shelf. These widths land the same component on 2 / 3 / 4 / 6
+ * columns at 390 / 600 / 900 / 1400 px — the plan's own numbers — and a named density still wins,
+ * because a user who picked "Compact" meant it.
+ */
+export const AUTO_COVER: Record<DeviceClass, number> = { phone: 148, tablet: 180, desktop: 200 };
+
 /** The cover width a library draws, from the preference and the slider. */
 export function coverWidth(preference: DensityPreference, device: DeviceClass, coverSize: number): number {
   if (preference === "manual") return coverSize;
-  if (preference === "auto") return DENSITIES[defaultDensity(device)];
+  if (preference === "auto") return AUTO_COVER[device];
   return DENSITIES[preference];
 }
 

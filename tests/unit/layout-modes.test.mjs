@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  AUTO_COVER,
   BADGE_OPTIONS,
   DEFAULT_BADGES,
   DENSITIES,
@@ -193,8 +194,10 @@ test("density: auto is the device class's own default, and Custom is the slider"
   assert.equal(defaultDensity("tablet"), "comfortable");
   assert.equal(defaultDensity("desktop"), "comfortable");
 
-  assert.equal(coverWidth("auto", "phone", 132), DENSITIES.large);
-  assert.equal(coverWidth("auto", "tablet", 132), DENSITIES.comfortable);
+  // `auto` is the device class's own width, which is not the same as its named density: a tablet's
+  // "comfortable" 112 would draw seven columns at 900px (see the widths test below).
+  assert.equal(coverWidth("auto", "phone", 132), AUTO_COVER.phone);
+  assert.equal(coverWidth("auto", "tablet", 132), AUTO_COVER.tablet);
   assert.equal(coverWidth("comfortable", "desktop", 132), DENSITIES.comfortable);
   assert.equal(coverWidth("compact", "tablet", 132), DENSITIES.compact);
   // Custom is the slider, verbatim — the value need not be a preset.
@@ -235,4 +238,21 @@ test("the collection bar draws everything when it fits, and nothing beside a sid
 
   const sidebar = collectionBar(items, { mode: "sidebar", visible: 0, overflow: 0, pinned: 1 });
   assert.deepEqual(sidebar, { shown: [], overflow: [] });
+});
+
+test("the same grid draws 2 / 3 / 4 / 6 columns at 390 / 600 / 900 / 1400", () => {
+  // The plan's widths, through the shipped functions rather than a second copy of the arithmetic:
+  // a tablet at the phone's cover width fitted seven columns, which is a wall of thumbnails.
+  const counts = [390, 600, 900, 1400].map((width) => {
+    const cover = coverWidth("auto", deviceClass(width), 132);
+    return columns(width - 24, cover);
+  });
+  assert.deepEqual(counts, [2, 3, 4, 6]);
+});
+
+test("a named density still wins over the device's auto width", () => {
+  // Someone who picked Compact meant it, even on a desktop.
+  assert.equal(coverWidth("compact", "desktop", 132), DENSITIES.compact);
+  assert.equal(coverWidth("manual", "desktop", 111), 111);
+  assert.equal(coverWidth("auto", "phone", 132), AUTO_COVER.phone);
 });
