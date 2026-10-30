@@ -1,0 +1,52 @@
+{
+  "name": "Fixture Repository",
+  "badgeLabel": "FIX",
+  "signingKey": "a806eecc97621b76c74878b3d2b7851ba7290673fb58db35079509932b813ae0",
+  "contact": {
+    "website": "https://fixture.example/repo",
+    "discord": "https://discord.gg/fixture"
+  },
+  "extensionList": {
+    "extensions": [
+      {
+        "name": "Fixture Demo",
+        "packageName": "fixture.demo",
+        "resources": {
+          "apkUrl": "fixture.demo-v1.0.0.apk",
+          "iconUrl": "https://fixture.example/icon.png",
+          "jarUrl": "fixture.demo-v1.0.0.jar"
+        },
+        "extensionLib": "1.6",
+        "versionCode": "100",
+        "versionName": "1.0.0",
+        "contentWarning": "CONTENT_WARNING_SAFE",
+        "sources": [
+          {
+            "id": "1000000000000000001",
+            "name": "Fixture HTML",
+            "language": "en",
+            "homeUrl": "https://fixture.example/"
+          },
+          {
+            "id": "1000000000000000002",
+            "name": "Fixture JSON",
+            "language": "en",
+            "homeUrl": "https://fixture.example/api/"
+          },
+          {
+            "id": "1000000000000000003",
+            "name": "Fixture Login",
+            "language": "en",
+            "homeUrl": "https://login.fixture.example/"
+          },
+          {
+            "id": "1000000000000000004",
+            "name": "Fixture Cookie",
+            "language": "en",
+            "homeUrl": "https://cookie.fixture.example/"
+          }
+        ]
+      }
+    ]
+  }
+}

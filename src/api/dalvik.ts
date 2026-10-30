@@ -272,6 +272,26 @@ function pathOf(url: string): string {
   }
 }
 
+/**
+ * A bare relative address belongs to the source's site, not to the host.
+ *
+ * Three shapes arrive and only one needs a base: a full URL is already an address; `/image/abc`
+ * is the host's own proxy path (the thing `asset` re-points onto this client's base); and
+ * `covers/3.png` is the *source's* own site, which only the extension's declared `baseUrl` can
+ * resolve. Handing that last shape to `asset` joins it to the host and 404s — the fixture in
+ * `tests/fixtures/dalvik-mock.mjs` mints exactly that shape for exactly this reason.
+ */
+function sourceRelative(sourceBaseUrl: string | undefined, raw: string | null | undefined): string | null {
+  if (raw === null || raw === undefined || raw === "") return null;
+  if (/^([a-z][a-z0-9+.-]*:|\/)/i.test(raw)) return null;
+  if (sourceBaseUrl === undefined || sourceBaseUrl === "") return null;
+  try {
+    return new URL(raw, sourceBaseUrl.endsWith("/") ? sourceBaseUrl : `${sourceBaseUrl}/`).toString();
+  } catch {
+    return null;
+  }
+}
+
 function base64(bytes: Uint8Array): string {
   // Node and the browser disagree about how to feed btoa, so go through Buffer where it exists.
   if (typeof Buffer !== "undefined") return Buffer.from(bytes).toString("base64");
@@ -379,14 +399,30 @@ export function createDalvikProvider(options: DalvikProviderOptions): SourceProv
     return found;
   }
 
-  function toSeries(sourceId: string, manga: DalvikManga): Series {
+  /** The source's own site, when the installed extension declared one. */
+  function baseUrlForSourceId(sourceId: string): string | undefined {
+    for (const extension of options.extensions) {
+      const found = extension.sources.find((source) => source.id === sourceId);
+      if (found !== undefined) return found.baseUrl;
+    }
+    return undefined;
+  }
+
+  /** The address to load for a minted image: the source's site first, the host's proxy second. */
+  function imageAddress(sourceBaseUrl: string | undefined, raw: string | null | undefined): string | undefined {
+    return client.asset(sourceRelative(sourceBaseUrl, raw) ?? raw);
+  }
+
+  function toSeries(sourceId: string, manga: DalvikManga, sourceBaseUrl?: string): Series {
     const id = joinId(kind, `${sourceId}:${manga.url}`);
     if (typeof manga.title === "string" && manga.title !== "") titles.set(id, manga.title);
     return {
       id,
       provider: kind,
       title: manga.title ?? titles.get(id) ?? "",
-      ...(client.asset(manga.thumbnail_url) === undefined ? {} : { cover: client.asset(manga.thumbnail_url) }),
+      ...(imageAddress(sourceBaseUrl, manga.thumbnail_url) === undefined
+        ? {}
+        : { cover: imageAddress(sourceBaseUrl, manga.thumbnail_url) }),
       ...(typeof manga.author === "string" ? { author: manga.author } : {}),
       ...(typeof manga.description === "string" ? { description: manga.description } : {}),
     };
@@ -442,7 +478,11 @@ export function createDalvikProvider(options: DalvikProviderOptions): SourceProv
         sourceId,
         page,
       });
-      return paged((result.body.mangas ?? []).map((manga) => toSeries(sourceId, manga)), result.body.hasNextPage === true);
+      const sourceBaseUrl = baseUrlForSourceId(sourceId);
+      return paged(
+        (result.body.mangas ?? []).map((manga) => toSeries(sourceId, manga, sourceBaseUrl)),
+        result.body.hasNextPage === true,
+      );
     },
 
     async latest(namespaced: string, page: number): Promise<Paged<Series>> {
@@ -454,7 +494,11 @@ export function createDalvikProvider(options: DalvikProviderOptions): SourceProv
         sourceId,
         page,
       });
-      return paged((result.body.mangas ?? []).map((manga) => toSeries(sourceId, manga)), result.body.hasNextPage === true);
+      const sourceBaseUrl = baseUrlForSourceId(sourceId);
+      return paged(
+        (result.body.mangas ?? []).map((manga) => toSeries(sourceId, manga, sourceBaseUrl)),
+        result.body.hasNextPage === true,
+      );
     },
 
     async search(namespaced: string, query: string, page: number): Promise<Paged<Series>> {
@@ -467,7 +511,11 @@ export function createDalvikProvider(options: DalvikProviderOptions): SourceProv
         page,
         search: query,
       });
-      return paged((result.body.mangas ?? []).map((manga) => toSeries(sourceId, manga)), result.body.hasNextPage === true);
+      const sourceBaseUrl = baseUrlForSourceId(sourceId);
+      return paged(
+        (result.body.mangas ?? []).map((manga) => toSeries(sourceId, manga, sourceBaseUrl)),
+        result.body.hasNextPage === true,
+      );
     },
 
     async details(seriesId: string): Promise<Series> {
@@ -479,7 +527,7 @@ export function createDalvikProvider(options: DalvikProviderOptions): SourceProv
         sourceId,
         mangaData: { url, initialized: true },
       });
-      return toSeries(sourceId, result.body);
+      return toSeries(sourceId, result.body, baseUrlForSourceId(sourceId));
     },
 
     async chapters(seriesId: string): Promise<Chapter[]> {
@@ -513,7 +561,7 @@ export function createDalvikProvider(options: DalvikProviderOptions): SourceProv
       });
       const pages = Array.isArray(result.body) ? result.body : [];
       return pages.map((page, index) => {
-        const address = client.asset(page.imageUrl) ?? client.asset(page.url);
+        const address = imageAddress(baseUrlForSourceId(sourceId), page.imageUrl) ?? client.asset(page.url);
         if (address === undefined) {
           throw new DalvikError(`page ${index} came back without an image address`, 0);
         }
