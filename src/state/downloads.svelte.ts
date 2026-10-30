@@ -12,6 +12,8 @@ import { library } from "./library.svelte";
 import type { Chapter } from "../api/source";
 import type { DownloadRow } from "../lib/db/store";
 import { imageSrc } from "../lib/pages";
+import { pace, workBudget } from "../lib/performance";
+import { settings } from "./settings.svelte";
 
 export type { DownloadRow };
 
@@ -82,8 +84,13 @@ class Downloads {
           const pages = await library.pages(next.chapterId);
           this.active = { chapterId: next.chapterId, done: 0, total: pages.length };
           let bytes = 0;
-          for (const page of pages) {
-            const response = await fetch(imageSrc(page));
+          // The CPU level decides how many pages are in flight and how hard the queue pushes.
+          // Sequential was the old behaviour for one chapter; the level makes it a choice, and a
+          // single page at a time is still what "background" asks for.
+          const budget = workBudget(settings.cpuLevel);
+          let cursor = 0;
+          const fetchPage = async (page: (typeof pages)[number]): Promise<void> => {
+            const response = await fetch(imageSrc(page), { signal: AbortSignal.timeout(budget.pageTimeoutMs) });
             if (!response.ok) throw new Error(`page ${page.index + 1}: HTTP ${response.status}`);
             const blob = await response.blob();
             bytes += blob.size;
@@ -93,8 +100,18 @@ class Downloads {
               index: page.index,
               blob,
             });
-            this.active = { chapterId: next.chapterId, done: page.index + 1, total: pages.length };
-          }
+            this.active = { chapterId: next.chapterId, done: (this.active?.done ?? 0) + 1, total: pages.length };
+            await pace(settings.cpuLevel);
+          };
+          const worker = async (): Promise<void> => {
+            while (cursor < pages.length) {
+              const page = pages[cursor++];
+              await fetchPage(page);
+            }
+          };
+          await Promise.all(
+            Array.from({ length: Math.max(1, Math.min(budget.downloadConcurrency, pages.length)) }, () => worker()),
+          );
           await store.putDownload({
             chapterId: next.chapterId,
             seriesId: next.seriesId,

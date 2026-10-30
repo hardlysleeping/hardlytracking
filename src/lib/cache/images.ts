@@ -112,9 +112,14 @@ export class ImageCache {
     return task;
   }
 
-  /** Prefetch a screenful, so scrolling does not wait on the network. */
-  warm(urls: readonly string[]): void {
-    for (const url of urls.slice(0, 60)) void this.resolve(url);
+  /**
+   * Prefetch a screenful, so scrolling does not wait on the network.
+   *
+   * The batch size comes from the CPU level: warming sixty covers at once is exactly the kind of
+   * work that makes a laptop feel frozen while the app looks idle.
+   */
+  warm(urls: readonly string[], batch = 12): void {
+    for (const url of urls.slice(0, Math.max(1, batch))) void this.resolve(url);
   }
 
   private async touch(url: string): Promise<void> {

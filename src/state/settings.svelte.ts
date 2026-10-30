@@ -8,6 +8,7 @@
 import type { CategoryNavPreference, DensityPreference } from "../lib/layout-modes";
 import type { LibraryStore } from "../lib/db/store";
 import type { Margins, PanePreference } from "../lib/view-options";
+import { DEFAULT_CPU_LEVEL, type CpuLevel } from "../lib/performance";
 
 export type LibraryView = "grid" | "compact" | "list";
 export type Sort = "title" | "recent" | "source";
@@ -41,6 +42,8 @@ export interface Prefs {
   pinnedSources: string[];
   /** Global search defaults to the pinned sources when there are any. */
   searchPinnedOnly: boolean;
+  /** How hard the app may work: pages fetched at once and pacing between them. */
+  cpuLevel: CpuLevel;
   /** Room around the content: comfortable, compact, or none. */
   contentMargins: Margins;
   /** Remove comfort-only chrome (screen heading, Continue strip) so the grid keeps the pixels. */
@@ -77,6 +80,7 @@ class Settings {
   historyRetentionDays = $state(0);
   pinnedSources = $state<string[]>([]);
   searchPinnedOnly = $state(true);
+  cpuLevel = $state<CpuLevel>(DEFAULT_CPU_LEVEL);
   contentMargins = $state<Margins>("comfortable");
   maximizeSpace = $state(false);
   libraryPane = $state<PanePreference>("auto");
@@ -108,6 +112,7 @@ class Settings {
     this.historyRetentionDays = await read("historyRetentionDays", this.historyRetentionDays);
     this.pinnedSources = await read("pinnedSources", this.pinnedSources);
     this.searchPinnedOnly = await read("searchPinnedOnly", this.searchPinnedOnly);
+    this.cpuLevel = await read("cpuLevel", this.cpuLevel);
     this.contentMargins = await read("contentMargins", this.contentMargins);
     this.maximizeSpace = await read("maximizeSpace", this.maximizeSpace);
     this.libraryPane = await read("libraryPane", this.libraryPane);

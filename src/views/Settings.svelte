@@ -18,6 +18,7 @@
   import { imageCache } from "../lib/cache/images";
   import { CACHE_LIMIT_CHOICES, describeCache, formatBytes, type CacheEntry } from "../lib/cache/policy";
   import { MARGIN_CHOICES, PANE_CHOICES } from "../lib/view-options";
+  import { CPU_LEVELS, describeLevel } from "../lib/performance";
 
   /** The slider shows the cover the library actually draws, not a value a preset overrides. */
   const cover = $derived(coverWidth(settings.libraryDensity, deviceClass(viewport.width), settings.coverSize));
@@ -204,6 +205,24 @@
   </section>
 
   <section class="group">
+    <h2>Performance</h2>
+    <div class="row">
+      <span>Work level<em class="sub">{describeLevel(settings.cpuLevel)}</em></span>
+      <div class="chips">
+        {#each CPU_LEVELS as level (level.id)}
+          <button
+            class="chip"
+            class:on={settings.cpuLevel === level.id}
+            title={level.hint}
+            onclick={() => settings.set("cpuLevel", level.id)}
+          >
+            {level.label}
+          </button>
+        {/each}
+      </div>
+    </div>
+    <p class="hint">Downloads and cover warming follow this. It cannot touch the extension host — that runs in its own container, capped by <code>docker-compose.yml</code>.</p>
+
     <h2>Layout</h2>
     <div class="row">
       <span>Content margins<em class="sub">How much room the content leaves at the edges.</em></span>
