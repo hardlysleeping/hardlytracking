@@ -27,6 +27,19 @@ const READ_PREFIX = "read:";
  */
 const LOCAL_ONLY_PREFIXES = ["downloadQueue", "sync.device", "cache."] as const;
 
+/**
+ * Stores that never travel, by name.
+ *
+ * `trackerAccounts` holds access and refresh tokens for the user's own tracker accounts. A backup
+ * that carries them is a backup that leaks them the moment it is shared, mailed or uploaded — and a
+ * token is not a setting, so there is nothing to import either.
+ */
+const LOCAL_ONLY_STORES = ["trackerAccounts"] as const;
+
+export function travelsInBackup(store: string): boolean {
+  return !LOCAL_ONLY_STORES.includes(store as (typeof LOCAL_ONLY_STORES)[number]);
+}
+
 function isLocalOnlyKey(key: string): boolean {
   return LOCAL_ONLY_PREFIXES.some((prefix) => key === prefix || key.startsWith(`${prefix}.`));
 }

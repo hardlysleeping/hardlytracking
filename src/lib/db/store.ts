@@ -8,6 +8,7 @@
  */
 import type { Chapter, Page, Series } from "../../api/source";
 import type { InstalledExtension } from "../../api/dalvik";
+import type { TrackerAccountRow, TrackerRow } from "../trackers/types";
 import { normaliseCategories, type Category } from "../categories";
 import type { LibraryFilter } from "../library/filter";
 import type { Database } from "./open";
@@ -300,6 +301,48 @@ export class LibraryStore {
 
   async removeExtension(extensionId: string): Promise<void> {
     await this.db.remove("extensions", extensionId);
+  }
+
+  // ---- trackers: the user's own list on someone else's service ---------------
+  //
+  // One row per (series, service). The remote id is the bind; `pending` is the retry queue, kept on
+  // the row so a failed push survives a reload. Accounts are a separate store because they are the
+  // only rows in this database that hold a secret, and the backup code excludes that store by name.
+
+  async listTrackers(): Promise<TrackerRow[]> {
+    return this.db.all<TrackerRow>("trackers");
+  }
+
+  async listTrackersForSeries(seriesId: string): Promise<TrackerRow[]> {
+    return (await this.db.all<TrackerRow>("trackers")).filter((row) => row.seriesId === seriesId);
+  }
+
+  async getTracker(id: string): Promise<TrackerRow | undefined> {
+    return this.db.get<TrackerRow>("trackers", id);
+  }
+
+  async putTracker(row: TrackerRow): Promise<void> {
+    await this.db.put("trackers", { ...row } as unknown as Record<string, unknown>);
+  }
+
+  async removeTracker(id: string): Promise<void> {
+    await this.db.remove("trackers", id);
+  }
+
+  async listTrackerAccounts(): Promise<TrackerAccountRow[]> {
+    return this.db.all<TrackerAccountRow>("trackerAccounts");
+  }
+
+  async getTrackerAccount(service: string): Promise<TrackerAccountRow | undefined> {
+    return this.db.get<TrackerAccountRow>("trackerAccounts", service);
+  }
+
+  async putTrackerAccount(row: TrackerAccountRow): Promise<void> {
+    await this.db.put("trackerAccounts", { ...row } as unknown as Record<string, unknown>);
+  }
+
+  async removeTrackerAccount(service: string): Promise<void> {
+    await this.db.remove("trackerAccounts", service);
   }
 
   // ---- history, position, source mappings -----------------------------------

@@ -32,6 +32,8 @@ export const STORES = [
   "searchCache",
   "knownSeries",
   "cookies",
+  "trackers",
+  "trackerAccounts",
 ] as const;
 export type StoreName = (typeof STORES)[number];
 
@@ -66,6 +68,8 @@ const KEY_PATH: Record<StoreName, string> = {
   searchCache: "key",
   knownSeries: "id",
   cookies: "key",
+  trackers: "id",
+  trackerAccounts: "service",
 };
 
 export function keyPathOf(store: StoreName): string {
@@ -80,7 +84,7 @@ export interface Database {
 }
 
 const DB_NAME = "hardlytracking";
-const DB_VERSION = 12;
+const DB_VERSION = 13;
 
 function wrap<T>(request: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => {
