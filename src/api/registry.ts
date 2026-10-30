@@ -30,6 +30,11 @@ export interface RegistryConfig {
   dalvikBase?: string | null;
   /** Probe override, so a test can hand the registry a stub host. */
   fetchImpl?: typeof fetch;
+  /**
+   * Whether the built-in archive.org extension is on. `undefined` means yes, so a test that does not
+   * care about the switch still gets the provider.
+   */
+  archiveEnabled?: () => boolean;
 }
 
 /** The live dalvik host: the client to install through, and the list it reads. */
@@ -59,8 +64,14 @@ export async function createProviders(config: RegistryConfig): Promise<ProviderS
   providers.push(createLocalProvider(config.store));
 
   // archive.org needs no host, no token and no configuration: it is a public catalogue, so it is
-  // always available and never appears as an empty shelf.
-  providers.push(createArchiveProvider(config.fetchImpl === undefined ? {} : { fetchImpl: config.fetchImpl }));
+  // always built and never appears as an empty shelf. Its switch is the built-in extension's own
+  // row, read live, so turning it off in Extensions takes effect without a restart.
+  providers.push(
+    createArchiveProvider({
+      ...(config.fetchImpl === undefined ? {} : { fetchImpl: config.fetchImpl }),
+      ...(config.archiveEnabled === undefined ? {} : { enabled: config.archiveEnabled }),
+    }),
+  );
 
   let dalvik: DalvikHost | null = null;
   const dalvikBase = config.dalvikBase === undefined ? apiUrl("/api/dalvik") : config.dalvikBase;
@@ -68,9 +79,10 @@ export async function createProviders(config: RegistryConfig): Promise<ProviderS
     const client = new DalvikClient({ baseUrl: dalvikBase, ...(config.fetchImpl === undefined ? {} : { fetchImpl: config.fetchImpl }) });
     try {
       const capabilities = await client.capabilities();
-      // Read once at boot so the sources of an APK installed last launch are there
-      // before the first paint; the array stays live afterwards.
-      const extensions = await config.store.listExtensions();
+      // Read once at boot so the sources of an APK installed last launch are there before the
+      // first paint; the array stays live afterwards. Built-ins are excluded: they have no APK and
+      // no runtime handle, so feeding one to the host would ask it to run a package it never saw.
+      const extensions = (await config.store.listExtensions()).filter((row) => row.builtin !== true);
       providers.push(
         createDalvikProvider({
           client,

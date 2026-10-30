@@ -1,10 +1,13 @@
-import { apiUrl, withToken } from "./host";
+import { apiUrl, hasLocalServer, withToken } from "./host";
 
 /**
  * Any remote image through our own `/api/img`: page images need headers, extension icons need a
  * host that does not answer a bare `<img>`, and one route means one place where a token is added.
  */
 export function proxiedImage(url: string): string {
+  // No server of our own (a packaged app with no desktop paired): point the <img> at the URL. An
+  // image request needs no CORS, and `/api/img` there is the SPA's index.html, not a picture.
+  if (!hasLocalServer()) return url;
   return withToken(apiUrl(`/api/img?url=${encodeURIComponent(url)}`));
 }
 

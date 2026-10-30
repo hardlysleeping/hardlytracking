@@ -17,7 +17,7 @@
  * origin: repository indexes live on one host and APKs redirect to another.
  */
 import { parseIndex, type ExtensionEntry, type ExtensionIndex } from "./index";
-import { apiUrl, withToken } from "../host";
+import { apiUrl, hasLocalServer, withToken } from "../host";
 
 export interface Repository {
   /** What the user pasted, normalised; this is the key a repository is remembered by. */
@@ -41,6 +41,18 @@ export class RepositoryError extends Error {
 /** `/api/repo?url=…` — same origin, so no CORS and no mixed content. */
 export function repoProxyUrl(target: string): string {
   return withToken(apiUrl(`/api/repo?url=${encodeURIComponent(target)}`));
+}
+
+/**
+ * How a repository index is actually fetched.
+ *
+ * Through our own `/api/repo` when this build has a server — it adds the headers some hosts want and
+ * keeps the request same-origin. A packaged app has no such route, so it asks the repository
+ * directly: every index host in this ecosystem serves CORS `*`, because Mihon itself is a native
+ * client and the index has to be publicly readable.
+ */
+export function repoFetchUrl(target: string): string {
+  return hasLocalServer() ? repoProxyUrl(target) : target;
 }
 
 function trimSlash(url: string): string {
@@ -117,7 +129,7 @@ export interface LoadOptions {
 
 /** Read a repository's index, trying the candidate URLs and reporting what was tried. */
 export async function loadRepository(input: string, options: LoadOptions = {}): Promise<Repository> {
-  const doFetch = options.fetchImpl ?? ((target: string) => fetch(repoProxyUrl(target)));
+  const doFetch = options.fetchImpl ?? ((target: string) => fetch(repoFetchUrl(target)));
   const candidates = candidateIndexUrls(input);
   if (candidates.length === 0) {
     throw new RepositoryError(
@@ -183,7 +195,7 @@ function hostOf(url: string): string {
 
 /** The bytes of an APK, through the same passthrough. */
 export async function downloadApk(entry: ExtensionEntry, options: LoadOptions = {}): Promise<Uint8Array> {
-  const doFetch = options.fetchImpl ?? ((target: string) => fetch(repoProxyUrl(target)));
+  const doFetch = options.fetchImpl ?? ((target: string) => fetch(repoFetchUrl(target)));
   const response = await doFetch(entry.apkUrl);
   if (!response.ok) {
     throw new RepositoryError(`${entry.name} (${entry.version}) could not be downloaded: ${response.status}`, [entry.apkUrl]);

@@ -272,6 +272,10 @@ button {
   margin: 0 0 var(--s4);
   padding: var(--s3);
   border-radius: var(--r2);
+  /* An error names the URLs it tried, and a URL has no spaces to break at. Without this the banner
+   * is wider than the phone and the whole page scrolls sideways. */
+  overflow-wrap: anywhere;
+  word-break: break-word;
   background: color-mix(in srgb, var(--danger) 14%, var(--surface));
   border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent);
   color: var(--danger);
@@ -368,5 +372,18 @@ button.ghost:disabled {
 @media (max-width: 599px) {
   .view {
     padding-top: 10px !important;
+  }
+}
+
+/**
+ * iOS zooms the whole page when a field smaller than 16px takes focus, and it does not zoom back out
+ * when the keyboard closes — which reads as "the app is stuck zoomed in and scrolls sideways".
+ * 16px is the threshold, so on a phone the fields are at least that.
+ */
+@media (max-width: 599px) {
+  input,
+  select,
+  textarea {
+    font-size: max(16px, var(--t-md)) !important;
   }
 }

@@ -8,6 +8,7 @@
  */
 import { apiUrl } from "../lib/host";
 import { createProviders, type DalvikHost } from "./registry";
+import { BUILTIN_ARCHIVE_ID, ensureBuiltinExtensions, isBuiltin } from "./builtin";
 import type { InstalledExtension } from "./dalvik";
 import type { SourceProvider } from "./source";
 import { openDatabase, type Database } from "../lib/db/open";
@@ -71,12 +72,17 @@ export interface OpenProfileOptions {
 export async function openLibraryProfile(options: OpenProfileOptions = {}): Promise<LibraryProfile> {
   const database = options.database ?? (await openDatabase());
   const store = new LibraryStore(database);
+  // Built-ins are installed before the providers are built, because a provider's switch is its row:
+  // the first launch of a fresh install must already know that archive.org is on.
+  const builtins = await ensureBuiltinExtensions(store);
+  const switches = { archive: builtins.find((row) => row.extensionId === BUILTIN_ARCHIVE_ID)?.enabled !== false };
   const registry = await createProviders({
     store,
     // `null` is the local-only build; only an absent option means "the default runtime".
     mihonBase: options.mihonBase === undefined ? apiUrl("/api/mihon") : options.mihonBase,
     dalvikBase: options.dalvikBase === undefined ? apiUrl("/api/dalvik") : options.dalvikBase,
     ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
+    archiveEnabled: () => switches.archive,
   });
 
   const dalvik = registry.dalvik;
@@ -117,11 +123,19 @@ export async function openLibraryProfile(options: OpenProfileOptions = {}): Prom
       if (row === undefined) return;
       const next: InstalledExtension = { ...row, enabled };
       await store.putExtension(next);
+      // A built-in has no host to tell: its provider reads this flag on the next call.
+      if (isBuiltin(extensionId)) {
+        if (extensionId === BUILTIN_ARCHIVE_ID) switches.archive = enabled;
+        return;
+      }
       if (dalvik === null) return;
       const at = dalvik.extensions.findIndex((extension) => extension.extensionId === extensionId);
       if (at >= 0) dalvik.extensions[at] = next;
     },
     async uninstallExtension(extensionId: string): Promise<void> {
+      // There is nothing to uninstall: the code is in the app. Refusing keeps a stray call from
+      // deleting a row that would be re-seeded on the next launch and look like a bug.
+      if (isBuiltin(extensionId)) throw new Error(`${extensionId} is built in; disable it instead`);
       await store.removeExtension(extensionId);
       if (dalvik === null) return;
       const at = dalvik.extensions.findIndex((extension) => extension.extensionId === extensionId);

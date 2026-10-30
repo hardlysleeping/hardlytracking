@@ -66,6 +66,14 @@ const PAGE_EXTENSIONS = ["jpg", "jpeg", "png", "webp", "gif", "bmp"];
 export interface ArchiveProviderOptions {
   fetchImpl?: typeof fetch;
   base?: string;
+  /**
+   * Whether the built-in extension is enabled.
+   *
+   * A disabled extension is not offered — `sources()` answers with nothing, exactly as a disabled
+   * dalvik extension does — but a *read* of something already in the library still works, because
+   * turning an extension off should not make a saved book unopenable.
+   */
+  enabled?: () => boolean;
 }
 
 /** archive.org's own list-vs-string habit, flattened once here so nothing downstream has to know. */
@@ -339,6 +347,7 @@ const LISTING_CACHE_SIZE = 24;
 export function createArchiveProvider(options: ArchiveProviderOptions = {}): SourceProvider {
   const fetchImpl = options.fetchImpl ?? fetch;
   const base = (options.base ?? ARCHIVE_BASE).replace(/\/+$/, "");
+  const enabled = options.enabled ?? (() => true);
 
   const search = async (query: string, page: number, sort: string): Promise<Paged<Series>> => {
     const params = buildQuery({ query, sort });
@@ -380,7 +389,7 @@ export function createArchiveProvider(options: ArchiveProviderOptions = {}): Sou
     ownsProgress: true,
 
     async sources() {
-      return [{ ...ARCHIVE_SOURCE }];
+      return enabled() ? [{ ...ARCHIVE_SOURCE }] : [];
     },
 
     async popular(_sourceId, page) {

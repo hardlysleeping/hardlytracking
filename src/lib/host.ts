@@ -53,6 +53,23 @@ export function setHostToken(token: string): void {
   }
 }
 
+/**
+ * Whether this build has an HTTP server of its own to call.
+ *
+ * A packaged app loads from `capacitor://localhost`, where `/api/*` is not a route — it is the SPA's
+ * own index.html. So every proxy path there answers with HTML, and a caller that expects JSON reads
+ * that as "not JSON" (a repository, a page image) instead of "there is no proxy". The desktop build
+ * and any http(s) origin do have one.
+ */
+export function hasLocalServer(): boolean {
+  if (remoteHost() !== "") return true;
+  try {
+    return location.protocol === "http:" || location.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
 /** An API path, resolved against the paired host when there is one. */
 export function apiUrl(path: string): string {
   const host = remoteHost();

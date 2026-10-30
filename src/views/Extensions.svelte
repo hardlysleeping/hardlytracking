@@ -60,7 +60,10 @@
     return sourcesOfExtension(library.sources, row);
   }
 
-  const installed = $derived(library.extensions);
+  // Built-ins first: they are part of the app, not something that was added to it.
+  const installed = $derived(
+    [...library.extensions].sort((a, b) => Number(b.builtin === true) - Number(a.builtin === true)),
+  );
 
   /** package id -> installed row, so an entry knows whether it is new, current or old. */
   const byPackage = $derived(new Map(installed.map((row) => [row.packageId, row])));
@@ -197,6 +200,7 @@
                 <span class="sub">
                   {row.versionName ?? "unknown version"} · {row.sources.length} source{row.sources.length === 1 ? "" : "s"}{#if langs.length > 0} · {langs.join(", ")}{/if}
                 </span>
+                {#if row.builtin === true}<span class="badge">Built in</span>{/if}
                 {#if row.enabled === false}<span class="badge off">Disabled</span>{/if}
               </div>
               <label class="switch" title={row.enabled === false ? "Enable" : "Disable"}>
@@ -216,7 +220,7 @@
                 <button
                   class="chip small link"
                   title={`Browse ${source.name}`}
-                  onclick={() => go(pathTo("source", `dalvik:src:${source.id}`))}
+                  onclick={() => go(pathTo("source", source.id.includes(":") ? source.id : `dalvik:src:${source.id}`))}
                 >
                   {source.name}{#if source.lang} <span class="lang">{source.lang}</span>{/if}
                 </button>
@@ -228,7 +232,9 @@
               {#if owned.length > 0}
                 <button class="btn ghost" onclick={() => go(pathTo("source", owned[0].id))}>Browse</button>
               {/if}
-              {#if removing === row.extensionId}
+              {#if row.builtin === true}
+                <span class="confirm">Ships with HardlyTracking — no APK, so there is nothing to uninstall.</span>
+              {:else if removing === row.extensionId}
                 <span class="confirm">
                   <span>Uninstall {label}? Its {row.sources.length} source{row.sources.length === 1 ? "" : "s"} disappear; your library stays.</span>
                   <button class="chip" onclick={() => (removing = null)}>Cancel</button>

@@ -96,8 +96,9 @@ test("an APK installed through the profile is kept in our database and its sourc
     // The bytes were the install: base64 on the same call surface.
     assert.equal(host.seen.at(-1).body.data, Buffer.from(apk).toString("base64"));
 
-    // Kept, with the three fields the card asks for.
-    const [row] = await profile.store.listExtensions();
+    // Kept, with the three fields the card asks for. The built-in row is not an APK, so it is
+    // skipped here rather than making this assertion about two different kinds of extension.
+    const [row] = (await profile.store.listExtensions()).filter((extension) => extension.builtin !== true);
     // `enabled` is part of the row now: an installed extension can be switched off without
     // losing its APK or its sources, so the flag has to be stored with it.
     assert.deepEqual(Object.keys(row).sort(), ["enabled", "extensionId", "packageId", "sources"]);
@@ -110,7 +111,7 @@ test("an APK installed through the profile is kept in our database and its sourc
 
     // Reinstalling the same APK replaces its row instead of duplicating 61 sources.
     await profile.installApk(apk, "eu.kanade.tachiyomi.extension.all.mangadex");
-    assert.equal((await profile.store.listExtensions()).length, 1);
+    assert.equal((await profile.store.listExtensions()).filter((row) => row.builtin !== true).length, 1);
     assert.equal((await providerFor(profile.providers, "dalvik:src:1").sources()).length, 2);
   } finally {
     await host.close();

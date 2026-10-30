@@ -315,6 +315,11 @@ export interface InstalledExtension {
   versionCode?: number;
   /** Disabled extensions keep their APK and their sources but are not offered. */
   enabled?: boolean;
+  /**
+   * Ships inside the app: there is no APK to uninstall, only a switch. The provider is compiled in,
+   * so the row exists to be seen and toggled, not to be installed.
+   */
+  builtin?: boolean;
 }
 
 /**

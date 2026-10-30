@@ -31,9 +31,15 @@ export function extensionLanguages(row: Pick<InstalledExtension, "sources">): st
   return seen;
 }
 
-/** The namespaced ids of this extension's sources, so a button can open one. */
+/**
+ * The namespaced ids of this extension's sources, so a button can open one.
+ *
+ * A built-in's provider names its own sources (`archive:src:texts`); an APK's runtime hands back a
+ * bare source id that needs the `dalvik:src:` prefix. Prefixing twice is how a built-in would end up
+ * with a source nothing can open, so the prefix is only added when it is missing.
+ */
 export function extensionSourceIds(row: Pick<InstalledExtension, "sources">): string[] {
-  return row.sources.map((source) => `dalvik:src:${source.id}`);
+  return row.sources.map((source) => (source.id.includes(":") ? source.id : `dalvik:src:${source.id}`));
 }
 
 /**
