@@ -43,7 +43,9 @@ export function words(text: string): string[] {
   const pattern = /"([^"]*)"|(\S+)/g;
   let match: RegExpExecArray | null;
   while ((match = pattern.exec(text)) !== null) {
-    const word = (match[1] ?? match[2] ?? "").trim();
+    // A quote that never closes is a character the user is still typing, not part of the search:
+    // `"one piece` must keep narrowing while they type, not stop matching every title.
+    const word = (match[1] ?? match[2] ?? "").trim().replace(/^"|"$/g, "");
     if (word !== "") out.push(word);
   }
   return out;
