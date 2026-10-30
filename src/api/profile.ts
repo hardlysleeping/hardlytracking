@@ -135,6 +135,9 @@ export async function openLibraryProfile(options: OpenProfileOptions = {}): Prom
         ...(meta.repoUrl === undefined ? {} : { repoUrl: meta.repoUrl }),
         ...(meta.versionName === undefined ? {} : { versionName: meta.versionName }),
         ...(meta.versionCode === undefined ? {} : { versionCode: meta.versionCode }),
+        // Kept on the row, not in memory: the runtime holds APKs only in memory, so this device is
+        // what lets an extension survive a restart of the runtime the user never sees.
+        apk: apk.buffer.slice(apk.byteOffset, apk.byteOffset + apk.byteLength) as ArrayBuffer,
       };
       await store.putExtension(row);
       // The provider reads this same array, so the new sources are live on the next call —

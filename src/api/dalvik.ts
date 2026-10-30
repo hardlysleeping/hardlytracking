@@ -428,6 +428,15 @@ export interface InstalledExtension {
    * so the row exists to be seen and toggled, not to be installed.
    */
   builtin?: boolean;
+  /**
+   * The APK's own bytes, kept so the extension can be handed back to a runtime that forgot it.
+   *
+   * The runtime loads an APK into memory, keyed by its SHA-256, and never stores it: when the
+   * process restarts, or its cache evicts the entry, every later call answers "Extension handle …
+   * is no longer loaded; resend the APK". Without the bytes on this device that is an extension the
+   * user has to reinstall after every restart of a container they never touched.
+   */
+  apk?: ArrayBuffer;
 }
 
 /**
@@ -578,15 +587,37 @@ export function createDalvikProvider(options: DalvikProviderOptions): SourceProv
       options.preferences === undefined || call.sourceId === undefined
         ? undefined
         : await options.preferences(call.sourceId);
-    const result = await client.call<T>(
-      settings === undefined || settings.length === 0 ? call : { ...call, preferences: settings },
-      { auth },
-    );
+    const body = settings === undefined || settings.length === 0 ? call : { ...call, preferences: settings };
+    let result: DalvikResult<T>;
+    try {
+      result = await client.call<T>(body, { auth });
+    } catch (error) {
+      const retry = apkForRetry(call, error);
+      if (retry === undefined) throw error;
+      // The runtime forgot this extension (it keeps APKs in memory, keyed by their hash). Hand it
+      // the bytes we kept, once: a second failure is a real failure and belongs to the caller.
+      result = await client.call<T>({ ...body, data: retry }, { auth });
+    }
     if (result.setCookie.length > 0 && options.cookies !== undefined) {
       const host = sourceBaseUrl === undefined ? null : hostOf(sourceBaseUrl);
       if (host !== null) await options.cookies.remember(host, result.setCookie);
     }
     return result;
+  }
+
+  /**
+   * The APK bytes for a call the runtime refused because it no longer holds that extension.
+   *
+   * Only that one message earns a retry. A 401, a timeout or a source that moved is the caller's
+   * answer and must not be retried — resending megabytes on every failure would hide the real error.
+   */
+  function apkForRetry(call: DalvikCall, error: unknown): string | undefined {
+    if (!(error instanceof DalvikError)) return undefined;
+    if (!/no longer loaded|resend the apk/i.test(error.message)) return undefined;
+    if (call.extensionId === undefined) return undefined;
+    const row = options.extensions.find((extension) => extension.extensionId === call.extensionId);
+    if (row?.apk === undefined) return undefined;
+    return base64(new Uint8Array(row.apk));
   }
 
   function toSeries(sourceId: string, manga: DalvikManga, sourceBaseUrl?: string): Series {

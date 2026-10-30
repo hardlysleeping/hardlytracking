@@ -101,9 +101,12 @@ test("an APK installed through the profile is kept in our database and its sourc
     const [row] = (await profile.store.listExtensions()).filter((extension) => extension.builtin !== true);
     // `enabled` is part of the row now: an installed extension can be switched off without
     // losing its APK or its sources, so the flag has to be stored with it.
-    assert.deepEqual(Object.keys(row).sort(), ["enabled", "extensionId", "packageId", "sources"]);
+    // `apk` is the fourth: the runtime keeps APKs only in memory, so the bytes live here and can be
+    // handed back when the runtime forgets a handle.
+    assert.deepEqual(Object.keys(row).sort(), ["apk", "enabled", "extensionId", "packageId", "sources"]);
     assert.equal(row.enabled, true);
     assert.equal(row.extensionId, "12fde776sha256");
+    assert.equal(new Uint8Array(row.apk).length, apk.length, "the bytes are stored with the row");
 
     // …and the sources are live without a reload of the provider.
     const sources = await providerFor(profile.providers, "dalvik:src:1").sources();
