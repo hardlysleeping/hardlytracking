@@ -13,6 +13,7 @@ Repo: `~/apps/hardlytracking` · branch `master` · remote `github.com/hardlysle
 | Card | Backlog | Work | Gate |
 |---|---|---|---|
 
+| **T24 `t_2ae97e10`** | 23 | **iPhone Library screen** — T-L1…T-L12 committed on `master` (`1ed3bd0`…`f446431`); **T-L13 in the working tree, uncommitted**: `scripts/library-perf.mjs` + `npm run perf`, `perf/bench.{html,svelte.ts}`, `content-visibility` + `contain-intrinsic-size` on `.tile`. Remaining: T-L13 step 4 (a read mark still costs 631 ms — replace the whole `unread` map per change), the `?cv=off` A/B, a `docs/runs/` entry, then T-L14 | 473/473 tests, `tsc` clean, `svelte-check` 0 errors; 5 000 rows: 271 ms first paint, 56 fps scroll, 2 mutations per read mark (plan §0) |
 | T12 `t_7d2d23fe` | 2 | iOS shell: Tauri plugin wrapping `MihonEmbeddedBridge` + `OpenJDKRuntime.xcframework` | unsigned IPA builds on Codemagic; on device the server starts and `/capabilities` answers |
 | T14 `t_7eb8c34d` | 4 | Local authority DB: history, last-read position, source mappings (categories + hidden/pinned marks already landed) | unit tests + the matrix's data-ownership checks |
 | T18 `t_6cc60338` | 5 | Reader modes: vertical + paged, settings, offline pages | both modes read a downloaded chapter with the network off |
@@ -44,10 +45,11 @@ Repo: `~/apps/hardlytracking` · branch `master` · remote `github.com/hardlysle
 
 | Card | Plan | Work | Gate |
 |---|---|---|---|
-| T24 `t_2ae97e10` | `~/.hermes/plans/2026-10-29_152448-hardlytracking-iphone-library.md` | **iPhone Library screen**: the owner's §1–§36 spec — five tabs (already there), category tabs + `+N` overflow, Continue Reading rules and controls, one filter/sort/search query model with active chips, manual order + drag, Select All + tri-state collections, badge set + quick-resume, state persistence, 5 000-row budget, offline, first-launch defaults | 14 tasks, each green on `npm test` + `tsc` + `svelte-check` + build; the plan's §3 parity list ticked off in the browser at 390 px; `node scripts/library-perf.mjs` prints the three numbers; offline reload |
+| — | — | Nothing waiting: T24 moved to **Now** above (it is live work, not a queued card) | — |
 
-Status `ready`, unassigned — the dispatcher skips an unassigned card, so nothing runs until it is
-assigned. `src/api/**` and `src-tauri/**` are untouched by it, so it does not collide with T12/T17.
+T24 is on the board as `blocked` with a comment carrying the same state as this file; the dispatcher
+skips an unassigned/blocked card, so nothing runs on it by itself. `src/api/**` and `src-tauri/**` are
+untouched by it, so it does not collide with T12/T17.
 
 ## Post-launch — paid sync (not on the road to launch)
 
