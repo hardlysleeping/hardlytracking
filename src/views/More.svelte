@@ -70,7 +70,6 @@
   }
 
   .top {
-    padding-top: var(--safe-t);
     margin-bottom: var(--s4);
   }
 

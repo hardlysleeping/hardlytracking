@@ -343,7 +343,6 @@
     align-items: baseline;
     justify-content: space-between;
     gap: var(--s3);
-    padding-top: var(--safe-t);
     margin-bottom: var(--s3);
   }
 

@@ -12,7 +12,9 @@ const config: CapacitorConfig = {
   appName: "HardlyTracking",
   webDir: "dist",
   ios: {
-    contentInset: "always",
+    // The app is full-bleed and handles the notch/home-indicator itself with `env(safe-area-inset-*)`.
+    // "always" insets the webview a second time, which is the band of dead space under the bar.
+    contentInset: "never",
     limitsNavigationsToAppBoundDomains: false,
   },
   server: {

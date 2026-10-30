@@ -305,7 +305,6 @@
     display: flex;
     align-items: baseline;
     gap: var(--s2);
-    padding-top: var(--safe-t);
     margin-bottom: var(--s4);
   }
 

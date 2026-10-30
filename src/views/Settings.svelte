@@ -474,7 +474,6 @@
     display: flex;
     align-items: center;
     gap: var(--s2);
-    padding-top: var(--safe-t);
     margin-bottom: var(--s4);
   }
 

@@ -78,14 +78,24 @@
 </div>
 
 <style>
+  /* A frame, not a document: the shell is exactly the screen and `main` is the scroller. A page
+   * that scrolls as a document leaves whatever the webview's viewport arithmetic says at the
+   * bottom — on an iPhone that was a band of empty space under the bar. */
   .app {
-    min-height: 100dvh;
+    height: 100dvh;
+    max-height: 100dvh;
+    display: grid;
+    grid-template-rows: minmax(0, 1fr);
+    overflow: hidden;
     background: var(--bg);
   }
 
   main {
     min-width: 0;
-    min-height: 100dvh;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior-y: contain;
+    -webkit-overflow-scrolling: touch;
   }
 
   .app.large main {
@@ -97,6 +107,10 @@
   }
 
   .app.compact main {
+    /* The shell is the one owner of the safe areas: the notch is paid for once here, and a view
+     * adds only its own breathing room. Every view used to add `var(--safe-t)` again, which put
+     * every heading an extra status-bar-height below the top on an iPhone. */
+    padding-top: var(--safe-t);
     padding-bottom: calc(var(--nav-h) + var(--safe-b));
   }
 
@@ -199,7 +213,9 @@
     position: fixed;
     inset: auto 0 0 0;
     z-index: 20;
-    padding: var(--s2) var(--s1) calc(var(--s2) + var(--safe-b)) var(--s1);
+    /* An iOS tab bar is 49 pt of content plus the home-indicator inset. Two steps of padding on
+     * each side made ours ~20 px taller than that, which is the "fat band" a phone user sees. */
+    padding: 4px var(--s1) calc(4px + var(--safe-b)) var(--s1);
     background: color-mix(in srgb, var(--surface) 92%, transparent);
     backdrop-filter: blur(14px);
     border-top: 1px solid var(--line);
