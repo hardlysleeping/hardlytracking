@@ -16,6 +16,8 @@
   import SeriesGrid from "../components/SeriesGrid.svelte";
   import Cover from "../components/Cover.svelte";
   import Sheet from "../components/Sheet.svelte";
+  import LibraryHeader from "../components/LibraryHeader.svelte";
+  import OverflowSheet, { type LibraryStats } from "../components/OverflowSheet.svelte";
   import { go, pathTo } from "../lib/nav";
   import { visibleCategories } from "../lib/categories";
   import { collectionBar, coverWidth, libraryLayout } from "../lib/layout-modes";
@@ -23,6 +25,7 @@
   import { emptyFacts, runQuery, type QueryFacts } from "../lib/library/query";
   import { EMPTY_FILTER } from "../lib/library/filter";
   import { DEFAULT_SORT, type SortSpec } from "../lib/library/sort";
+  import type { SearchScope } from "../lib/library/search";
   import SeriesPage from "./Series.svelte";
   import type { Series } from "../api/source";
 
@@ -32,6 +35,8 @@
   let selected = $state<string | null>(null);
   let query = $state("");
   let searching = $state(false);
+  /** `This collection` narrows the tab you are on; `All library` looks past it (§29). */
+  let searchScope = $state<SearchScope>("category");
   let filterOpen = $state(false);
   let sortOpen = $state(false);
   let categoriesOpen = $state(false);
@@ -54,6 +59,8 @@
   /** The split ratio while the divider is being dragged; committed to `settings` on release. */
   let dragRatio = $state<number | null>(null);
   let overflowOpen = $state(false);
+  /** The `⋯` sheet: refresh, select, categories, settings, statistics. */
+  let menuOpen = $state(false);
   let panes = $state<HTMLElement | null>(null);
 
   // ---- what this collection looked like when it was last left -------------------------------
@@ -264,6 +271,24 @@
 
   const sources = $derived([...new Set(library.library.map((series) => series.provider))]);
 
+  /** The numbers the `⋯` sheet reports, from what the screen already counted. */
+  const stats = $derived<LibraryStats>({
+    series: library.library.length,
+    unread: [...counts.unread.values()].reduce((sum, count) => sum + count, 0),
+    downloaded: downloads.rows.length,
+    categories: categories.items.map((category) => ({
+      name: category.name,
+      count: visible.filter((row) => (row.categoryIds ?? []).includes(category.id)).length,
+    })),
+  });
+
+  /** A refresh re-reads the shelf and asks the sources again; a source that is down is a note. */
+  async function refreshLibrary(): Promise<void> {
+    await library.refreshLibrary();
+    await library.loadSources();
+    await recount();
+  }
+
   /** The sort the old preference means, until T-L7 gives each collection its own spec. */
   const sortSpec = $derived<SortSpec>(
     settings.librarySort === "recent"
@@ -280,7 +305,7 @@
       {
         collection: selected,
         filter: { ...EMPTY_FILTER, unread: onlyUnread ? "unread" : "any", sources: onlySource === null ? [] : [onlySource] },
-        search: { text: query, scope: "category" },
+        search: { text: query, scope: searchScope },
         sort: sortSpec,
       },
       facts,
@@ -402,37 +427,24 @@
 </script>
 
 <section class="view">
-  <header class="top">
-    <div class="titles">
-      <h1>Library</h1>
-      {#if library.library.length > 0}
-        <span class="count">{rows.length}{rows.length !== library.library.length ? ` of ${library.library.length}` : ""}</span>
-      {/if}
-    </div>
-    {#if library.library.length > 0}
-    <div class="acts">
-      <button class="btn ghost icon" aria-label="Search the library" aria-pressed={searching} onclick={() => (searching = !searching)}>
-        <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5" /><path d="m16 16 4 4" /></svg>
-      </button>
-      <button class="btn ghost icon" aria-label="Select series" aria-pressed={selection !== null} onclick={toggleSelection}>
-        <svg viewBox="0 0 24 24"><path d="M4 7h10M4 12h10M4 17h7M17 15l2 2 3-3" /></svg>
-      </button>
-      <button class="btn ghost icon" aria-label="Refresh" onclick={() => void library.refreshLibrary().then(recount)}>
-        <svg viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.3-5.7M20 4v4h-4" /></svg>
-      </button>
-    </div>
-    {/if}
-  </header>
-
-  {#if searching}
-    <input
-      class="field search"
-      type="search"
-      placeholder="Search this library"
-      bind:value={query}
-      aria-label="Search this library"
-    />
-  {/if}
+  <LibraryHeader
+    count={rows.length}
+    total={library.library.length}
+    {searching}
+    text={query}
+    scope={searchScope}
+    selecting={selection !== null}
+    onsearch={() => (searching = !searching)}
+    onclosesearch={() => {
+      searching = false;
+      query = "";
+    }}
+    onselect={toggleSelection}
+    onrefresh={() => void refreshLibrary()}
+    onoverflow={() => (menuOpen = true)}
+    ontext={(value) => (query = value)}
+    onscope={(scope) => (searchScope = scope)}
+  />
 
   <div class="body">
     {#if layout.categoryNav.mode === "sidebar"}
@@ -673,6 +685,16 @@
   </button>
 </Sheet>
 
+<OverflowSheet
+  open={menuOpen}
+  onclose={() => (menuOpen = false)}
+  onrefresh={() => void refreshLibrary()}
+  onselect={() => (selection = new Set())}
+  oncategories={() => (categoriesOpen = true)}
+  onsettings={() => go("/settings")}
+  {stats}
+/>
+
 <Sheet open={categoriesOpen} title={selection === null ? "Categories" : "Add to category"} onclose={() => (categoriesOpen = false)}>
   {#if selection !== null}
     <p class="muted">{selection.size} series will be added to:</p>
@@ -815,38 +837,6 @@
     color: var(--text-3);
   }
 
-  .top {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--s3);
-    padding-top: var(--safe-t);
-    margin-bottom: var(--s3);
-  }
-
-  .titles {
-    display: flex;
-    align-items: baseline;
-    gap: var(--s2);
-    min-width: 0;
-  }
-
-  h1 {
-    font-size: var(--t-2xl);
-    font-weight: 650;
-  }
-
-  .count {
-    font-size: var(--t-sm);
-    color: var(--text-3);
-  }
-
-  .acts {
-    display: flex;
-    gap: 2px;
-  }
-
-  .acts svg,
   .views svg {
     width: 18px;
     height: 18px;
@@ -860,12 +850,6 @@
   .views button.on {
     color: var(--text-1);
     background: var(--surface-2);
-  }
-
-  .search {
-    width: 100%;
-    margin-bottom: var(--s3);
-    min-height: 38px;
   }
 
   .chips {

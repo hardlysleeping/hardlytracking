@@ -12,10 +12,13 @@ import type { Series } from "../../api/source";
 import { scoreRow } from "../search/index";
 import type { LibraryFilter } from "./filter";
 
+/** Where the search box looks. `category` is the default: narrow what you are looking at. */
+export type SearchScope = "category" | "all";
+
 export interface SearchState {
   text: string;
   /** `category` narrows the collection you are in; `all` looks through the whole library. */
-  scope: "category" | "all";
+  scope: SearchScope;
 }
 
 export const EMPTY_SEARCH: SearchState = { text: "", scope: "category" };
