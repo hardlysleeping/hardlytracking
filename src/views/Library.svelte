@@ -16,6 +16,7 @@
   import SeriesGrid from "../components/SeriesGrid.svelte";
   import { cleanOrder, orderAfterMove } from "../lib/library/order";
   import { applyCollection, collectionState, hiddenBy, selectAll } from "../lib/library/selection";
+  import { BADGE_KINDS, DEFAULT_BADGES, PRESET_BADGES, badgeList, type Badge } from "../lib/library/badges";
   import Sheet from "../components/Sheet.svelte";
   import LibraryHeader from "../components/LibraryHeader.svelte";
   import OverflowSheet, { type LibraryStats } from "../components/OverflowSheet.svelte";
@@ -219,11 +220,18 @@
    * Unread, totals, last-read order and downloads are all questions about the same rows, so they
    * are gathered together: a filter or a sort must never ask the database anything mid-render.
    */
-  let counts = $state<{ unread: Map<string, number>; total: Map<string, number>; lastRead: Map<string, number>; status: Map<string, string> }>({
+  let counts = $state<{
+    unread: Map<string, number>;
+    total: Map<string, number>;
+    lastRead: Map<string, number>;
+    status: Map<string, string>;
+    lastUpdated: Map<string, number>;
+  }>({
     unread: new Map(),
     total: new Map(),
     lastRead: new Map(),
     status: new Map(),
+    lastUpdated: new Map(),
   });
 
   async function recount(): Promise<void> {
@@ -239,14 +247,18 @@
     );
     const unread = new Map<string, number>();
     const total = new Map<string, number>();
+    const lastUpdated = new Map<string, number>();
     for (const chapter of chapters) {
       total.set(chapter.seriesId, (total.get(chapter.seriesId) ?? 0) + 1);
+      const at = chapter.uploadedAt ?? 0;
+      if (at > (lastUpdated.get(chapter.seriesId) ?? 0)) lastUpdated.set(chapter.seriesId, at);
       if (chapter.read || read.has(chapter.id)) continue;
       unread.set(chapter.seriesId, (unread.get(chapter.seriesId) ?? 0) + 1);
     }
     counts = {
       unread,
       total,
+      lastUpdated,
       lastRead: new Map(positions.map((row, index) => [row.seriesId, positions.length - index])),
       status: new Map(
         library.library.filter((row) => row.status !== undefined).map((row) => [row.id, row.status as string]),
@@ -276,6 +288,14 @@
     lastRead: counts.lastRead,
     status: counts.status,
     downloaded,
+    lastUpdated: counts.lastUpdated,
+    // New since the Updates screen was last opened — the mark, not a date, so opening it clears
+    // the badge for exactly the titles it showed.
+    newUpdates: new Set(
+      [...counts.lastUpdated.entries()]
+        .filter(([id, at]) => at > (settings.updatesSeen[id] ?? 0))
+        .map(([id]) => id),
+    ),
   });
 
   /** Continue reading, newest first — the shortcut back into a book. */
@@ -346,6 +366,21 @@
   const sortSpec = $derived<SortSpec>(sortKeyOf(settings.sortByCollection, selected));
 
   const sortLabel = $derived(SORT_OPTIONS.find((option) => option.key === sortSpec.key)?.label ?? "Title");
+
+  /** Three named presets: a size and the badges that belong with it, written together. */
+  const DENSITY_PRESETS = [
+    { name: "comfortable", label: "Comfortable", cover: 132 },
+    { name: "compact", label: "Compact", cover: 96 },
+    { name: "large", label: "Large", cover: 180 },
+  ] as const;
+
+  function applyPreset(preset: (typeof DENSITY_PRESETS)[number]): void {
+    settings.set("coverSize", preset.cover);
+    // The slider's value is what draws, so a preset has to move it — and "manual" is the setting
+    // that says the slider is in charge.
+    settings.set("libraryDensity", "manual");
+    settings.set("badgeSet", { ...PRESET_BADGES[preset.name] });
+  }
 
   /** Applying a sort writes only the collection it was applied to. */
   function setSort(spec: SortSpec): void {
@@ -463,6 +498,29 @@
     selection = new Set([...(selection ?? [])].filter((id) => visible.has(id)));
     hiddenAcknowledged = viewKey;
   }
+
+  /** The pills each card may draw, from the facts this screen already has. */
+  const badges = $derived.by(() => {
+    const map = new Map<string, Badge[]>();
+    for (const row of rows) {
+      map.set(
+        row.id,
+        badgeList(
+          {
+            unread: counts.unread.get(row.id),
+            downloaded: downloaded.get(row.id),
+            isNew: facts.newUpdates.has(row.id),
+            source: row.provider,
+          },
+          settings.badgeSet,
+        ),
+      );
+    }
+    return map;
+  });
+
+  /** Where a `▶` would go, per series: the chapter the reader stopped in. */
+  const resume = $derived(new Map(continuing.map((row) => [row.seriesId, row.chapterId])));
 
   /** The selected rows, which is what a collection row is asked about. */
   const selectedRows = $derived(selection === null ? [] : rows.filter((row) => selection?.has(row.id) === true));
@@ -673,6 +731,8 @@
             onselect={onSelect}
             reorderable={sortSpec.key === "manual"}
             onmove={moveRow}
+            {badges}
+            {resume}
             onlongpress={(series) => {
               selection = new Set([series.id]);
             }}
@@ -733,6 +793,18 @@
 
 <Sheet open={displayOpen} title="Display" onclose={() => (displayOpen = false)}>
   <div class="rows">
+    <div class="row presets">
+      <span>Size</span>
+      <div class="presetrow">
+        {#each DENSITY_PRESETS as preset (preset.name)}
+          <button
+            class="chip"
+            class:on={cover === preset.cover && settings.libraryDensity === "manual"}
+            onclick={() => applyPreset(preset)}
+          >{preset.label}</button>
+        {/each}
+      </div>
+    </div>
     <label class="row">
       <span>Cover size</span>
       <input
@@ -752,6 +824,21 @@
       <span>Show “Continue reading”</span>
       <input type="checkbox" checked={settings.showContinue} onchange={(event) => settings.set("showContinue", event.currentTarget.checked)} />
     </label>
+    <div class="row badgeset">
+      <span>Badges</span>
+      <div class="badgegrid">
+        {#each BADGE_KINDS as kind (kind)}
+          <label class="badgetoggle">
+            <input
+              type="checkbox"
+              checked={settings.badgeSet[kind] ?? DEFAULT_BADGES[kind]}
+              onchange={(event) => settings.set("badgeSet", { ...settings.badgeSet, [kind]: event.currentTarget.checked })}
+            />
+            <span>{kind}</span>
+          </label>
+        {/each}
+      </div>
+    </div>
   </div>
 </Sheet>
 

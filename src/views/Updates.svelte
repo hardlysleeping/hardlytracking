@@ -7,6 +7,7 @@
    * screen says how many titles were asked so an empty list is not mistaken for "nothing happened".
    */
   import { library, type UpdateRow } from "../state/library.svelte";
+  import { settings } from "../state/settings.svelte";
   import { downloads } from "../state/downloads.svelte";
   import Cover from "../components/Cover.svelte";
   import { go, pathTo } from "../lib/nav";
@@ -23,6 +24,14 @@
     try {
       asked = Math.min(library.library.length, 150);
       rows = await library.refreshUpdates();
+      // Opening this screen is what clears the "new" badge on the cards: the mark is the newest
+      // chapter each title had when the user looked, so nothing has to be read to acknowledge it.
+      const seen = { ...settings.updatesSeen };
+      for (const row of rows) {
+        const at = row.chapter.uploadedAt ?? 0;
+        if (at > (seen[row.seriesId] ?? 0)) seen[row.seriesId] = at;
+      }
+      settings.set("updatesSeen", seen);
       checked = true;
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);

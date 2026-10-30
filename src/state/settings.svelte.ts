@@ -9,6 +9,7 @@ import type { CategoryNavPreference, DensityPreference } from "../lib/layout-mod
 import type { LibraryStore } from "../lib/db/store";
 import { EMPTY_FILTER, type LibraryFilter } from "../lib/library/filter";
 import { sortSpecOfLegacy, type SortSpec } from "../lib/library/sort";
+import { DEFAULT_BADGES } from "../lib/library/badges";
 import type { Margins, PanePreference } from "../lib/view-options";
 import { DEFAULT_CPU_LEVEL, type CpuLevel } from "../lib/performance";
 
@@ -41,6 +42,18 @@ export interface Prefs {
    * they are ignored, and anything unlisted goes last in title order.
    */
   manualOrder: Record<string, string[]>;
+  /**
+   * Which card badges are on. A closed map of the six declared kinds, so a stored value from a
+   * newer build cannot put an unknown pill on a card, and an export carries the choice.
+   */
+  badgeSet: Record<string, boolean>;
+  /**
+   * The newest chapter timestamp a title had when the Updates screen was last opened.
+   *
+   * A "new" badge is the difference between the newest chapter now and this mark, so opening
+   * Updates is what clears it — the same promise the tab makes.
+   */
+  updatesSeen: Record<string, number>;
   /** The filter the sheet last applied. A durable field, so an export carries it. */
   libraryFilter: LibraryFilter;
   /**
@@ -97,6 +110,8 @@ class Settings {
   librarySort = $state<Sort>("title");
   sortByCollection = $state<Record<string, SortSpec>>({});
   manualOrder = $state<Record<string, string[]>>({});
+  badgeSet = $state<Record<string, boolean>>({ ...DEFAULT_BADGES });
+  updatesSeen = $state<Record<string, number>>({});
   libraryFilter = $state<LibraryFilter>({ ...EMPTY_FILTER, statuses: [], sources: [] });
   showContinue = $state(true);
   continuePosition = $state<"above" | "below">("above");
@@ -140,6 +155,8 @@ class Settings {
     this.librarySort = await read("librarySort", this.librarySort);
     this.sortByCollection = await read("sortByCollection", this.sortByCollection);
     this.manualOrder = await read("manualOrder", this.manualOrder);
+    this.badgeSet = { ...DEFAULT_BADGES, ...(await read("badgeSet", this.badgeSet)) };
+    this.updatesSeen = await read("updatesSeen", this.updatesSeen);
     // One-time migration: an existing three-value choice becomes the library's own spec, so the
     // upgrade does not silently re-sort the shelf the user has been looking at.
     if (Object.keys(this.sortByCollection).length === 0) {

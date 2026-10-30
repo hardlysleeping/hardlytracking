@@ -7,6 +7,7 @@
    * library, and the left pane of a desktop split.
    */
   import type { Series } from "../api/source";
+  import type { Badge } from "../lib/library/badges";
   import Cover from "./Cover.svelte";
   import { go, pathTo } from "../lib/nav";
 
@@ -29,6 +30,10 @@
     reorderable?: boolean;
     /** A drag that ended on another tile, by id. */
     onmove?: (fromId: string, toId: string) => void;
+    /** The pills a card may draw, per series. Absent means the plain unread count. */
+    badges?: Map<string, Badge[]>;
+    /** Where a resume would go, per series: a `▶` is drawn only when this has a chapter. */
+    resume?: Map<string, string>;
   }
   let {
     series,
@@ -43,6 +48,8 @@
     onlongpress,
     reorderable = false,
     onmove,
+    badges = new Map(),
+    resume = new Map(),
   }: Props = $props();
 
   let pressTimer: ReturnType<typeof setTimeout> | null = null;
@@ -117,6 +124,21 @@
   function badgeFor(id: string): number {
     return unread.get(id) ?? 0;
   }
+
+  /** The pills for one card: the badge map when the view built one, else today's unread count. */
+  function pillsFor(item: Series): Badge[] {
+    const built = badges.get(item.id);
+    if (built !== undefined) return built;
+    const count = badgeFor(item.id);
+    return count > 0 ? [{ kind: "unread", label: String(count), count }] : [];
+  }
+
+  /** One tap into the book, without opening the details page first (§15). */
+  function resumeAt(event: MouseEvent, item: Series): void {
+    event.stopPropagation();
+    const chapterId = resume.get(item.id);
+    if (chapterId !== undefined) go(pathTo("read", item.id, chapterId));
+  }
 </script>
 
 {#if series.length === 0}
@@ -149,8 +171,19 @@
         {:else}
           <div class="art">
             <Cover series={item} />
-            {#if badgeFor(item.id) > 0}
-              <span class="badge">{badgeFor(item.id)}</span>
+            {#if pillsFor(item).length > 0}
+              <span class="pills">
+                {#each pillsFor(item) as pill (pill.kind)}
+                  <span class="pill {pill.kind}">{pill.label}</span>
+                {/each}
+              </span>
+            {/if}
+            {#if resume.has(item.id)}
+              <button
+                class="resume"
+                aria-label={`Resume ${item.title}`}
+                onclick={(event) => resumeAt(event, item)}
+              >▶</button>
             {/if}
             {#if selection !== null}
               <span class="tick" aria-hidden="true">{selection.has(item.id) ? "✓" : ""}</span>
@@ -236,6 +269,54 @@
     }
   }
 
+  .pills {
+    position: absolute;
+    top: var(--s1);
+    right: var(--s1);
+    left: var(--s1);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    justify-content: flex-end;
+  }
+  .pill {
+    min-width: 20px;
+    height: 20px;
+    padding: 0 5px;
+    border-radius: var(--r-pill);
+    background: color-mix(in srgb, var(--bg) 78%, transparent);
+    color: var(--text-1);
+    font-size: var(--t-xs);
+    font-weight: 600;
+    display: grid;
+    place-items: center;
+    backdrop-filter: blur(2px);
+  }
+  .pill.downloaded {
+    color: var(--accent);
+  }
+  .pill.new {
+    background: var(--accent);
+    color: var(--bg);
+  }
+  /* The resume button sits where a thumb reaches on a phone, not in the corner a badge owns. */
+  .resume {
+    position: absolute;
+    right: var(--s1);
+    bottom: var(--s1);
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    border: 0;
+    background: color-mix(in srgb, var(--accent) 88%, transparent);
+    color: var(--bg);
+    font-size: var(--t-sm);
+    display: grid;
+    place-items: center;
+  }
+  .resume:hover {
+    background: var(--accent);
+  }
   .badge {
     position: absolute;
     top: var(--s1);
