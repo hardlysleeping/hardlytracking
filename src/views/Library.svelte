@@ -20,9 +20,10 @@
   import OverflowSheet, { type LibraryStats } from "../components/OverflowSheet.svelte";
   import FilterSheet from "../components/FilterSheet.svelte";
   import ChipRow from "../components/ChipRow.svelte";
+  import CollectionTabs from "../components/CollectionTabs.svelte";
   import { go, pathTo } from "../lib/nav";
   import { visibleCategories } from "../lib/categories";
-  import { collectionBar, coverWidth, libraryLayout } from "../lib/layout-modes";
+  import { coverWidth, libraryLayout } from "../lib/layout-modes";
   import { viewport } from "../lib/layout.svelte";
   import { emptyFacts, runQuery, type QueryFacts } from "../lib/library/query";
   import { EMPTY_FILTER, activeChips, countActive, isEmptyFilter, mergeFilter, withoutChip } from "../lib/library/filter";
@@ -62,7 +63,6 @@
   let picked = $state<string | null>(null);
   /** The split ratio while the divider is being dragged; committed to `settings` on release. */
   let dragRatio = $state<number | null>(null);
-  let overflowOpen = $state(false);
   /** The `⋯` sheet: refresh, select, categories, settings, statistics. */
   let menuOpen = $state(false);
   let panes = $state<HTMLElement | null>(null);
@@ -197,16 +197,8 @@
     }),
   );
 
-  /** The bar's collections, and the ones behind `+N`; empty when the list is a sidebar. */
-  const collections = $derived(collectionBar(shownCategories, layout.categoryNav));
-
   /** Auto is the device class's density, Custom is the slider, a preset wins over both. */
   const cover = $derived(coverWidth(settings.libraryDensity, layout.device, settings.coverSize));
-
-  /** A collection picked from `+N` still shows as the current chip. */
-  const selectedCategory = $derived(
-    selected === null ? null : shownCategories.find((category) => category.id === selected) ?? null,
-  );
 
   const SORT_LABELS = { title: "Title", recent: "Recently read", source: "Source" } as const;
 
@@ -519,34 +511,13 @@
       <div class="column">
         {#if library.library.length > 0}
         {#if layout.categoryNav.mode !== "sidebar"}
-        <div class="chips" role="tablist" aria-label="Categories">
-          <button class="chip" class:on={selected === null} role="tab" aria-selected={selected === null} onclick={() => (selected = null)}>
-            All
-          </button>
-          {#each collections.shown as category (category.id)}
-            <button
-              class="chip"
-              class:on={selected === category.id}
-              class:pinned={category.pinned}
-              role="tab"
-              aria-selected={selected === category.id}
-              onclick={() => (selected = category.id)}
-            >
-              {category.name}
-            </button>
-          {/each}
-          {#if selectedCategory !== null && !collections.shown.some((category) => category.id === selectedCategory.id)}
-            <button class="chip on" class:pinned={selectedCategory.pinned} role="tab" aria-selected="true" onclick={() => (selected = selectedCategory.id)}>
-              {selectedCategory.name}
-            </button>
-          {/if}
-          {#if collections.overflow.length > 0}
-            <button class="chip" aria-label={`${collections.overflow.length} more collections`} onclick={() => (overflowOpen = true)}>
-              +{collections.overflow.length}
-            </button>
-          {/if}
-          <button class="chip" onclick={() => (categoriesOpen = true)}>Categories…</button>
-        </div>
+        <CollectionTabs
+          categories={categories.items}
+          visible={shownCategories}
+          {selected}
+          onselect={(id) => (selected = id)}
+          onedit={() => (categoriesOpen = true)}
+        />
         {/if}
 
         {#if library.ready && selected === null && settings.showContinue && continuing.length > 0 && query.trim() === ""}
@@ -709,32 +680,6 @@
       <input type="checkbox" checked={settings.showContinue} onchange={(event) => settings.set("showContinue", event.currentTarget.checked)} />
     </label>
   </div>
-</Sheet>
-
-<Sheet open={overflowOpen} title="Collections" onclose={() => (overflowOpen = false)}>
-  <div class="picklist">
-    {#each collections.overflow as category (category.id)}
-      <button
-        class="chip"
-        class:on={selected === category.id}
-        onclick={() => {
-          selected = category.id;
-          overflowOpen = false;
-        }}
-      >
-        {category.name}
-      </button>
-    {/each}
-  </div>
-  <button
-    class="menu-item"
-    onclick={() => {
-      overflowOpen = false;
-      categoriesOpen = true;
-    }}
-  >
-    <span>Edit collections…</span>
-  </button>
 </Sheet>
 
 <OverflowSheet
@@ -902,24 +847,6 @@
   .views button.on {
     color: var(--text-1);
     background: var(--surface-2);
-  }
-
-  .chips {
-    display: flex;
-    gap: var(--s2);
-    overflow-x: auto;
-    padding-bottom: var(--s1);
-    margin-bottom: var(--s3);
-    scrollbar-width: none;
-  }
-
-  .chips::-webkit-scrollbar {
-    display: none;
-  }
-
-  .chip.pinned {
-    border-color: color-mix(in srgb, var(--tone-pinned) 55%, var(--line));
-    color: var(--text-1);
   }
 
   .tools {

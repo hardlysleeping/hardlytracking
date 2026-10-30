@@ -78,6 +78,11 @@ export interface Category {
   order: number;
   hidden: boolean;
   pinned: boolean;
+  /**
+   * The tab-row pin — a different mark from `pinned`, which floats the shelf in the rail.
+   * Optional so a row written before the tab row existed reads as "not pinned".
+   */
+  tabPinned?: boolean;
 }
 
 export interface Categorised {
@@ -103,6 +108,8 @@ export function normaliseCategories(raw: unknown): Category[] {
       order: typeof e.order === "number" && Number.isFinite(e.order) ? e.order : out.length,
       hidden: e.hidden === true,
       pinned: e.pinned === true,
+      // The tab pin survives a read; a row without it is simply not pinned to the tab row.
+      ...(e.tabPinned === true ? { tabPinned: true } : {}),
     });
   }
   return out.sort((a, b) => a.order - b.order);

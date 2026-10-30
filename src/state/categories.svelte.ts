@@ -103,6 +103,29 @@ class CategoriesState {
     this.items = await this.#store.listCategories();
   }
 
+  /**
+   * The tab-row pin, which is a different mark from `pinned`.
+   *
+   * Pinned-to-the-row collections are the five one-tap chips; `pinned` floats a shelf in the rail.
+   * Keeping them apart is what lets a user pin a shelf without rearranging their tab row.
+   */
+  async setTabPinned(categoryId: string, tabPinned: boolean): Promise<void> {
+    const current = this.items.find((c) => c.id === categoryId);
+    if (current === undefined || this.#store === null) return;
+    if ((current.tabPinned === true) === tabPinned) return;
+    const next: Category = { ...current };
+    if (tabPinned) next.tabPinned = true;
+    else delete next.tabPinned;
+    await this.#store.putCategory(next);
+    this.items = await this.#store.listCategories();
+  }
+
+  async toggleTabPin(categoryId: string): Promise<void> {
+    const current = this.items.find((c) => c.id === categoryId);
+    if (current === undefined) return;
+    await this.setTabPinned(categoryId, current.tabPinned !== true);
+  }
+
   async cycleHiddenView(): Promise<void> {
     this.hiddenView = nextHiddenView(this.hiddenView);
     await this.#store?.setPref(HIDDEN_VIEW_KEY, this.hiddenView);
