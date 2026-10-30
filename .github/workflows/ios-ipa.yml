@@ -1,0 +1,76 @@
+name: iOS IPA (unsigned)
+
+# The IPA is built on a macOS runner because an iOS binary needs Xcode, which does not exist on the
+# Linux workstation. The artefact is deliberately UNSIGNED: Sideloadly, AltStore or Xcode re-sign it
+# with the owner's own Apple ID, which is the only signing identity this project should ever use.
+#
+# Manual run only — it costs macOS minutes, so it is never triggered by a push.
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Branch or tag to build"
+        required: false
+        default: master
+
+jobs:
+  ipa:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Build the web app
+        run: npm run build
+
+      - name: Copy the build into the iOS shell
+        run: npx cap sync ios
+
+      - name: Install pods
+        working-directory: ios/App
+        run: pod install --repo-update
+
+      - name: Archive without signing
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -workspace ios/App/App.xcworkspace \
+            -scheme App \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/App.xcarchive" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGN_ENTITLEMENTS="" \
+            archive
+
+      - name: Pack the IPA
+        run: |
+          set -euo pipefail
+          APP="$RUNNER_TEMP/App.xcarchive/Products/Applications/App.app"
+          test -d "$APP"
+          mkdir -p "$RUNNER_TEMP/Payload"
+          cp -R "$APP" "$RUNNER_TEMP/Payload/"
+          # A payload-only zip is what an IPA is; no signature means any sideloading tool can sign it.
+          cd "$RUNNER_TEMP"
+          zip -qry HardlyTracking-unsigned.ipa Payload
+          ls -lh HardlyTracking-unsigned.ipa
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: HardlyTracking-unsigned-ipa
+          path: ${{ runner.temp }}/HardlyTracking-unsigned.ipa
+          if-no-files-found: error

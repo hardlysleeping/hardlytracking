@@ -17,6 +17,7 @@
     "serve:lan": "HOST=0.0.0.0 node server/proxy.mjs"
   },
   "devDependencies": {
+    "@capacitor/cli": "^7.6.10",
     "@sveltejs/vite-plugin-svelte": "^7.1.2",
     "@types/node": "^26.6.6",
     "svelte": "^5.56.3",
@@ -28,6 +29,8 @@
     "node": ">=22"
   },
   "dependencies": {
+    "@capacitor/core": "^7.6.10",
+    "@capacitor/ios": "^7.6.10",
     "@tauri-apps/api": "^2.12.4",
     "@tauri-apps/plugin-http": "^2.8.3"
   }

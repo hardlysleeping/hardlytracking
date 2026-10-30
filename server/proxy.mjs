@@ -299,6 +299,20 @@ const server = createServer((request, response) => {
   const url = new URL(request.url ?? "/", "http://localhost");
   const path = url.pathname;
 
+  // A packaged app loads from `capacitor://localhost`, so every API call from it is cross-origin and
+  // the browser refuses the answer without these. The token is still the gate: `*` here says who may
+  // read the response, not who may make the request.
+  if (path.startsWith("/api/")) {
+    response.setHeader("Access-Control-Allow-Origin", "*");
+    response.setHeader("Access-Control-Allow-Headers", "content-type, x-hardlytracking-token");
+    response.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    if (request.method === "OPTIONS") {
+      response.writeHead(204);
+      response.end();
+      return;
+    }
+  }
+
   // Pairing info and the API are the only guarded things: the app itself has to load before it can
   // send a header, so static files stay open and the token is what protects the library.
   if (path === "/api/host-info") {
