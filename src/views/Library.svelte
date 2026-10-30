@@ -21,13 +21,14 @@
   import ChipRow from "../components/ChipRow.svelte";
   import CollectionTabs from "../components/CollectionTabs.svelte";
   import ContinueRail from "../components/ContinueRail.svelte";
+  import SortSheet from "../components/SortSheet.svelte";
   import { go, pathTo } from "../lib/nav";
   import { visibleCategories } from "../lib/categories";
   import { coverWidth, libraryLayout } from "../lib/layout-modes";
   import { viewport } from "../lib/layout.svelte";
   import { emptyFacts, runQuery, type QueryFacts } from "../lib/library/query";
   import { EMPTY_FILTER, activeChips, countActive, isEmptyFilter, mergeFilter, withoutChip } from "../lib/library/filter";
-  import { DEFAULT_SORT, type SortSpec } from "../lib/library/sort";
+  import { SORT_OPTIONS, sortKeyOf, type SortSpec } from "../lib/library/sort";
   import { parseSearch, withoutOperator, type SearchScope } from "../lib/library/search";
   import { eligible } from "../lib/library/continue";
   import { sourceLabel } from "../lib/titles";
@@ -121,7 +122,6 @@
       return;
     }
     // A remembered view is applied, not merely stored: the point is that it looks the same.
-    if (row.sort !== undefined) settings.set("librarySort", row.sort as typeof settings.librarySort);
     if (row.view !== undefined) settings.set("libraryView", row.view as typeof settings.libraryView);
     if (row.coverSize !== undefined) settings.set("coverSize", row.coverSize);
     if (row.filter !== undefined) {
@@ -200,8 +200,6 @@
 
   /** Auto is the device class's density, Custom is the slider, a preset wins over both. */
   const cover = $derived(coverWidth(settings.libraryDensity, layout.device, settings.coverSize));
-
-  const SORT_LABELS = { title: "Title", recent: "Recently read", source: "Source" } as const;
 
   const VIEWS = [
     { id: "grid", icon: "M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z" },
@@ -338,14 +336,15 @@
     await recount();
   }
 
-  /** The sort the old preference means, until T-L7 gives each collection its own spec. */
-  const sortSpec = $derived<SortSpec>(
-    settings.librarySort === "recent"
-      ? { key: "lastRead", dir: "desc" }
-      : settings.librarySort === "source"
-        ? { key: "source", dir: "asc" }
-        : DEFAULT_SORT,
-  );
+  /** Each collection remembers its own key and direction; All is the fallback. */
+  const sortSpec = $derived<SortSpec>(sortKeyOf(settings.sortByCollection, selected));
+
+  const sortLabel = $derived(SORT_OPTIONS.find((option) => option.key === sortSpec.key)?.label ?? "Title");
+
+  /** Applying a sort writes only the collection it was applied to. */
+  function setSort(spec: SortSpec): void {
+    settings.set("sortByCollection", { ...settings.sortByCollection, [selected ?? "all"]: spec });
+  }
 
   /** Every row this screen shows, through the one query model. */
   const rows = $derived(
@@ -537,7 +536,7 @@
           <button class="btn ghost" onclick={() => (filterOpen = true)}>
             Filter{filterCount > 0 ? ` (${filterCount})` : ""}
           </button>
-          <button class="btn ghost" onclick={() => (sortOpen = true)}>Sort · {SORT_LABELS[settings.librarySort]}</button>
+          <button class="btn ghost" onclick={() => (sortOpen = true)}>Sort · {sortLabel}</button>
           <button class="btn ghost" onclick={() => (displayOpen = true)}>Display</button>
           <div class="views" role="group" aria-label="Layout">
             {#each VIEWS as view (view.id)}
@@ -630,23 +629,13 @@
   {/if}
 </section>
 
-<Sheet open={sortOpen} title="Sort by" onclose={() => (sortOpen = false)}>
-  <div class="menu-list">
-    {#each Object.entries(SORT_LABELS) as [id, label] (id)}
-      <button
-        class="menu-item"
-        class:on={settings.librarySort === id}
-        onclick={() => {
-          settings.set("librarySort", id as typeof settings.librarySort);
-          sortOpen = false;
-        }}
-      >
-        <span>{label}</span>
-        {#if settings.librarySort === id}<span aria-hidden="true">✓</span>{/if}
-      </button>
-    {/each}
-  </div>
-</Sheet>
+<SortSheet
+  open={sortOpen}
+  spec={sortSpec}
+  collection={selected === null ? "All" : shownCategories.find((category) => category.id === selected)?.name ?? "All"}
+  onclose={() => (sortOpen = false)}
+  onapply={setSort}
+/>
 
 <FilterSheet
   open={filterOpen}
@@ -933,30 +922,6 @@
     gap: var(--s3);
     font-size: var(--t-md);
     min-height: 36px;
-  }
-
-  .menu-list {
-    display: grid;
-    gap: 2px;
-  }
-
-  .menu-item {
-    all: unset;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--s3);
-    padding: var(--s3);
-    border-radius: var(--r2);
-    min-height: 44px;
-    box-sizing: border-box;
-    font-size: var(--t-md);
-  }
-
-  .menu-item:hover,
-  .menu-item.on {
-    background: var(--surface-2);
   }
 
   .picklist {

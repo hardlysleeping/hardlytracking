@@ -8,6 +8,7 @@
 import type { CategoryNavPreference, DensityPreference } from "../lib/layout-modes";
 import type { LibraryStore } from "../lib/db/store";
 import { EMPTY_FILTER, type LibraryFilter } from "../lib/library/filter";
+import { sortSpecOfLegacy, type SortSpec } from "../lib/library/sort";
 import type { Margins, PanePreference } from "../lib/view-options";
 import { DEFAULT_CPU_LEVEL, type CpuLevel } from "../lib/performance";
 
@@ -28,7 +29,10 @@ export interface Prefs {
   categoryNav: CategoryNavPreference;
   /** The grid/detail split, remembered after the divider is dragged. */
   splitRatio: number;
+  /** The old three-value sort, kept readable; `sortByCollection` is what the library uses. */
   librarySort: Sort;
+  /** One sort per collection, keyed by category id, `"all"` for the whole library. */
+  sortByCollection: Record<string, SortSpec>;
   /** The filter the sheet last applied. A durable field, so an export carries it. */
   libraryFilter: LibraryFilter;
   /**
@@ -83,6 +87,7 @@ class Settings {
   categoryNav = $state<CategoryNavPreference>("automatic");
   splitRatio = $state(0.58);
   librarySort = $state<Sort>("title");
+  sortByCollection = $state<Record<string, SortSpec>>({});
   libraryFilter = $state<LibraryFilter>({ ...EMPTY_FILTER, statuses: [], sources: [] });
   showContinue = $state(true);
   continuePosition = $state<"above" | "below">("above");
@@ -124,6 +129,12 @@ class Settings {
     this.categoryNav = await read("categoryNav", this.categoryNav);
     this.splitRatio = await read("splitRatio", this.splitRatio);
     this.librarySort = await read("librarySort", this.librarySort);
+    this.sortByCollection = await read("sortByCollection", this.sortByCollection);
+    // One-time migration: an existing three-value choice becomes the library's own spec, so the
+    // upgrade does not silently re-sort the shelf the user has been looking at.
+    if (Object.keys(this.sortByCollection).length === 0) {
+      this.sortByCollection = { all: sortSpecOfLegacy(this.librarySort) };
+    }
     this.libraryFilter = await read("libraryFilter", this.libraryFilter);
     this.showContinue = await read("showContinue", this.showContinue);
     this.continuePosition = await read("continuePosition", this.continuePosition);
