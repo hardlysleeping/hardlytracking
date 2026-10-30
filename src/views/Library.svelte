@@ -10,16 +10,19 @@
   import { library } from "../state/library.svelte";
   import { categories } from "../state/categories.svelte";
   import { settings } from "../state/settings.svelte";
+  import { downloads } from "../state/downloads.svelte";
   import { viewStateKey } from "../lib/history";
-  import { scoreRow } from "../lib/search/index";
   import CategoryRail from "../components/CategoryRail.svelte";
   import SeriesGrid from "../components/SeriesGrid.svelte";
   import Cover from "../components/Cover.svelte";
   import Sheet from "../components/Sheet.svelte";
   import { go, pathTo } from "../lib/nav";
-  import { applyView, visibleCategories } from "../lib/categories";
+  import { visibleCategories } from "../lib/categories";
   import { collectionBar, coverWidth, libraryLayout } from "../lib/layout-modes";
   import { viewport } from "../lib/layout.svelte";
+  import { emptyFacts, runQuery, type QueryFacts } from "../lib/library/query";
+  import { EMPTY_FILTER } from "../lib/library/filter";
+  import { DEFAULT_SORT, type SortSpec } from "../lib/library/sort";
   import SeriesPage from "./Series.svelte";
   import type { Series } from "../api/source";
 
@@ -153,11 +156,7 @@
   });
 
   const visible = $derived(
-    applyView(
-      library.library.map((series) => ({ ...series, categoryIds: series.categoryIds ?? [] })),
-      categories.items,
-      { hiddenView: categories.hiddenView, pinView: categories.pinView },
-    ),
+    library.library.map((series) => ({ ...series, categoryIds: series.categoryIds ?? [] })),
   );
 
   /** The chips obey the eye, exactly as the rail does. */
@@ -191,9 +190,18 @@
     { id: "list", icon: "M4 6h16M4 12h16M4 18h16" },
   ] as const;
 
-  /** Unread per series, from one pass over the mirrored chapters and one over the read marks. */
-  let unread = $state(new Map<string, number>());
-  let readOrder = $state(new Map<string, number>());
+  /**
+   * The facts every stage of the query reads, from one pass over what we already hold.
+   *
+   * Unread, totals, last-read order and downloads are all questions about the same rows, so they
+   * are gathered together: a filter or a sort must never ask the database anything mid-render.
+   */
+  let counts = $state<{ unread: Map<string, number>; total: Map<string, number>; lastRead: Map<string, number>; status: Map<string, string> }>({
+    unread: new Map(),
+    total: new Map(),
+    lastRead: new Map(),
+    status: new Map(),
+  });
 
   async function recount(): Promise<void> {
     const store = library.profile?.store;
@@ -206,18 +214,45 @@
     const read = new Set(
       prefs.filter((row) => String(row.key).startsWith("read:")).filter((row) => row.value === true).map((row) => String(row.key).slice(5)),
     );
-    const counts = new Map<string, number>();
+    const unread = new Map<string, number>();
+    const total = new Map<string, number>();
     for (const chapter of chapters) {
+      total.set(chapter.seriesId, (total.get(chapter.seriesId) ?? 0) + 1);
       if (chapter.read || read.has(chapter.id)) continue;
-      counts.set(chapter.seriesId, (counts.get(chapter.seriesId) ?? 0) + 1);
+      unread.set(chapter.seriesId, (unread.get(chapter.seriesId) ?? 0) + 1);
     }
-    unread = counts;
-    readOrder = new Map(positions.map((row, index) => [row.seriesId, positions.length - index]));
+    counts = {
+      unread,
+      total,
+      lastRead: new Map(positions.map((row, index) => [row.seriesId, positions.length - index])),
+      status: new Map(
+        library.library.filter((row) => row.status !== undefined).map((row) => [row.id, row.status as string]),
+      ),
+    };
   }
 
   $effect(() => {
     if (library.profile === null) return;
     void recount();
+  });
+
+  /** Unread per series, for the badge the grid draws. */
+  const unread = $derived(counts.unread);
+
+  /** A download finishing changes the downloaded badge and the filter, without a full recount. */
+  const downloaded = $derived.by(() => {
+    const map = new Map<string, number>();
+    for (const row of downloads.rows) map.set(row.seriesId, (map.get(row.seriesId) ?? 0) + 1);
+    return map;
+  });
+
+  const facts = $derived<QueryFacts>({
+    ...emptyFacts(),
+    unread: counts.unread,
+    total: counts.total,
+    lastRead: counts.lastRead,
+    status: counts.status,
+    downloaded,
   });
 
   /** Continue reading, newest first — the shortcut back into a book. */
@@ -229,28 +264,28 @@
 
   const sources = $derived([...new Set(library.library.map((series) => series.provider))]);
 
-  const rows = $derived.by(() => {
-    const needle = query.trim().toLowerCase();
-    let list = visible.filter((series) => {
-      if (selected !== null && !(series.categoryIds ?? []).includes(selected)) return false;
-      if (onlySource !== null && series.provider !== onlySource) return false;
-      if (onlyUnread && (unread.get(series.id) ?? 0) === 0) return false;
-      if (needle !== "" && scoreRow(series, needle) === 0) return false;
-      return true;
-    });
-    if (needle !== "") {
-      // A query ranks, it does not merely filter: the row whose title starts with what was typed
-      // comes first, then a title word, then the author. Same index the local search uses.
-      list = [...list].sort((a, b) => scoreRow(b, needle) - scoreRow(a, needle) || a.title.localeCompare(b.title));
-    } else if (settings.librarySort === "title") {
-      list = [...list].sort((a, b) => a.title.localeCompare(b.title));
-    } else if (settings.librarySort === "recent") {
-      list = [...list].sort((a, b) => (readOrder.get(b.id) ?? 0) - (readOrder.get(a.id) ?? 0));
-    } else {
-      list = [...list].sort((a, b) => a.provider.localeCompare(b.provider) || a.title.localeCompare(b.title));
-    }
-    return list;
-  });
+  /** The sort the old preference means, until T-L7 gives each collection its own spec. */
+  const sortSpec = $derived<SortSpec>(
+    settings.librarySort === "recent"
+      ? { key: "lastRead", dir: "desc" }
+      : settings.librarySort === "source"
+        ? { key: "source", dir: "asc" }
+        : DEFAULT_SORT,
+  );
+
+  /** Every row this screen shows, through the one query model. */
+  const rows = $derived(
+    runQuery(
+      { series: visible, categories: categories.items, marks: { hiddenView: categories.hiddenView, pinView: categories.pinView } },
+      {
+        collection: selected,
+        filter: { ...EMPTY_FILTER, unread: onlyUnread ? "unread" : "any", sources: onlySource === null ? [] : [onlySource] },
+        search: { text: query, scope: "category" },
+        sort: sortSpec,
+      },
+      facts,
+    ),
+  );
 
   const emptyMessage = $derived.by(() => {
     if (library.library.length === 0) return "Your library is empty.";
