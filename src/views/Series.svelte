@@ -9,6 +9,7 @@
   import { library } from "../state/library.svelte";
   import { categories } from "../state/categories.svelte";
   import { downloads } from "../state/downloads.svelte";
+  import { settings } from "../state/settings.svelte";
   import { providerFor } from "../api/registry";
   import type { Chapter, Series } from "../api/source";
   import Cover from "../components/Cover.svelte";
@@ -115,6 +116,11 @@
     }
     chapters = chapters.map((row) => (row.id === chapter.id ? { ...row, read } : row));
     chapterMenu = null;
+    // §7: a finished chapter points Continue at the next *unread* one. A local write only —
+    // `advance` does nothing when there is no next unread chapter.
+    if (read && series !== null && settings.continueAfterFinish === "next-unread") {
+      await library.advance(series.id, chapter.id);
+    }
   }
 
   async function markAll(): Promise<void> {

@@ -31,7 +31,20 @@ export interface Prefs {
   librarySort: Sort;
   /** The filter the sheet last applied. A durable field, so an export carries it. */
   libraryFilter: LibraryFilter;
+  /**
+   * The Continue strip's on/off. `showContinue` is the storage key, kept from the first build so
+   * the owner's existing choice survives the upgrade — the strip's `continueShow` is this field.
+   */
   showContinue: boolean;
+  /** Where the strip sits relative to the tools row. */
+  continuePosition: "above" | "below";
+  /** How many cards the strip draws, 1–20. */
+  continueMax: number;
+  continueSize: "small" | "medium";
+  /** After finishing a chapter: point at the next unread one, or stay put. */
+  continueAfterFinish: "next-unread" | "hold";
+  /** Series taken off the strip. Their position, library and history rows are untouched. */
+  continueDismissed: string[];
   readerMode: ReaderMode;
   readerFit: Fit;
   pageGap: number;
@@ -72,6 +85,11 @@ class Settings {
   librarySort = $state<Sort>("title");
   libraryFilter = $state<LibraryFilter>({ ...EMPTY_FILTER, statuses: [], sources: [] });
   showContinue = $state(true);
+  continuePosition = $state<"above" | "below">("above");
+  continueMax = $state(10);
+  continueSize = $state<"small" | "medium">("small");
+  continueAfterFinish = $state<"next-unread" | "hold">("next-unread");
+  continueDismissed = $state<string[]>([]);
 
   readerMode = $state<ReaderMode>("vertical");
   readerFit = $state<Fit>("width");
@@ -108,6 +126,11 @@ class Settings {
     this.librarySort = await read("librarySort", this.librarySort);
     this.libraryFilter = await read("libraryFilter", this.libraryFilter);
     this.showContinue = await read("showContinue", this.showContinue);
+    this.continuePosition = await read("continuePosition", this.continuePosition);
+    this.continueMax = await read("continueMax", this.continueMax);
+    this.continueSize = await read("continueSize", this.continueSize);
+    this.continueAfterFinish = await read("continueAfterFinish", this.continueAfterFinish);
+    this.continueDismissed = await read("continueDismissed", this.continueDismissed);
     this.readerMode = await read("readerMode", this.readerMode);
     this.readerFit = await read("readerFit", this.readerFit);
     this.pageGap = await read("pageGap", this.pageGap);

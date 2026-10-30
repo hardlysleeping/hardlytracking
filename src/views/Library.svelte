@@ -14,13 +14,13 @@
   import { viewStateKey } from "../lib/history";
   import CategoryRail from "../components/CategoryRail.svelte";
   import SeriesGrid from "../components/SeriesGrid.svelte";
-  import Cover from "../components/Cover.svelte";
   import Sheet from "../components/Sheet.svelte";
   import LibraryHeader from "../components/LibraryHeader.svelte";
   import OverflowSheet, { type LibraryStats } from "../components/OverflowSheet.svelte";
   import FilterSheet from "../components/FilterSheet.svelte";
   import ChipRow from "../components/ChipRow.svelte";
   import CollectionTabs from "../components/CollectionTabs.svelte";
+  import ContinueRail from "../components/ContinueRail.svelte";
   import { go, pathTo } from "../lib/nav";
   import { visibleCategories } from "../lib/categories";
   import { coverWidth, libraryLayout } from "../lib/layout-modes";
@@ -29,6 +29,7 @@
   import { EMPTY_FILTER, activeChips, countActive, isEmptyFilter, mergeFilter, withoutChip } from "../lib/library/filter";
   import { DEFAULT_SORT, type SortSpec } from "../lib/library/sort";
   import { parseSearch, withoutOperator, type SearchScope } from "../lib/library/search";
+  import { eligible } from "../lib/library/continue";
   import { sourceLabel } from "../lib/titles";
   import SeriesPage from "./Series.svelte";
   import type { Series } from "../api/source";
@@ -277,8 +278,16 @@
   let continuing = $state<Array<{ seriesId: string; chapterId: string; page: number; title: string; cover?: string; chapterName: string }>>([]);
   $effect(() => {
     if (library.profile === null) return;
-    void library.continueReading().then((rows) => (continuing = rows));
+    void library.continueReading(20).then((rows) => (continuing = rows));
   });
+
+  /** The strip's rows: dismissed titles dropped, capped at the setting, order kept. */
+  const continueRows = $derived(eligible(continuing, new Set(settings.continueDismissed), settings.continueMax));
+
+  /** Drawn only on the whole shelf, with nothing typed, when the setting is on. */
+  const continueVisible = $derived(
+    library.ready && selected === null && settings.showContinue && continueRows.length > 0 && query.trim() === "",
+  );
 
   const sources = $derived([...new Set(library.library.map((series) => series.provider))]);
 
@@ -520,22 +529,8 @@
         />
         {/if}
 
-        {#if library.ready && selected === null && settings.showContinue && continuing.length > 0 && query.trim() === ""}
-          <section class="continue" aria-label="Continue reading">
-            <h2>Continue reading</h2>
-            <div class="strip">
-              {#each continuing as row (row.seriesId)}
-                <button class="cont" onclick={() => go(pathTo("read", row.seriesId, row.chapterId))}>
-                  <Cover series={{ title: row.title, ...(row.cover === undefined ? {} : { cover: row.cover }) }} size="row" />
-                  <span class="body">
-                    <span class="t">{row.title}</span>
-                    <span class="p">{row.chapterName === "" ? `page ${row.page + 1}` : `${row.chapterName} · page ${row.page + 1}`}</span>
-                    <span class="go">Continue</span>
-                  </span>
-                </button>
-              {/each}
-            </div>
-          </section>
+        {#if continueVisible && settings.continuePosition === "above"}
+          <ContinueRail rows={continueRows} size={settings.continueSize} />
         {/if}
 
         <div class="tools">
@@ -560,6 +555,10 @@
         </div>
 
         <ChipRow chips={filterChips} onremove={removeChip} />
+
+        {#if continueVisible && settings.continuePosition === "below"}
+          <ContinueRail rows={continueRows} size={settings.continueSize} />
+        {/if}
         {/if}
 
         {#if !library.ready}
@@ -862,80 +861,7 @@
     gap: 2px;
   }
 
-  .continue {
-    margin-bottom: var(--s5);
-  }
-
-  .continue h2 {
-    font-size: var(--t-xs);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    color: var(--text-3);
-    margin-bottom: var(--s2);
-  }
-
-  .strip {
-    display: flex;
-    gap: var(--s2);
-    overflow-x: auto;
-  }
-
-  .cont {
-    all: unset;
-    cursor: pointer;
-    display: grid;
-    grid-template-columns: auto minmax(0, 1fr);
-    align-items: center;
-    gap: var(--s3);
-    min-width: 208px;
-    max-width: 268px;
-    padding: var(--s3);
-    border-radius: var(--r2);
-    border: 1px solid var(--line);
-    background: var(--surface);
-  }
-
-  .cont .body {
-    display: grid;
-    gap: 2px;
-    min-width: 0;
-  }
-
-  .cont .t {
-    font-weight: 600;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .cont .go {
-    font-size: var(--t-xs);
-    color: var(--accent);
-  }
-
-  .cont:hover {
-    border-color: var(--line-strong);
-  }
-
-  .cont .t {
-    font-size: var(--t-sm);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  .cont .p {
-    font-size: var(--t-xs);
-    color: var(--text-3);
-  }
-
-  .cont .go {
-    font-size: var(--t-xs);
-    color: var(--accent);
-    margin-top: var(--s1);
-  }
-
-  .blank {
+    .blank {
     display: grid;
     gap: var(--s2);
     padding-top: var(--s6);
