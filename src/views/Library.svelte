@@ -7,7 +7,9 @@
    * densities, filters and a selection mode. Nothing here writes to a source — the only writes are
    * read marks, category membership and removing a row from the shelf.
    */
+  import { tick } from "svelte";
   import { library } from "../state/library.svelte";
+  import { libraryMemory } from "../state/libraryview.svelte";
   import { categories } from "../state/categories.svelte";
   import { settings } from "../state/settings.svelte";
   import { downloads } from "../state/downloads.svelte";
@@ -32,7 +34,7 @@
   import { emptyFacts, runQuery, type QueryFacts } from "../lib/library/query";
   import { EMPTY_FILTER, activeChips, countActive, isEmptyFilter, mergeFilter, withoutChip } from "../lib/library/filter";
   import { SORT_OPTIONS, sortKeyOf, type SortSpec } from "../lib/library/sort";
-  import { parseSearch, withoutOperator, type SearchScope } from "../lib/library/search";
+  import { parseSearch, withoutOperator } from "../lib/library/search";
   import { eligible } from "../lib/library/continue";
   import { sourceLabel } from "../lib/titles";
   import SeriesPage from "./Series.svelte";
@@ -40,12 +42,21 @@
 
   let { current = null }: { current?: string | null } = $props();
 
-  /** Which category the rail is pointing at; `null` is the whole library. */
-  let selected = $state<string | null>(null);
-  let query = $state("");
-  let searching = $state(false);
+  /**
+   * Which category the rail is pointing at; `null` is the whole library. It lives in
+   * `libraryMemory` so Library → Series → back comes back here, and the durable copy in settings
+   * so a relaunch does too.
+   */
+  const selected = $derived(libraryMemory.collection);
+  const query = $derived(libraryMemory.query);
+  const searching = $derived(libraryMemory.searching);
   /** `This collection` narrows the tab you are on; `All library` looks past it (§29). */
-  let searchScope = $state<SearchScope>("category");
+  const searchScope = $derived(libraryMemory.scope);
+
+  function setCollection(id: string | null): void {
+    libraryMemory.collection = id;
+    settings.set("libraryCollection", id);
+  }
   let filterOpen = $state(false);
   let sortOpen = $state(false);
   let categoriesOpen = $state(false);
@@ -104,10 +115,34 @@
         statuses: [...settings.libraryFilter.statuses],
         sources: [...settings.libraryFilter.sources],
       },
-      query,
-      scroll: typeof window === "undefined" ? 0 : window.scrollY,
+      // Not the query: a stored search restored at launch reads as an empty library. The words
+      // survive a route change in `libraryMemory`; a reload starts with an empty box.
+      query: "",
+      scroll: scroller()?.scrollTop ?? 0,
       selectedSeriesId: null as string | null,
     };
+  }
+
+  /**
+   * The shell scrolls `main`, not the document — `window.scrollY` is always 0 here, which is why a
+   * remembered offset never landed. One function, so the reader and the writer cannot disagree.
+   */
+  function scroller(): HTMLElement | null {
+    if (typeof document === "undefined") return null;
+    return document.querySelector("main");
+  }
+
+  /**
+   * Put the offset back after the grid has a real height. Two frames, then a second attempt: the
+   * first lands the layout, the second catches a cover that changed the row height under it.
+   */
+  async function restoreScroll(top: number): Promise<void> {
+    await tick();
+    await new Promise<void>((done) => requestAnimationFrame(() => done()));
+    scroller()?.scrollTo({ top, behavior: "auto" });
+    await new Promise<void>((done) => requestAnimationFrame(() => done()));
+    const box = scroller();
+    if (box !== null && Math.abs(box.scrollTop - top) > 1) box.scrollTo({ top, behavior: "auto" });
   }
 
   function saveViewSoon(): void {
@@ -142,20 +177,29 @@
       });
     }
     if (row.query !== undefined) {
-      query = row.query;
-      searching = row.query.trim() !== "";
+      // A stored query is deliberately not restored: a search box that comes back filled after a
+      // relaunch reads as an empty library. The words survive a route change in `libraryMemory`,
+      // which is the promise §31 makes; a reload starts clean.
     }
     restoring = false;
     // Record the visit even if nothing is changed: the next launch should open here.
     saveViewSoon();
-    if (typeof window !== "undefined" && row.scroll !== undefined) {
-      // After paint, so the grid has its real height and the offset lands.
-      requestAnimationFrame(() => window.scrollTo({ top: row.scroll ?? 0, behavior: "auto" }));
-    }
+    // The offset survives a route change in `libraryMemory` (no database read, no flicker); the
+    // stored row is the answer after a relaunch. Either way it is applied after the grid has laid
+    // out, or the scroller clamps it to a half-built height.
+    const target = libraryMemory.scroll || row.scroll || 0;
+    libraryMemory.scroll = target;
+    if (target > 0) await restoreScroll(target);
   }
 
   $effect(() => {
     if (!library.ready) return;
+    if (!libraryMemory.mounted) {
+      // A reload: the shelf opens where it was left (§31's durable list). A route change keeps
+      // whatever the memory already holds, which is why this runs once, not on every mount.
+      libraryMemory.mounted = true;
+      libraryMemory.collection = settings.libraryCollection;
+    }
     void restoreView(selected);
 
     // A tab close or a reload does not destroy the component, so the flush cannot live only in
@@ -166,16 +210,20 @@
       if (restoring) return;
       void library.saveViewState(savedKey === "all" ? null : savedKey, captureViewState());
     };
-    const onScroll = (): void => saveViewSoon();
+    const box = scroller();
+    const onScroll = (): void => {
+      libraryMemory.scroll = box?.scrollTop ?? 0;
+      saveViewSoon();
+    };
+    box?.addEventListener("scroll", onScroll, { passive: true });
     const onHide = (): void => {
       if (document.visibilityState === "hidden") flush();
     };
-    window.addEventListener("scroll", onScroll, { passive: true });
     window.addEventListener("pagehide", flush);
     document.addEventListener("visibilitychange", onHide);
 
     return () => {
-      window.removeEventListener("scroll", onScroll);
+      box?.removeEventListener("scroll", onScroll);
       window.removeEventListener("pagehide", flush);
       document.removeEventListener("visibilitychange", onHide);
       // Leaving this collection (or the screen) still writes what it looked like.
@@ -341,7 +389,7 @@
     const next = withoutChip(filter, key);
     const wasInSheet = countActive(next) < countActive(filter);
     settings.set("libraryFilter", next);
-    if (!wasInSheet) query = withoutOperator(query, key);
+    if (!wasInSheet) libraryMemory.query = withoutOperator(query, key);
   }
 
   /** The numbers the `⋯` sheet reports, from what the screen already counted. */
@@ -622,22 +670,22 @@
     text={query}
     scope={searchScope}
     selecting={selection !== null}
-    onsearch={() => (searching = !searching)}
+    onsearch={() => (libraryMemory.searching = !libraryMemory.searching)}
     onclosesearch={() => {
-      searching = false;
-      query = "";
+      libraryMemory.searching = false;
+      libraryMemory.query = "";
     }}
     onselect={toggleSelection}
     onrefresh={() => void refreshLibrary()}
     onoverflow={() => (menuOpen = true)}
-    ontext={(value) => (query = value)}
-    onscope={(scope) => (searchScope = scope)}
+    ontext={(value) => (libraryMemory.query = value)}
+    onscope={(scope) => (libraryMemory.scope = scope)}
   />
 
   <div class="body">
     {#if layout.categoryNav.mode === "sidebar"}
       <aside class="collections" style:width={`${layout.sidebarWidth}px`} aria-label="Collections">
-        <button class="crow" class:on={selected === null} aria-current={selected === null ? "true" : undefined} onclick={() => (selected = null)}>
+        <button class="crow" class:on={selected === null} aria-current={selected === null ? "true" : undefined} onclick={() => setCollection(null)}>
           All
         </button>
         {#each shownCategories as category (category.id)}
@@ -646,7 +694,7 @@
             class:on={selected === category.id}
             class:pinned={category.pinned}
             aria-current={selected === category.id ? "true" : undefined}
-            onclick={() => (selected = category.id)}
+            onclick={() => setCollection(category.id)}
           >
             {category.name}
           </button>
@@ -663,7 +711,7 @@
           categories={categories.items}
           visible={shownCategories}
           {selected}
-          onselect={(id) => (selected = id)}
+          onselect={(id) => setCollection(id)}
           onedit={() => (categoriesOpen = true)}
         />
         {/if}
@@ -877,7 +925,7 @@
     <CategoryRail
       {selected}
       onselect={(id) => {
-        selected = id;
+        setCollection(id);
         categoriesOpen = false;
       }}
     />

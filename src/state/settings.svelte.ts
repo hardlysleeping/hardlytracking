@@ -57,6 +57,11 @@ export interface Prefs {
   /** The filter the sheet last applied. A durable field, so an export carries it. */
   libraryFilter: LibraryFilter;
   /**
+   * The collection the shelf was last looking at, so a relaunch opens there rather than at "All".
+   * `null` is the whole library — a real answer, not "unset", so it is stored as one.
+   */
+  libraryCollection: string | null;
+  /**
    * The Continue strip's on/off. `showContinue` is the storage key, kept from the first build so
    * the owner's existing choice survives the upgrade — the strip's `continueShow` is this field.
    */
@@ -113,6 +118,7 @@ class Settings {
   badgeSet = $state<Record<string, boolean>>({ ...DEFAULT_BADGES });
   updatesSeen = $state<Record<string, number>>({});
   libraryFilter = $state<LibraryFilter>({ ...EMPTY_FILTER, statuses: [], sources: [] });
+  libraryCollection = $state<string | null>(null);
   showContinue = $state(true);
   continuePosition = $state<"above" | "below">("above");
   continueMax = $state(10);
@@ -163,6 +169,7 @@ class Settings {
       this.sortByCollection = { all: sortSpecOfLegacy(this.librarySort) };
     }
     this.libraryFilter = await read("libraryFilter", this.libraryFilter);
+    this.libraryCollection = await read("libraryCollection", this.libraryCollection);
     this.showContinue = await read("showContinue", this.showContinue);
     this.continuePosition = await read("continuePosition", this.continuePosition);
     this.continueMax = await read("continueMax", this.continueMax);
