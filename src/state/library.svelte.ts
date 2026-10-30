@@ -14,6 +14,7 @@ import { BACKGROUND_GRACE_MS, viewStateKey } from "../lib/history";
 import { nextUnread } from "../lib/library/continue";
 import { settings } from "./settings.svelte";
 import { installTrackerSync } from "../lib/trackers/sync";
+import { startNativeRuntime } from "../lib/mihon-runtime";
 import { imageCache } from "../lib/cache/images";
 import type { Chapter, Page, Series, Source } from "../api/source";
 
@@ -46,7 +47,11 @@ class LibraryState {
   async open(): Promise<void> {
     if (this.profile !== null) return;
     try {
-      this.profile = await openLibraryProfile();
+      // On the iPhone shell the extension host is inside this process, so it has to be serving
+      // before the providers are built. Everywhere else this resolves to `null` without doing any
+      // work, and the app's own `/api/dalvik` proxy stays the default host.
+      const nativeBase = await startNativeRuntime();
+      this.profile = await openLibraryProfile(nativeBase === null ? {} : { dalvikBase: nativeBase });
       this.library = await this.profile.store.listSeries();
       this.extensions = await this.profile.store.listExtensions();
       this.repos = await this.profile.store.listRepos();

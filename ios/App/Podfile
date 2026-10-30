@@ -16,7 +16,9 @@ end
 
 target 'App' do
   capacitor_pods
-  # Add your Pods here
+  # The on-device extension runtime: an OpenJDK Zero VM in this process, serving /dalvik on loopback.
+  # Its podspec downloads the pinned JVM + server jar and links them on the Mac that builds the app.
+  pod 'MihonRuntime', :path => '../MihonRuntime'
 end
 
 post_install do |installer|

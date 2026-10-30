@@ -17,7 +17,9 @@ on:
 jobs:
   ipa:
     runs-on: macos-15
-    timeout-minutes: 30
+    # The first run compiles an OpenJDK Zero static library into a framework (prepare_command); later
+    # runs hit the runner's cache only if the image provides one, so budget for the slow path.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
         with:
@@ -28,6 +30,12 @@ jobs:
           node-version: 22
           cache: npm
 
+      - name: JDK for the runtime's logging shim
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
       - name: Install
         run: npm ci
 
@@ -37,7 +45,7 @@ jobs:
       - name: Copy the build into the iOS shell
         run: npx cap sync ios
 
-      - name: Install pods
+      - name: Install pods (downloads and links the embedded JVM)
         working-directory: ios/App
         run: pod install --repo-update
 
@@ -56,6 +64,21 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             CODE_SIGN_ENTITLEMENTS="" \
             archive
+
+      - name: The runtime is inside the app, not just linked
+        run: |
+          set -euo pipefail
+          APP="$RUNNER_TEMP/App.xcarchive/Products/Applications/App.app"
+          # A framework that is on disk but not embedded, or a jar that no resource bundle copied,
+          # produces an app that starts and then cannot open a single source. Check the bytes.
+          test -f "$APP/Frameworks/OpenJDKRuntime.framework/OpenJDKRuntime"
+          test -f "$APP/Frameworks/OpenJDKRuntime.framework/lib/lib/modules"
+          JAR=$(find "$APP" -name 'MExtensionServer.jar' -print -quit)
+          test -n "$JAR"
+          test -f "$(dirname "$JAR")/java-logging-shim.jar"
+          file "$APP/Frameworks/OpenJDKRuntime.framework/OpenJDKRuntime"
+          du -sh "$APP/Frameworks/OpenJDKRuntime.framework" "$(dirname "$JAR")"
+          echo "runtime jar: $JAR"
 
       - name: Pack the IPA
         run: |
