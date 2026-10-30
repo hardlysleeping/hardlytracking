@@ -105,7 +105,6 @@ export async function openLibraryProfile(options: OpenProfileOptions = {}): Prom
     dalvikBase: options.dalvikBase === undefined ? apiUrl("/api/dalvik") : options.dalvikBase,
     ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
     archiveEnabled: () => switches.archive,
-    runtimeEnabled: () => switches.runtime,
     // The session: the jar this device keeps, and the UA the webview logged in with. Read on every
     // call, because the runtime's own jar is memory-only and has no read route (matrix row HTTP-07).
     cookies: jar,

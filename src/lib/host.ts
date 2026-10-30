@@ -16,6 +16,8 @@
 
 const HOST_KEY = "hardlytracking.host";
 const TOKEN_KEY = "hardlytracking.token";
+/** Whether the paired read server is in use. Its built-in extension's switch writes this. */
+const READ_SERVER_KEY = "hardlytracking.readServer";
 
 /** The paired host, or `""` for this origin. */
 export function remoteHost(): string {
@@ -70,9 +72,33 @@ export function hasLocalServer(): boolean {
   }
 }
 
-/** An API path, resolved against the paired host when there is one. */
+/**
+ * Whether this device uses a paired read server.
+ *
+ * Default on: pairing a host is the act of opting in, so an app that has one should use it. Turning
+ * the built-in extension off keeps the pairing (address and token) but makes every call local again —
+ * the pairing is a setting, the switch is the decision.
+ */
+export function readServerEnabled(): boolean {
+  try {
+    return (localStorage.getItem(READ_SERVER_KEY) ?? "on") !== "off";
+  } catch {
+    return true;
+  }
+}
+
+export function setReadServerEnabled(enabled: boolean): void {
+  try {
+    if (enabled) localStorage.removeItem(READ_SERVER_KEY);
+    else localStorage.setItem(READ_SERVER_KEY, "off");
+  } catch {
+    /* a browser with storage disabled keeps the session default */
+  }
+}
+
+/** An API path, resolved against the paired host when there is one and the server is in use. */
 export function apiUrl(path: string): string {
-  const host = remoteHost();
+  const host = readServerEnabled() ? remoteHost() : "";
   return host === "" ? path : `${host}${path}`;
 }
 

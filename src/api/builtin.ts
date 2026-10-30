@@ -17,8 +17,15 @@ import type { LibraryStore } from "../lib/db/store";
 /** Stable id: not a hash of anything, because there are no bytes to hash. */
 export const BUILTIN_ARCHIVE_ID = "builtin:internet-archive";
 
-/** The Mihon extension host, as a built-in rather than something the user has to find. */
-export const BUILTIN_RUNTIME_ID = "builtin:mihon-runtime";
+/**
+ * The read server: the desktop (or any paired host) that serves this app and runs its extensions.
+ *
+ * This is a built-in because it is a way of *using* the app, not a store you install: on a phone the
+ * whole point is that a machine with the runtime does the work and the phone reads. It is not the
+ * Mihon runtime itself — that is a service the app talks to, and it has no business appearing as an
+ * extension the user could uninstall.
+ */
+export const BUILTIN_READ_SERVER_ID = "builtin:read-server";
 
 /**
  * Internet Archive, preinstalled and on by default.
@@ -39,10 +46,10 @@ export const BUILTIN_EXTENSIONS: InstalledExtension[] = [
     builtin: true,
   },
   {
-    extensionId: BUILTIN_RUNTIME_ID,
-    packageId: "ing.hardlysleep.hardlytracking.builtin.runtime",
-    name: "Mihon extensions",
-    // No icon: this one is a host, not a store. The card falls back to its initial.
+    extensionId: BUILTIN_READ_SERVER_ID,
+    packageId: "ing.hardlysleep.hardlytracking.builtin.readserver",
+    name: "Read server",
+    // No sources of its own: it is a transport. Its card names the host it is paired with.
     sources: [],
     versionName: "1.0.0",
     enabled: true,

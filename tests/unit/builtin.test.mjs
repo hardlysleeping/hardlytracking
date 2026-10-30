@@ -15,12 +15,14 @@ function store() {
   return new LibraryStore(memoryDatabase());
 }
 
-test("the built-in list is archive.org and the Mihon runtime", () => {
+test("the built-ins are archive.org and the read server, and nothing else", () => {
   assert.equal(BUILTIN_EXTENSIONS.length, 2);
   assert.deepEqual(
     BUILTIN_EXTENSIONS.map((entry) => entry.extensionId),
-    ["builtin:internet-archive", "builtin:mihon-runtime"],
+    ["builtin:internet-archive", "builtin:read-server"],
   );
+  // The Mihon runtime is a service the app talks to, not an extension anyone can uninstall.
+  assert.equal(BUILTIN_EXTENSIONS.some((entry) => /mihon|runtime/i.test(entry.name)), false);
   const row = BUILTIN_EXTENSIONS[0];
   assert.equal(row.extensionId, BUILTIN_ARCHIVE_ID);
   assert.equal(row.builtin, true);
@@ -34,7 +36,7 @@ test("the built-in list is archive.org and the Mihon runtime", () => {
 test("a fresh install gets the row, and seeding twice does not duplicate it", async () => {
   const library = store();
   const first = await ensureBuiltinExtensions(library);
-  assert.equal(first.length, 2, "archive.org and the runtime");
+  assert.equal(first.length, 2, "archive.org and the read server");
   assert.equal(first[0].extensionId, BUILTIN_ARCHIVE_ID);
 
   const second = await ensureBuiltinExtensions(library);
@@ -118,4 +120,27 @@ test("a packaged app asks the repository directly, because it has no /api/repo o
   // In node there is no `location`, which is the same answer as a packaged app: no server here.
   assert.equal(repoFetchUrl("https://example.test/repo/index.pb"), "https://example.test/repo/index.pb");
   assert.equal(proxiedImage("https://example.test/icon.png"), "https://example.test/icon.png");
+});
+
+test("the read server switch turns the pairing off without forgetting it", async () => {
+  const { readServerEnabled, setReadServerEnabled, remoteHost, apiUrl } = await import("../../src/lib/host.ts");
+  const memory = new Map();
+  globalThis.localStorage = {
+    getItem: (key) => (memory.has(key) ? memory.get(key) : null),
+    setItem: (key, value) => memory.set(key, String(value)),
+    removeItem: (key) => memory.delete(key),
+  };
+  // `setRemoteHost` compares against location.origin, and node has no location, so the pairing is
+  // written the way a browser writes it.
+  memory.set("hardlytracking.host", "http://desktop.test:8460");
+  assert.equal(apiUrl("/api/dalvik"), "http://desktop.test:8460/api/dalvik");
+
+  setReadServerEnabled(false);
+  assert.equal(readServerEnabled(), false);
+  assert.equal(apiUrl("/api/dalvik"), "/api/dalvik", "off means this device, whatever is paired");
+  assert.equal(remoteHost(), "http://desktop.test:8460", "the address is kept, not deleted");
+
+  setReadServerEnabled(true);
+  assert.equal(apiUrl("/api/dalvik"), "http://desktop.test:8460/api/dalvik", "on again uses the pairing");
+  delete globalThis.localStorage;
 });

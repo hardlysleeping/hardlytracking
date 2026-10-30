@@ -36,8 +36,6 @@ export interface RegistryConfig {
    * care about the switch still gets the provider.
    */
   archiveEnabled?: () => boolean;
-  /** Whether the built-in Mihon runtime is on. `undefined` means yes. */
-  runtimeEnabled?: () => boolean;
   /**
    * Where this device keeps source cookies, so a logged-in source stays logged in across a runtime
    * restart (the runtime's own jar is memory-only). Absent means no session is carried.
@@ -99,7 +97,6 @@ export async function createProviders(config: RegistryConfig): Promise<ProviderS
         createDalvikProvider({
           client,
           extensions,
-          ...(config.runtimeEnabled === undefined ? {} : { enabled: config.runtimeEnabled }),
           // The session travels on every call: cookies from this device's jar, the UA the webview
           // used, and — when this build hosts one — the port of the app's own webview bridge.
           ...(config.cookies === undefined ? {} : { cookies: config.cookies }),

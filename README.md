@@ -55,6 +55,14 @@ Svelte 5 UI  →  SourceProvider  →  MihonProvider  →  /api/mihon  →  Miho
 - **`server/proxy.mjs`** serves the built app and proxies `/api/mihon/*` to the runtime, so the
   browser sees one origin and there is no CORS to configure.
 
+## What ships inside HardlyTracking, and what never can
+
+No content source ships with this app. The user adds extension repositories or installs APKs
+themselves, exactly as in Mihon — an app that bundles them becomes a distributor of third-party
+code. The built-ins that *are* allowed are the ones with no third-party catalogue behind them:
+locally hosted services (Komga, Suwayomi), Internet Archive (open data, public API), and this
+project's own read server. The rule and its reasons: `docs/builtins.md`.
+
 ## Free, and what is paid
 
 The reader is free and stays free: standalone iPhone reading, Mihon/Komikku extensions, the local
