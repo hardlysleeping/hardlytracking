@@ -202,8 +202,10 @@ jobs:
           [ -x "$sevenz" ] || { echo "::error::no 7-Zip at $sevenz"; exit 1; }
           "$sevenz" a -tzip -mx=5 "$zip" portable/HardlyTracking > /dev/null
           ls -lh "$zip"
-          # Prove the archive carries the host, rather than trusting the folder it came from.
-          "$sevenz" l "$zip" > /tmp/zip-list.txt
+          # Prove the archive carries the host, rather than trusting the folder it came from. 7-Zip
+          # lists Windows paths with backslashes, so normalise before grepping — a grep for
+          # `runtime/runner.jar` misses `HardlyTracking\runtime\runner.jar` and fails a good zip.
+          "$sevenz" l "$zip" | tr '\\' '/' > /tmp/zip-list.txt
           grep -q 'runtime/runner.jar' /tmp/zip-list.txt
           grep -q 'runtime/jre/bin/java.exe' /tmp/zip-list.txt
           echo "✓ the portable zip carries runner.jar and a JRE"
@@ -291,6 +293,13 @@ jobs:
           dmg=$(find src-tauri/target/x86_64-apple-darwin/release/bundle/dmg -name '*.dmg' -print -quit)
           [ -n "$dmg" ] || { echo "✗ no dmg"; exit 1; }
           cp "$dmg" "HardlyTracking_${version}_macos-x86_64.dmg"
+          # This job runs beside the matrix, so the release page may not exist yet — the first
+          # attempt failed here with "release not found" after a good build. Create it if it is
+          # missing (the release job's own create is idempotent and tolerates this).
+          if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" \
+              --title "HardlyTracking ${version}" --generate-notes || true
+          fi
           gh release upload "$TAG" "HardlyTracking_${version}_macos-x86_64.dmg" --clobber --repo "$GITHUB_REPOSITORY"
           gh release upload "$TAG" "HardlyTracking_${version}_macos-x86_64-portable.zip" --clobber --repo "$GITHUB_REPOSITORY"
 
