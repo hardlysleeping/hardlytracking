@@ -12,6 +12,7 @@ import { sortSpecOfLegacy, type SortSpec } from "../lib/library/sort";
 import { DEFAULT_BADGES } from "../lib/library/badges";
 import type { Margins, PanePreference } from "../lib/view-options";
 import { DEFAULT_CPU_LEVEL, type CpuLevel } from "../lib/performance";
+import { levelOr, type ContentLevel } from "../lib/content/levels";
 
 export type LibraryView = "grid" | "compact" | "list";
 export type Sort = "title" | "recent" | "source";
@@ -90,6 +91,23 @@ export interface Prefs {
   searchPinnedOnly: boolean;
   /** How hard the app may work: pages fetched at once and pacing between them. */
   cpuLevel: CpuLevel;
+  /**
+   * Restricted / Mature / Adult — what the extension store and the source list are allowed to show.
+   *
+   * Mature, not Restricted, is the default: most indexes label nothing at all, and an app that
+   * opens with an empty store reads as broken rather than as careful.
+   */
+  contentLevel: ContentLevel;
+  /**
+   * The age declaration, stored apart from the level.
+   *
+   * A restored backup, or a level left at Adult by another build, must not show adult sources to
+   * someone who never said they were an adult. The setting says what to show; this says whether it
+   * may.
+   */
+  adultDeclared: boolean;
+  /** When the declaration was made, so Settings can say "declared on …" rather than just "on". */
+  adultDeclaredAt: number | null;
   /** Room around the content: comfortable, compact, or none. */
   contentMargins: Margins;
   /** Remove comfort-only chrome (screen heading, Continue strip) so the grid keeps the pixels. */
@@ -138,6 +156,9 @@ class Settings {
   pinnedSources = $state<string[]>([]);
   searchPinnedOnly = $state(true);
   cpuLevel = $state<CpuLevel>(DEFAULT_CPU_LEVEL);
+  contentLevel = $state<ContentLevel>("mature");
+  adultDeclared = $state(false);
+  adultDeclaredAt = $state<number | null>(null);
   contentMargins = $state<Margins>("comfortable");
   maximizeSpace = $state(false);
   libraryPane = $state<PanePreference>("auto");
@@ -186,6 +207,9 @@ class Settings {
     this.pinnedSources = await read("pinnedSources", this.pinnedSources);
     this.searchPinnedOnly = await read("searchPinnedOnly", this.searchPinnedOnly);
     this.cpuLevel = await read("cpuLevel", this.cpuLevel);
+    this.contentLevel = levelOr(await read<unknown>("contentLevel", this.contentLevel));
+    this.adultDeclared = await read("adultDeclared", this.adultDeclared);
+    this.adultDeclaredAt = await read("adultDeclaredAt", this.adultDeclaredAt);
     this.contentMargins = await read("contentMargins", this.contentMargins);
     this.maximizeSpace = await read("maximizeSpace", this.maximizeSpace);
     this.libraryPane = await read("libraryPane", this.libraryPane);

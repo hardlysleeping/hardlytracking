@@ -14,6 +14,7 @@
   import { EYE_PATHS, MARKER_PATH, PIN_WORDS } from "../lib/categories";
   import { visibleSources } from "../lib/marks";
   import { providerLabel } from "../api/source";
+  import { filterByLevel, hiddenNotice, levelOfSource } from "../lib/content/levels";
 
   let { current = null }: { current?: string | null } = $props();
 
@@ -22,9 +23,20 @@
   /** The pin mark with the search-scoped pins folded in: one glyph, both consequences. */
   const marks = $derived(sourceMarks.withSearchPins(settings.pinnedSources));
 
+  /**
+   * Sources at the content level, before the eye and the pin.
+   *
+   * The level is applied here rather than deeper because a source is the only thing Browse lists: a
+   * hidden one is not searchable either, which is the point of hiding it.
+   */
+  const allowedSources = $derived(
+    filterByLevel(library.sources, (source) => levelOfSource(source.nsfw), settings.contentLevel, settings.adultDeclared),
+  );
+  const levelNotice = $derived(hiddenNotice(library.sources.length - allowedSources.length, settings.contentLevel));
+
   const sources = $derived.by(() => {
     const needle = query.trim().toLowerCase();
-    const found = library.sources.filter(
+    const found = allowedSources.filter(
       (source) => needle === "" || `${source.name} ${source.lang ?? ""}`.toLowerCase().includes(needle),
     );
     // The eye and the pin, exactly as the category rail does them: hidden sources leave the list
@@ -137,6 +149,10 @@
       </section>
     {/each}
 
+    {#if levelNotice !== null}
+      <p class="levelnote">{levelNotice}</p>
+    {/if}
+
     {#if sources.length === 0}
       <p class="empty">No source matches “{query}”.</p>
     {/if}
@@ -144,6 +160,13 @@
 </section>
 
 <style>
+  .levelnote {
+    margin: 0 0 var(--s2);
+    padding: 0 var(--s3);
+    font-size: var(--t-xs);
+    color: var(--text-3);
+  }
+
   .view {
     padding: var(--s4) var(--s4) var(--s7);
     max-width: 900px;

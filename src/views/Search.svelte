@@ -21,6 +21,7 @@
   import { isFresh, searchCacheKey, type CachedSearch } from "../lib/search/index";
   import { pinnedSources, togglePin } from "../lib/pinned";
   import { go, pathTo } from "../lib/nav";
+  import { filterByLevel, levelOfSource } from "../lib/content/levels";
 
   interface Props {
     initial?: string | null;
@@ -60,7 +61,11 @@
   let saving = $state(false);
   let notice = $state("");
 
-  const sources = $derived(library.sources);
+  // A source hidden by the content level cannot be searched either: hiding a list but not its
+  // results would be the same content, one tap further in.
+  const sources = $derived(
+    filterByLevel(library.sources, (source) => levelOfSource(source.nsfw), settings.contentLevel, settings.adultDeclared),
+  );
 
   /** Pinned sources, in the order the user pinned them, limited to what is actually installed. */
   const pinned = $derived(pinnedSources(sources, settings.pinnedSources));

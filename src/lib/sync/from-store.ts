@@ -23,9 +23,12 @@ const READ_PREFIX = "read:";
  *
  * `downloadQueue` is a to-do list of chapters to fetch onto THIS machine; `sync.device` is this
  * device's identity in the merge. Importing either is not "bringing your settings over", it is
- * starting work and stealing an identity.
+ * starting work and stealing an identity. `settings.adultDeclared` is an age declaration made by a
+ * person on a device: the content level travels (it is a preference), the declaration does not — a
+ * restored "Adult" falls back to Mature until somebody declares again, which is what `allows()` in
+ * `lib/content/levels.ts` enforces.
  */
-const LOCAL_ONLY_PREFIXES = ["downloadQueue", "sync.device", "cache."] as const;
+const LOCAL_ONLY_PREFIXES = ["downloadQueue", "sync.device", "cache.", "settings.adultDeclared"] as const;
 
 /**
  * Stores that never travel, by name.

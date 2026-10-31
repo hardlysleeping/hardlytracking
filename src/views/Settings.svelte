@@ -20,6 +20,7 @@
   import { CACHE_LIMIT_CHOICES, describeCache, formatBytes, type CacheEntry } from "../lib/cache/policy";
   import { MARGIN_CHOICES, PANE_CHOICES } from "../lib/view-options";
   import { CPU_LEVELS, describeLevel } from "../lib/performance";
+import { CONTENT_LEVELS, type ContentLevel } from "../lib/content/levels";
 
   /** The slider shows the cover the library actually draws, not a value a preset overrides. */
   const cover = $derived(coverWidth(settings.libraryDensity, deviceClass(viewport.width), settings.coverSize));
@@ -151,6 +152,31 @@
     cleared = `Deleted ${removed.sessions} session${removed.sessions === 1 ? "" : "s"} and ${removed.history} history entr${removed.history === 1 ? "y" : "ies"} from ${scope}. Progress and read marks were not touched.`;
     clearing = null;
   }
+
+  /** The age gate is shown, not applied: choosing Adult asks before it shows anything. */
+  let ageGate = $state(false);
+
+  function chooseLevel(level: ContentLevel): void {
+    if (level === "adult" && !settings.adultDeclared) {
+      ageGate = true;
+      return;
+    }
+    settings.set("contentLevel", level);
+    ageGate = false;
+  }
+
+  function declareAdult(): void {
+    settings.set("adultDeclaredAt", Date.now());
+    settings.set("adultDeclared", true);
+    settings.set("contentLevel", "adult");
+    ageGate = false;
+  }
+
+  function withdrawAdult(): void {
+    settings.set("adultDeclared", false);
+    settings.set("adultDeclaredAt", null);
+    if (settings.contentLevel === "adult") settings.set("contentLevel", "mature");
+  }
 </script>
 
 <section class="view">
@@ -168,6 +194,43 @@
         <button class="chip" class:on={appearance.theme === option.id} onclick={() => appearance.apply(option.id)}>{option.label}</button>
       {/each}
     </div>
+  </section>
+
+  <section class="group">
+    <h2>Content</h2>
+    <div class="row">
+      <span>Show sources rated<em class="sub">{CONTENT_LEVELS.find((l) => l.id === settings.contentLevel)?.hint ?? ""}</em></span>
+      <div class="chips">
+        {#each CONTENT_LEVELS as option (option.id)}
+          <button class="chip" class:on={settings.contentLevel === option.id} onclick={() => chooseLevel(option.id)}>
+            {option.label}
+          </button>
+        {/each}
+      </div>
+    </div>
+    {#if ageGate}
+      <div class="age">
+        <p class="agehead">Adult sources</p>
+        <p class="agebody">
+          Nothing about them is classified but their own index. Confirm you are 18 or older and they
+          will be listed and searchable; the setting is remembered on this device.
+        </p>
+        <div class="ageacts">
+          <button class="btn ghost" onclick={() => (ageGate = false)}>Cancel</button>
+          <button class="btn primary" onclick={declareAdult}>I am 18 or older</button>
+        </div>
+      </div>
+    {:else if settings.adultDeclared}
+      <div class="row">
+        <span>
+          Adult sources
+          <em class="sub">
+            Declared {settings.adultDeclaredAt === null ? "on this device" : `on ${new Date(settings.adultDeclaredAt).toLocaleDateString()}`}.
+          </em>
+        </span>
+        <button class="btn ghost" onclick={withdrawAdult}>Turn off</button>
+      </div>
+    {/if}
   </section>
 
   <section class="group">
@@ -512,6 +575,34 @@
 </section>
 
 <style>
+  .age {
+    margin-top: var(--s2);
+    padding: var(--s3);
+    border: 1px solid var(--line);
+    border-radius: var(--r3);
+    background: var(--surface-2);
+    display: grid;
+    gap: var(--s2);
+  }
+
+  .agehead {
+    margin: 0;
+    font-weight: 600;
+  }
+
+  .agebody {
+    margin: 0;
+    font-size: var(--t-sm);
+    color: var(--text-2);
+    max-width: 58ch;
+  }
+
+  .ageacts {
+    display: flex;
+    gap: var(--s2);
+    flex-wrap: wrap;
+  }
+
   .view {
     padding: var(--s3) var(--s4) var(--s7);
     max-width: 720px;

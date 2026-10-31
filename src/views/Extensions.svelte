@@ -11,7 +11,10 @@
   import { planUpdates, updateState, type ExtensionEntry } from "../lib/extensions/index";
   import { RepositoryError, loadRepository, type Repository } from "../lib/extensions/repository";
   import { packagesLabel, proposalOf, type RepoProposal } from "../lib/extensions/proposal";
+  import { filterByLevel, hiddenNotice, levelOfWarning } from "../lib/content/levels";
+  import { settings } from "../state/settings.svelte";
   import { extensionLabel, extensionLanguages, sourcesOfExtension } from "../lib/extensions/installed";
+  import { softwareHref } from "../lib/software";
   import { proxiedImage } from "../lib/pages";
   import { go, pathTo } from "../lib/nav";
   import { htServerEnabled, hostToken, remoteHost, setHostToken, setRemoteHost } from "../lib/host";
@@ -211,10 +214,21 @@ import {
   /** package id -> installed row, so an entry knows whether it is new, current or old. */
   const byPackage = $derived(new Map(installed.map((row) => [row.packageId, row])));
 
+  /**
+   * What the content level allows, before the search box.
+   *
+   * Filtered at the index, not at the row: an entry the level hides must not be findable by typing
+   * its name, and must not be installable by URL either.
+   */
+  const allowed = $derived(
+    filterByLevel(entries, (entry) => levelOfWarning(entry.contentWarning), settings.contentLevel, settings.adultDeclared),
+  );
+  const levelNotice = $derived(hiddenNotice(entries.length - allowed.length, settings.contentLevel));
+
   const matched = $derived.by(() => {
     const needle = search.trim().toLowerCase();
-    if (needle === "") return entries;
-    return entries.filter((entry) =>
+    if (needle === "") return allowed;
+    return allowed.filter((entry) =>
       `${entry.name} ${entry.pkg} ${entry.sources.map((source) => source.lang).join(" ")}`.toLowerCase().includes(needle),
     );
   });
@@ -443,7 +457,17 @@ import {
                 <span class="icon fallback" aria-hidden="true">{label.slice(0, 1)}</span>
               {/if}
               <div class="info">
-                <span class="name">{label}</span>
+                {#if row.builtin === true}
+                  <span class="name">{label}</span>
+                {:else}
+                  <!-- The list is the index; the package page is the record. A built-in has no
+                       package page: it ships with the app rather than coming from a repository. -->
+                  <button
+                    class="name link"
+                    title={`Open ${label}`}
+                    onclick={() => go(softwareHref({ pkg: row.packageId, repo: row.repoUrl ?? null }))}
+                  >{label}</button>
+                {/if}
                 <span class="sub">
                   {#if row.extensionId === "builtin:ht-server"}
                     <!-- A host is not a source itself: what matters is which machine it is. -->
@@ -722,6 +746,9 @@ import {
         <p class="summary">
           {matched.length === 0 ? "No match" : `${matched.length} extension${matched.length === 1 ? "" : "s"}`}{matched.length > shown.length ? ` · showing ${shown.length}` : ""}
         </p>
+        {#if levelNotice !== null}
+          <p class="levelnote">{levelNotice}</p>
+        {/if}
         <ul class="rows">
           {#each shown as entry (entry.pkg)}
             {@const state = stateOf(entry)}
@@ -821,6 +848,12 @@ import {
 </section>
 
 <style>
+  .levelnote {
+    margin: 0 0 var(--s2);
+    font-size: var(--t-xs);
+    color: var(--text-3);
+  }
+
   .proposal {
     display: grid;
     gap: var(--s1);
