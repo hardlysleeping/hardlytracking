@@ -121,6 +121,24 @@ test("retention prunes only old closed sessions, never open ones", async () => {
   assert.equal((await s.listTombstones()).filter((row) => row.kind === "session").length, 1);
 });
 
+test("retention never ages out reading history, only the sessions", async () => {
+  // History is the record of what was read and when — the thing stats are built from — so it has no
+  // retention window. Only the timed sessions age out.
+  const s = store();
+  const now = 10_000 * 86_400_000;
+  const ancient = now - 900 * 86_400_000;
+  await s.recordHistory("s", "read-long-ago", ancient);
+  const id = await s.beginSession({ seriesId: "s", chapterId: "read-long-ago", startPage: 0 }, ancient);
+  await s.endSession(id, { endPage: 3, at: ancient + 60_000 });
+
+  assert.equal(await s.pruneSessions(30, now), 1, "the session aged out");
+  assert.equal((await s.listSessions()).length, 0);
+  const history = await s.listHistory(10);
+  assert.equal(history.length, 1, "the history row is still there");
+  assert.equal(history[0].chapterId, "read-long-ago");
+  assert.equal(history[0].at, ancient, "and it still carries the day it was read");
+});
+
 test("retention of zero keeps everything", async () => {
   const s = store();
   const id = await s.beginSession({ seriesId: "s", chapterId: "ch", startPage: 0 }, 0);

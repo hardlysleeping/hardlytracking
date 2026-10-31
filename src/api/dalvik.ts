@@ -741,6 +741,8 @@ export function createDalvikProvider(options: DalvikProviderOptions): SourceProv
           provider: kind,
           name: source.name,
           ...(source.lang === undefined ? {} : { lang: source.lang }),
+          // The site the extension reads, so a pasted link can be matched to it by host.
+          ...(source.baseUrl === undefined || source.baseUrl === "" ? {} : { baseUrl: source.baseUrl }),
         })),
       );
     },

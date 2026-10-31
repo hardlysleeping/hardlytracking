@@ -46,6 +46,7 @@ export const ARCHIVE_SOURCE: Source = {
   name: "Internet Archive",
   lang: "en",
   supportsLatest: true,
+  baseUrl: ARCHIVE_BASE,
 };
 
 /** Leaf width for streamed pages. 1200 is legible on a phone at 3x without pulling the 2 MB scan. */

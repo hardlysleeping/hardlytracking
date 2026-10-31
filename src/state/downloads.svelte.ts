@@ -17,12 +17,21 @@ import { library } from "./library.svelte";
 import type { Chapter, Page } from "../api/source";
 import type { DownloadRow } from "../lib/db/store";
 import { DownloadEngine, type DownloadHost, type LocalChapter } from "../lib/downloads/engine";
-import { isComplete, type Progress, type QueueItem } from "../lib/downloads/state";
+import {
+  chaptersToFetch,
+  isComplete,
+  type FetchMode,
+  type Progress,
+  type QueueItem,
+} from "../lib/downloads/state";
 import { pageSrc } from "../lib/pages";
 import { workBudget } from "../lib/performance";
 import { settings } from "./settings.svelte";
 
 export type { DownloadRow, LocalChapter, Progress, QueueItem };
+
+/** Where the per-series chapter counts are kept. One pref key, so a reload reads what a fetch learned. */
+const TOTALS_PREF = "downloadTotals";
 
 class Downloads implements DownloadHost {
   rows = $state<DownloadRow[]>([]);
@@ -83,6 +92,50 @@ class Downloads implements DownloadHost {
 
   enqueueMany(seriesId: string, chapters: Chapter[]): void {
     this.worker()?.enqueueMany(seriesId, chapters);
+  }
+
+  /**
+   * Queue a whole series, the way the Downloads screen offers it.
+   *
+   * `new` takes the chapters this device has never seen; `all` also retries the half-here and the
+   * failed ones. Returns what it asked for, so the screen can say "queued 4 of 12" instead of
+   * leaving the tap unanswered.
+   */
+  async fetchSeries(seriesId: string, mode: FetchMode): Promise<{ queued: number; total: number }> {
+    const chapters = await library.chapters(seriesId);
+    // Remember how many chapters the series has: a card that says "3 of 12 issues" needs the 12,
+    // and asking the source again on every visit would be a network call for a number that does
+    // not change.
+    await this.rememberTotal(seriesId, chapters.length);
+    const want = chaptersToFetch(
+      chapters,
+      {
+        complete: new Set(this.rows.filter(isComplete).map((row) => row.chapterId)),
+        known: new Set(this.rows.map((row) => row.chapterId)),
+        queued: new Set([
+          ...this.queue.map((item) => item.chapterId),
+          ...(this.active === null ? [] : [this.active.chapterId]),
+        ]),
+      },
+      mode,
+    );
+    this.enqueueMany(seriesId, want);
+    return { queued: want.length, total: chapters.length };
+  }
+
+  /** Chapter counts per series, learned when a series is fetched. Survives a reload. */
+  async knownTotals(): Promise<Record<string, number>> {
+    const store = library.profile?.store;
+    if (store === undefined) return {};
+    return (await store.getPref<Record<string, number>>(TOTALS_PREF)) ?? {};
+  }
+
+  private async rememberTotal(seriesId: string, total: number): Promise<void> {
+    const store = library.profile?.store;
+    if (store === undefined || total <= 0) return;
+    const totals = await this.knownTotals();
+    if (totals[seriesId] === total) return;
+    await store.setPref(TOTALS_PREF, { ...totals, [seriesId]: total });
   }
 
   cancel(chapterId: string): void {

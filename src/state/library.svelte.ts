@@ -318,6 +318,19 @@ class LibraryState {
     await this.refreshLibrary();
   }
 
+  /** The source's own page for a series: what a pasted link is turned into before it is queued. */
+  async details(seriesId: string): Promise<Series> {
+    if (this.profile === null) throw new Error("no library is open");
+    return providerFor(this.profile.providers, seriesId).details(seriesId);
+  }
+
+  /** One page of a source's search, for a link that names a site rather than a series. */
+  async searchSource(sourceId: string, query: string): Promise<Series[]> {
+    if (this.profile === null) return [];
+    const result = await providerFor(this.profile.providers, sourceId).search(sourceId, query, 1);
+    return result.items;
+  }
+
   async chapters(seriesId: string): Promise<Chapter[]> {
     if (this.profile === null) return [];
     const provider = providerFor(this.profile.providers, seriesId);

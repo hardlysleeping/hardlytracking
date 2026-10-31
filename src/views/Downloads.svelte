@@ -1,18 +1,32 @@
 <script lang="ts">
   /**
-   * Downloads: what is on this device, what is arriving, and how much room it takes.
+   * Downloads: what is arriving, what is here, and how to ask for more.
+   *
+   * Two lists, because they answer two different questions — Queue is "what is left", Finished is
+   * "what do I have" — and both are searchable, because a device with 400 chapters needs a way in
+   * that is not scrolling. A series card says how many of its issues are here out of how many it
+   * has, so "did it finish?" is answered on the card rather than by counting rows.
+   *
+   * The paste box exists because the links come from somewhere else: a forum, a chat, an archive
+   * search in another tab. A link is resolved against the sources this app actually has installed
+   * and turned into queue entries — or refused with the reason, never guessed at.
    *
    * Downloaded chapters are the offline promise, so this screen is about state as much as
-   * management: a chapter that is queued, running, finished, partial or failed looks different in
-   * each case, and each case has the one action that makes sense. Nothing here is ever uploaded —
-   * a download lives in this device's database and nowhere else.
-   *
-   * The list is grouped by series and read in chapter order, because a downloads screen is
-   * checked against a series page, not against the order things happened to be tapped in.
+   * management: queued, running, finished, partial and failed look different, and each has the one
+   * action that makes sense. Nothing here is ever uploaded — a download lives in this device's
+   * database and nowhere else.
    */
   import { downloads } from "../state/downloads.svelte";
   import { library } from "../state/library.svelte";
-  import { groupBySeries, isComplete, manageRows, type ManageRow } from "../lib/downloads/state";
+  import {
+    grabbedLabel,
+    groupBySeries,
+    isComplete,
+    manageRows,
+    matchesDownloadQuery,
+    type ManageRow,
+  } from "../lib/downloads/state";
+  import { bestMatch, hostOf, resolveLinks } from "../lib/downloads/links";
   import { go, pathTo } from "../lib/nav";
 
   $effect(() => {
@@ -22,26 +36,82 @@
   /** Titles: the library first, then any title this device has seen before. */
   let known = $state<Map<string, string>>(new Map());
 
-  $effect(() => {
+  /** Read the titles this device knows; called again whenever a new one is learned. */
+  async function refreshKnown(): Promise<void> {
     const store = library.profile?.store;
     if (store === undefined) return;
-    void store.listKnownSeries().then((rows) => {
-      known = new Map(rows.map((row) => [row.id, row.title]));
-    });
+    const rows = await store.listKnownSeries();
+    known = new Map(rows.map((row) => [row.id, row.title]));
+  }
+
+  $effect(() => {
+    void refreshKnown();
   });
 
   const titles = $derived(new Map([...known, ...library.library.map((row) => [row.id, row.title] as [string, string])]));
 
   const lines = $derived(manageRows(downloads.rows, downloads.queue, downloads.active));
-  const groups = $derived(groupBySeries(lines, titles));
 
-  /** Chapters whose pages are all here. A partial one is listed, but it is not counted as kept. */
+  /** How many chapters a series has, so "3 of 12 issues" is a fact rather than a row count. */
+  let totals = $state<Record<string, number>>({});
+  /** Not reactive: it only stops the same series being read out of the database twice. */
+  const counted = new Map<string, number>();
+
+  $effect(() => {
+    const store = library.profile?.store;
+    if (store === undefined) return;
+    // Every series on this screen, including the ones that are only queued and have no row yet.
+    const ids = [...new Set(lines.map((row) => row.seriesId))].filter((id) => !(id in totals));
+    if (ids.length === 0) return;
+    void (async () => {
+      const learned = await downloads.knownTotals();
+      const next: Record<string, number> = {};
+      for (const id of ids) {
+        // A count learned by a fetch first; the mirrored chapter list second; nothing invented.
+        const known = counted.get(id) ?? learned[id];
+        const total = known ?? (await store.listChapters(id)).length;
+        if (total > 0) counted.set(id, total);
+        next[id] = total;
+      }
+      totals = { ...totals, ...next };
+    })();
+  });
+
+  let tab = $state<"queue" | "finished">("queue");
+  let query = $state("");
+
+  const filtered = $derived(
+    lines.filter((row) => matchesDownloadQuery(query, titles.get(row.seriesId), row.chapterName)),
+  );
+  // The running chapter is pinned above the list; showing it again here would be the same row
+  // twice, and the two copies would disagree by a page.
+  const queueLines = $derived(
+    filtered.filter(
+      (row) =>
+        row.chapterId !== downloads.active?.chapterId &&
+        (row.state === "queued" || row.state === "downloading" || row.state === "failed" || row.state === "partial"),
+    ),
+  );
+  const finishedLines = $derived(filtered.filter((row) => row.state === "done"));
+  const shown = $derived(tab === "queue" ? queueLines : finishedLines);
+  const groups = $derived(groupBySeries(shown, titles));
+
   const kept = $derived(downloads.rows.filter(isComplete).length);
   const waiting = $derived(downloads.queue.filter((item) => item.state !== "failed").length);
+  const failed = $derived(downloads.queue.filter((item) => item.state === "failed").length);
 
   /** The row or series waiting for a second tap. Destructive actions are never one tap. */
   let confirming = $state<string | null>(null);
   let confirmingSeries = $state<string | null>(null);
+
+  /** The paste box, and what each line of the last paste turned into. */
+  let paste = $state("");
+  let pasting = $state(false);
+  let reports = $state<Array<{ ok: boolean; text: string }>>([]);
+
+  /** A series whose "fetch" tap is in flight, so the button cannot be double-tapped. */
+  let fetching = $state<string | null>(null);
+  let notice = $state("");
 
   function size(bytes: number): string {
     if (bytes < 1024) return `${bytes} B`;
@@ -75,6 +145,23 @@
     return row.state === "partial" || row.state === "failed";
   }
 
+  /** Chapters of one series that are complete here, for the card's count. */
+  function grabbed(seriesId: string): number {
+    return downloads.rows.filter((row) => row.seriesId === seriesId && isComplete(row)).length;
+  }
+
+  /** The running chapter's own line, when the list already has it. */
+  const running = $derived(
+    downloads.active === null ? null : lines.find((row) => row.chapterId === downloads.active?.chapterId) ?? null,
+  );
+  const runningPercent = $derived(
+    downloads.active === null
+      ? 0
+      : downloads.active.total <= 0
+        ? 0
+        : Math.min(Math.round((downloads.active.done / downloads.active.total) * 100), 100),
+  );
+
   async function removeRow(row: ManageRow): Promise<void> {
     confirming = null;
     await downloads.remove(row.chapterId);
@@ -84,41 +171,219 @@
     confirmingSeries = null;
     await downloads.removeSeries(seriesId);
   }
+
+  /** Queue a series' chapters: only the unseen ones, or everything that is not already here. */
+  async function fetchSeries(seriesId: string, mode: "new" | "all"): Promise<void> {
+    if (fetching !== null) return;
+    fetching = seriesId;
+    notice = "";
+    try {
+      const { queued, total } = await downloads.fetchSeries(seriesId, mode);
+      counted.set(seriesId, total);
+      totals = { ...totals, [seriesId]: total };
+      const name = titles.get(seriesId) ?? "That series";
+      notice =
+        queued === 0
+          ? `${name}: nothing left to fetch (${total} issue${total === 1 ? "" : "s"})`
+          : `${name}: queued ${queued} of ${total} issue${total === 1 ? "" : "s"}`;
+    } catch (error) {
+      notice = `${titles.get(seriesId) ?? "That series"}: ${error instanceof Error ? error.message : String(error)}`;
+    } finally {
+      fetching = null;
+    }
+  }
+
+  /**
+   * Resolve every pasted link and queue what it names.
+   *
+   * One line at a time, in order, so the report reads like the paste: an Archive link is an item id
+   * and needs no search; a source link is searched on the one source whose host it belongs to. A
+   * title that is found is queued straight away — that is what "grab it" means — and a line that
+   * cannot be resolved says why instead of vanishing.
+   */
+  async function addPasted(): Promise<void> {
+    if (pasting || paste.trim() === "") return;
+    pasting = true;
+    reports = [];
+    const found: Array<{ ok: boolean; text: string }> = [];
+    try {
+      for (const target of resolveLinks(paste, library.sources)) {
+        if (target.kind === "error") {
+          found.push({
+            ok: false,
+            text: `${target.url === null ? target.raw : hostOf(target.url) ?? target.raw} — ${target.reason}`,
+          });
+          reports = [...found];
+          continue;
+        }
+        try {
+          const series =
+            target.kind === "archive"
+              ? await library.details(target.seriesId)
+              : bestMatch(await library.searchSource(target.sourceId, target.query), target.query);
+          if (series === null) {
+            found.push({
+              ok: false,
+              text:
+                target.kind === "source"
+                  ? `${target.sourceName} found nothing for “${target.query}”`
+                  : `Internet Archive has no item ${target.seriesId}`,
+            });
+            reports = [...found];
+            continue;
+          }
+          await library.rememberSeriesMeta(series);
+          const { queued, total } = await downloads.fetchSeries(series.id, "new");
+          counted.set(series.id, total);
+          totals = { ...totals, [series.id]: total };
+          known = new Map([...known, [series.id, series.title]]);
+          found.push({
+            ok: true,
+            text: `${series.title} — ${
+              queued === 0 ? "already here" : `${queued} of ${total} issue${total === 1 ? "" : "s"} queued`
+            }`,
+          });
+        } catch (error) {
+          found.push({
+            ok: false,
+            text: `${hostOf(target.url) ?? target.url}: ${error instanceof Error ? error.message : String(error)}`,
+          });
+        }
+        reports = [...found];
+      }
+      if (found.some((entry) => entry.ok)) paste = "";
+    } finally {
+      pasting = false;
+    }
+  }
 </script>
 
 <section class="view">
   <header class="top">
     <h1>Downloads</h1>
     <span class="count">
-      {size(downloads.bytes)} · {kept} chapter{kept === 1 ? "" : "s"}{waiting > 0 ? ` · ${waiting} queued` : ""}
+      {size(downloads.bytes)} · {kept} chapter{kept === 1 ? "" : "s"}{waiting > 0 ? ` · ${waiting} queued` : ""}{failed > 0 ? ` · ${failed} failed` : ""}
     </span>
   </header>
 
   {#if downloads.error}<p class="banner">{downloads.error}</p>{/if}
 
+  <!-- Downloading now: pinned above both lists, because the running chapter is the one thing that
+       changes while you watch. -->
+  {#if downloads.active !== null}
+    <section class="now">
+      <header>
+        <h2>Downloading now</h2>
+        <span class="hint">{waiting} waiting</span>
+      </header>
+      <div class="nowbody">
+        <div class="info">
+          <span class="t">{downloads.active.chapterName ?? running?.chapterName ?? "Chapter"}</span>
+          <span class="s">
+            {[
+              titles.get(downloads.active.seriesId ?? "") ?? downloads.active.seriesId ?? "",
+              `${downloads.active.done} / ${downloads.active.total || "?"} pages`,
+            ]
+              .filter((part) => part !== "")
+              .join(" · ")}
+          </span>
+        </div>
+        <span class="state on">{runningPercent}%</span>
+        <div class="bar" role="progressbar" aria-valuenow={runningPercent} aria-valuemin="0" aria-valuemax="100">
+          <span style:width="{runningPercent}%"></span>
+        </div>
+        <button class="btn ghost" onclick={() => downloads.cancel(downloads.active!.chapterId)}>Cancel</button>
+      </div>
+    </section>
+  {/if}
+
+  <!-- The paste box: small on purpose. It is a doorway, not the page. -->
+  <details class="paste" open={reports.length > 0 || paste !== ""}>
+    <summary>Add from a link</summary>
+    <p class="phint">
+      Paste links — Internet Archive items, or pages from a source you have installed (BatCave, and anything else
+      that publishes one). Each one is found and queued.
+    </p>
+    <textarea
+      bind:value={paste}
+      rows="2"
+      placeholder="https://archive.org/details/…&#10;https://batcave.biz/comic/…"
+      aria-label="Links to download"
+    ></textarea>
+    <div class="prow">
+      <button class="btn primary" onclick={() => void addPasted()} disabled={pasting || paste.trim() === ""}>
+        {pasting ? "Looking…" : "Add to queue"}
+      </button>
+      <span class="hint">{library.sources.length} source{library.sources.length === 1 ? "" : "s"} installed</span>
+    </div>
+    {#if reports.length > 0}
+      <ul class="reports">
+        {#each reports as report}
+          <li class:bad={!report.ok}>
+            <span aria-hidden="true">{report.ok ? "✓" : "✕"}</span>
+            {report.text}
+          </li>
+        {/each}
+      </ul>
+    {/if}
+  </details>
+
+  {#if notice !== ""}<p class="banner quiet">{notice}</p>{/if}
+
+  <div class="tabs" role="tablist">
+    <button class="tab" class:on={tab === "queue"} role="tab" aria-selected={tab === "queue"} onclick={() => (tab = "queue")}>
+      Queue<span class="n">{queueLines.length}</span>
+    </button>
+    <button class="tab" class:on={tab === "finished"} role="tab" aria-selected={tab === "finished"} onclick={() => (tab = "finished")}>
+      Finished<span class="n">{finishedLines.length}</span>
+    </button>
+  </div>
+
+  {#if lines.length > 0}
+    <input class="find" bind:value={query} placeholder="Search this list" aria-label="Search downloads" />
+  {/if}
+
   {#if lines.length === 0}
     <div class="blank">
       <p class="blankline">Nothing downloaded.</p>
       <p class="blanksub">
-        A download keeps a chapter's pages in this device's own database, so it opens with no network at all —
-        the extension host can be off, and the chapter still reads. Nothing is uploaded, and deleting it frees the space.
+        A download keeps a chapter's pages in this device's own database, so it opens with no network at all — the
+        extension host can be off, and the chapter still reads. Paste a link above, or open a series and download
+        from there.
       </p>
       <button class="btn primary" onclick={() => go("/library")}>Open the library</button>
     </div>
+  {:else if shown.length === 0}
+    <p class="blankline small">
+      {query.trim() === ""
+        ? tab === "queue"
+          ? "Nothing waiting."
+          : "Nothing finished yet."
+        : `Nothing matches “${query.trim()}”.`}
+    </p>
   {:else}
     {#each groups as group (group.seriesId)}
       <section class="group">
         <header class="ghead">
-          <h2>{titles.get(group.seriesId) ?? group.seriesId}<span class="gsize">{size(group.bytes)} · {group.chapters}</span></h2>
+          <div class="gtitle">
+            <h2>{titles.get(group.seriesId) ?? group.seriesId}</h2>
+            <span class="gsize">{grabbedLabel(grabbed(group.seriesId), totals[group.seriesId])} · {size(group.bytes)}</span>
+          </div>
           {#if confirmingSeries !== group.seriesId}
-            <button class="chip" onclick={() => (confirmingSeries = group.seriesId)}>Delete all</button>
+            <span class="gacts">
+              <button class="chip" disabled={fetching !== null} onclick={() => void fetchSeries(group.seriesId, "new")}>
+                {fetching === group.seriesId ? "Fetching…" : "Fetch new"}
+              </button>
+              <button class="chip" disabled={fetching !== null} onclick={() => void fetchSeries(group.seriesId, "all")}>Fetch all</button>
+              <button class="chip danger" onclick={() => (confirmingSeries = group.seriesId)}>Delete all</button>
+            </span>
           {/if}
         </header>
 
         {#if confirmingSeries === group.seriesId}
           <div class="confirm">
             <p>
-              Delete all {group.chapters} downloaded chapter{group.chapters === 1 ? "" : "s"} of
+              Delete all {grabbed(group.seriesId)} downloaded chapter{grabbed(group.seriesId) === 1 ? "" : "s"} of
               {titles.get(group.seriesId) ?? "this series"}? {size(group.bytes)} will be freed on this device.
             </p>
             <span class="acts2">
@@ -221,6 +486,160 @@
     color: var(--text-3);
   }
 
+  .banner {
+    margin: 0 0 var(--s3);
+    padding: var(--s2) var(--s3);
+    border-radius: var(--r2);
+    background: var(--surface-2);
+    font-size: var(--t-sm);
+  }
+
+  .banner.quiet {
+    color: var(--text-2);
+  }
+
+  .now {
+    margin-bottom: var(--s4);
+    padding: var(--s3);
+    border: 1px solid var(--line);
+    border-radius: var(--r3);
+    background: var(--surface-2);
+  }
+
+  .now header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--s2);
+    margin-bottom: var(--s2);
+  }
+
+  .now h2 {
+    font-size: var(--t-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-3);
+  }
+
+  .nowbody {
+    display: flex;
+    align-items: center;
+    gap: var(--s3);
+    flex-wrap: wrap;
+  }
+
+  .nowbody .bar {
+    flex: 1 1 140px;
+    width: auto;
+  }
+
+  .paste {
+    margin-bottom: var(--s4);
+    padding: var(--s2) var(--s3);
+    border: 1px solid var(--line);
+    border-radius: var(--r3);
+  }
+
+  .paste summary {
+    cursor: pointer;
+    font-size: var(--t-sm);
+    color: var(--text-2);
+  }
+
+  .phint {
+    margin: var(--s2) 0;
+    font-size: var(--t-xs);
+    color: var(--text-3);
+    max-width: 60ch;
+  }
+
+  textarea {
+    width: 100%;
+    box-sizing: border-box;
+    resize: vertical;
+    padding: var(--s2);
+    border: 1px solid var(--line);
+    border-radius: var(--r2);
+    background: var(--surface);
+    color: var(--text);
+    font: inherit;
+    font-size: var(--t-sm);
+  }
+
+  .prow {
+    display: flex;
+    align-items: center;
+    gap: var(--s2);
+    margin-top: var(--s2);
+    flex-wrap: wrap;
+  }
+
+  .hint {
+    font-size: var(--t-xs);
+    color: var(--text-3);
+  }
+
+  .reports {
+    list-style: none;
+    margin: var(--s2) 0 0;
+    padding: 0;
+    display: grid;
+    gap: 2px;
+    font-size: var(--t-xs);
+  }
+
+  .reports li {
+    color: var(--success, #4f9d69);
+    overflow-wrap: anywhere;
+  }
+
+  .reports li.bad {
+    color: var(--danger, #d9534f);
+  }
+
+  .tabs {
+    display: flex;
+    gap: var(--s2);
+    margin-bottom: var(--s3);
+  }
+
+  .tab {
+    all: unset;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: var(--s2);
+    padding: 6px var(--s3);
+    border-radius: var(--r-pill);
+    font-size: var(--t-sm);
+    color: var(--text-2);
+    border: 1px solid transparent;
+  }
+
+  .tab.on {
+    color: var(--text);
+    background: var(--surface-2);
+    border-color: var(--line);
+  }
+
+  .tab .n {
+    font-size: var(--t-xs);
+    color: var(--text-3);
+  }
+
+  .find {
+    width: 100%;
+    box-sizing: border-box;
+    margin-bottom: var(--s3);
+    padding: 8px var(--s3);
+    border: 1px solid var(--line);
+    border-radius: var(--r-pill);
+    background: var(--surface);
+    color: var(--text);
+    font: inherit;
+    font-size: var(--t-sm);
+  }
+
   .group {
     margin-bottom: var(--s5);
   }
@@ -230,25 +649,67 @@
     align-items: baseline;
     gap: var(--s2);
     margin-bottom: var(--s2);
+    flex-wrap: wrap;
+  }
+
+  .gtitle {
+    flex: 1;
+    min-width: 12ch;
+    display: grid;
+    gap: 1px;
   }
 
   h2 {
-    flex: 1;
-    min-width: 0;
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: var(--s2);
-    font-size: var(--t-xs);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    color: var(--text-3);
+    font-size: var(--t-md);
+    font-weight: 600;
   }
 
   .gsize {
-    text-transform: none;
-    letter-spacing: 0;
-    white-space: nowrap;
+    font-size: var(--t-xs);
+    color: var(--text-3);
+  }
+
+  .gacts {
+    display: flex;
+    gap: var(--s2);
+    flex-wrap: wrap;
+  }
+
+  .chip {
+    all: unset;
+    cursor: pointer;
+    padding: 4px var(--s2);
+    border-radius: var(--r-pill);
+    border: 1px solid var(--line);
+    font-size: var(--t-xs);
+    color: var(--text-2);
+  }
+
+  .chip:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+
+  .chip.danger {
+    color: var(--danger, #d9534f);
+    border-color: currentColor;
+  }
+
+  .confirm {
+    display: grid;
+    gap: var(--s2);
+    padding: var(--s2) var(--s2) var(--s3);
+    border-bottom: 1px solid var(--line);
+    margin-bottom: var(--s2);
+  }
+
+  .confirm p,
+  .sentence p {
+    margin: 0;
+    font-size: var(--t-sm);
+    color: var(--text-2);
+    line-height: 1.6;
+    max-width: 60ch;
   }
 
   .rows {
@@ -346,31 +807,9 @@
     font-size: var(--t-sm);
   }
 
-  .confirm {
-    display: grid;
-    gap: var(--s2);
-    padding: var(--s2) var(--s2) var(--s3);
-    border-bottom: 1px solid var(--line);
-    margin-bottom: var(--s2);
-  }
-
-  .confirm p,
-  .sentence p {
-    margin: 0;
-    font-size: var(--t-sm);
-    color: var(--text-2);
-    line-height: 1.6;
-    max-width: 60ch;
-  }
-
   .sentence {
     list-style: none;
     padding: 0 var(--s2) var(--s2);
-  }
-
-  .chip.danger {
-    color: var(--danger, #d9534f);
-    border-color: currentColor;
   }
 
   .blank {
@@ -384,6 +823,11 @@
   .blankline {
     margin: 0;
     font-size: var(--t-lg);
+  }
+
+  .blankline.small {
+    color: var(--text-3);
+    font-size: var(--t-sm);
   }
 
   .blanksub {

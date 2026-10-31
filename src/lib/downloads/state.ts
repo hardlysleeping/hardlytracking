@@ -49,6 +49,10 @@ export interface Progress {
   chapterId: string;
   done: number;
   total: number;
+  /** The series it belongs to, so a screen can name it without searching every list it has. */
+  seriesId?: string;
+  /** The chapter's own name, for the same reason. */
+  chapterName?: string;
 }
 
 /** What the Downloads screen draws: one line per chapter, whatever state it is in. */
@@ -320,4 +324,66 @@ export function manageRows(rows: DownloadRow[], queue: QueueItem[], active: Prog
   }
 
   return sortForManage([...lines.values()]);
+}
+
+/**
+ * What "fetch" means, as a choice rather than a mood.
+ *
+ * `new` is the safe default: chapters this device has never seen a row for. `all` also takes the
+ * rows that are half here or that gave up — the difference between "get me the rest of the series"
+ * and "try the broken ones again". Neither re-downloads a chapter that is already complete, because
+ * a queue that re-fetches finished work is a queue nobody trusts.
+ */
+export type FetchMode = "new" | "all";
+
+/** The rows that already exist for a series, so "new" and "all" can be told apart. */
+export interface SeenChapters {
+  /** Chapters whose pages are all stored. */
+  complete: ReadonlySet<string>;
+  /** Chapters with a row of any kind: complete, partial, failed. */
+  known: ReadonlySet<string>;
+  /** Chapters already waiting in the queue or running. */
+  queued: ReadonlySet<string>;
+}
+
+export function chaptersToFetch<T extends { id: string }>(
+  chapters: readonly T[],
+  seen: SeenChapters,
+  mode: FetchMode,
+): T[] {
+  return chapters.filter((chapter) => {
+    if (seen.complete.has(chapter.id)) return false;
+    if (seen.queued.has(chapter.id)) return false;
+    if (mode === "new") return !seen.known.has(chapter.id);
+    return true;
+  });
+}
+
+/** How many of a series' chapters are on this device, out of how many the series has. */
+export function grabbedOf(complete: number, total?: number): { grabbed: number; total: number | null } {
+  const safe = Number.isFinite(complete) && complete > 0 ? Math.floor(complete) : 0;
+  const all = total !== undefined && Number.isFinite(total) && total > 0 ? Math.floor(total) : null;
+  // A device can hold more than the series page currently lists (chapters get removed upstream);
+  // reporting "7 of 5" would read as a bug, so the total never goes below what is here.
+  return { grabbed: safe, total: all === null ? null : Math.max(all, safe) };
+}
+
+/** "3 of 12 issues" — or just "3 issues" when the series has never been listed on this device. */
+export function grabbedLabel(complete: number, total?: number): string {
+  const { grabbed, total: all } = grabbedOf(complete, total);
+  if (all === null) return `${grabbed} issue${grabbed === 1 ? "" : "s"}`;
+  return `${grabbed} of ${all} issue${all === 1 ? "" : "s"}`;
+}
+
+/**
+ * Filter a downloads list by what the user typed.
+ *
+ * The search box covers both columns of the screen, so it matches the series title as well as the
+ * chapter name — searching "berserk" in Finished has to find the chapters of Berserk, not only a
+ * chapter literally called Berserk.
+ */
+export function matchesDownloadQuery(query: string, ...fields: Array<string | undefined>): boolean {
+  const wanted = query.trim().toLowerCase();
+  if (wanted === "") return true;
+  return fields.some((field) => (field ?? "").toLowerCase().includes(wanted));
 }

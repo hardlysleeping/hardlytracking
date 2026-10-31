@@ -84,6 +84,7 @@ test("export -> file -> import -> export is the same document, byte for byte", a
   assert.equal(applied.categories, 2);
   assert.equal(applied.positions, 1);
   assert.equal(applied.sessions, 1);
+  assert.equal(applied.history, 1, "the reading history came back too");
   assert.equal(applied.mappings, 1);
   assert.equal(applied.repos, 2);
   assert.equal(applied.tombstones, 1);

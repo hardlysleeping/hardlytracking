@@ -6,9 +6,13 @@ import { DownloadEngine } from "../../src/lib/downloads/engine.ts";
 import {
   QUEUE_PREF,
   bytesOf,
+  chaptersToFetch,
+  grabbedLabel,
+  grabbedOf,
   groupBySeries,
   isComplete,
   manageRows,
+  matchesDownloadQuery,
   planQueue,
   reconcile,
   retryable,
@@ -473,4 +477,34 @@ test("an orphaned page row is freed on the next load instead of holding the byte
   await store.putDownloadPage({ id: "ghost#0", chapterId: "ghost", index: 0, blob: new Blob([new Uint8Array(64)]) });
   await engine.load();
   assert.deepEqual(await store.allDownloadPages(), []);
+});
+
+test("fetch new takes what this device has never seen, fetch all also retries the broken ones", () => {
+  const chapters = [{ id: "a" }, { id: "b" }, { id: "c" }, { id: "d" }];
+  const seen = {
+    complete: new Set(["a"]),
+    known: new Set(["a", "b"]),
+    queued: new Set(["d"]),
+  };
+  assert.deepEqual(chaptersToFetch(chapters, seen, "new").map((c) => c.id), ["c"], "b already has a row");
+  assert.deepEqual(chaptersToFetch(chapters, seen, "all").map((c) => c.id), ["b", "c"], "d is already queued");
+  assert.deepEqual(chaptersToFetch([], seen, "all"), []);
+});
+
+test("the count reads as issues grabbed of issues known", () => {
+  assert.equal(grabbedLabel(3, 12), "3 of 12 issues");
+  assert.equal(grabbedLabel(1, 1), "1 of 1 issue");
+  assert.equal(grabbedLabel(0, 5), "0 of 5 issues");
+  assert.equal(grabbedLabel(4), "4 issues", "no list means no total, not a guess");
+  assert.equal(grabbedLabel(7, 5), "7 of 7 issues", "never fewer than what is here");
+  assert.deepEqual(grabbedOf(2, undefined), { grabbed: 2, total: null });
+  assert.deepEqual(grabbedOf(Number.NaN, 4), { grabbed: 0, total: 4 });
+});
+
+test("the search box matches the series as well as the chapter", () => {
+  assert.ok(matchesDownloadQuery("berserk", "Berserk", "Chapter 1"));
+  assert.ok(matchesDownloadQuery("chap", "Berserk", "Chapter 1"));
+  assert.ok(matchesDownloadQuery("", "Berserk", "Chapter 1"), "empty is everything");
+  assert.ok(!matchesDownloadQuery("vinland", "Berserk", "Chapter 1"));
+  assert.ok(matchesDownloadQuery("berserk", undefined, "Berserk chapter 3"), "a missing title is not a match killer");
 });

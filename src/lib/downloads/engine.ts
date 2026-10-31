@@ -351,7 +351,7 @@ export class DownloadEngine {
         if (next === null) break;
         this.host.queue = rest;
         await this.persistQueue();
-        this.host.active = { chapterId: next.chapterId, done: 0, total: 0 };
+        this.host.active = { chapterId: next.chapterId, done: 0, total: 0, seriesId: next.seriesId, chapterName: next.chapterName };
         try {
           await this.download(next);
         } finally {
@@ -383,7 +383,7 @@ export class DownloadEngine {
       const have = new Map(existing.map((page) => [page.index, page.blob.size]));
       let bytes = [...have.values()].reduce((sum, size) => sum + size, 0);
 
-      this.host.active = { chapterId: item.chapterId, done: have.size, total: pages.length };
+      this.host.active = { chapterId: item.chapterId, done: have.size, total: pages.length, seriesId: item.seriesId, chapterName: item.chapterName };
       const base: DownloadRow = {
         chapterId: item.chapterId,
         seriesId: item.seriesId,
@@ -418,7 +418,7 @@ export class DownloadEngine {
             blob,
           });
           done += 1;
-          this.host.active = { chapterId: item.chapterId, done, total: pages.length };
+          this.host.active = { chapterId: item.chapterId, done, total: pages.length, seriesId: item.seriesId, chapterName: item.chapterName };
           if (budget.pagePacingMs > 0) await new Promise((resolve) => setTimeout(resolve, budget.pagePacingMs));
         }
       };

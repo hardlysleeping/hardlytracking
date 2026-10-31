@@ -31,6 +31,14 @@ export interface Source {
   lang?: string;
   nsfw?: boolean;
   supportsLatest?: boolean;
+  /**
+   * The site this source reads, when it has one.
+   *
+   * It is what lets a pasted link be recognised as belonging to a source the user installed: the
+   * host is the only thing a URL and an extension have in common. Absent for sources that are not a
+   * website (a local folder, a server the user runs).
+   */
+  baseUrl?: string;
 }
 
 export interface Series {
