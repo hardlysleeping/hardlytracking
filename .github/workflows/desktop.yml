@@ -195,12 +195,17 @@ jobs:
           cp -r "$release/runtime" "$stage/"
           cp README.md LICENSE "$stage/" 2>/dev/null || true
           zip="HardlyTracking_${version}_windows-x86_64-portable.zip"
-          # 7z, not Compress-Archive: the latter takes minutes on a 140 MB tree and the runner has 7z.
-          7z a -tzip -mx=5 "$zip" portable/HardlyTracking > /dev/null
+          # 7-Zip is installed on the Windows image but not on PATH, so ask for it by path and keep a
+          # PATH lookup first in case a future image adds it. Compress-Archive takes minutes on 140 MB.
+          sevenz=$(command -v 7z || true)
+          [ -n "$sevenz" ] || sevenz="/c/Program Files/7-Zip/7z.exe"
+          [ -x "$sevenz" ] || { echo "::error::no 7-Zip at $sevenz"; exit 1; }
+          "$sevenz" a -tzip -mx=5 "$zip" portable/HardlyTracking > /dev/null
           ls -lh "$zip"
           # Prove the archive carries the host, rather than trusting the folder it came from.
-          7z l "$zip" | grep -q 'runtime/runner.jar'
-          7z l "$zip" | grep -q 'runtime/jre/bin/java.exe'
+          "$sevenz" l "$zip" > /tmp/zip-list.txt
+          grep -q 'runtime/runner.jar' /tmp/zip-list.txt
+          grep -q 'runtime/jre/bin/java.exe' /tmp/zip-list.txt
           echo "✓ the portable zip carries runner.jar and a JRE"
 
       - uses: actions/upload-artifact@v4

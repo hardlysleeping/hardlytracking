@@ -34,7 +34,9 @@
     "node": ">=22"
   },
   "dependencies": {
+    "@capacitor/app": "^7.1.2",
     "@capacitor/core": "^7.6.10",
+    "@capacitor/filesystem": "^7.1.9",
     "@capacitor/ios": "^7.6.10",
     "@supabase/supabase-js": "^2.118.0",
     "@tauri-apps/api": "^2.12.4",

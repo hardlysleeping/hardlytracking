@@ -22,6 +22,7 @@
   import Sheet from "../components/Sheet.svelte";
   import LibraryHeader from "../components/LibraryHeader.svelte";
   import AddFiles from "../components/AddFiles.svelte";
+  import DriveImport from "../components/DriveImport.svelte";
   import OverflowSheet, { type LibraryStats } from "../components/OverflowSheet.svelte";
   import FilterSheet from "../components/FilterSheet.svelte";
   import ChipRow from "../components/ChipRow.svelte";
@@ -65,6 +66,7 @@
   let categoriesOpen = $state(false);
   /** Display knobs (cover size, continue strip) — the settings that are not a filter. */
   let displayOpen = $state(false);
+  let driveOpen = $state(false);
 
   /** The applied filter is a setting, not component state: a reload must keep it. */
   const filter = $derived(settings.libraryFilter);
@@ -765,6 +767,7 @@
           <button class="btn ghost" onclick={() => (displayOpen = true)}>Display</button>
           <!-- The comics they already own: no server, no extension, no network. -->
           <AddFiles />
+          <button class="btn ghost" onclick={() => (driveOpen = true)}>From Drive</button>
           <div class="views" role="group" aria-label="Layout">
             {#each VIEWS as view (view.id)}
               <button
@@ -798,6 +801,7 @@
             </p>
             <div class="blankacts">
               <AddFiles look="primary" label="Add comic files" />
+              <button class="btn ghost" onclick={() => (driveOpen = true)}>From Google Drive</button>
               <button class="btn" onclick={() => go("/extensions")}>Add a repository</button>
               <button class="btn" onclick={() => go("/browse")}>Browse sources</button>
             </div>
@@ -881,6 +885,8 @@
   onclose={() => (filterOpen = false)}
   onapply={(next) => settings.set("libraryFilter", next)}
 />
+
+<DriveImport open={driveOpen} onclose={() => (driveOpen = false)} />
 
 <Sheet open={displayOpen} title="Display" onclose={() => (displayOpen = false)}>
   <div class="rows">

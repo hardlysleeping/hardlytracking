@@ -19,6 +19,7 @@ import { installTrackerSync } from "../lib/trackers/sync";
 import { planReadState, remoteReadCount } from "../lib/read-state";
 import type { RemoteRead, SourceProvider } from "../api/source";
 import { startNativeRuntime, shellFetch } from "../lib/mihon-runtime";
+import { watchOpenedFiles } from "../lib/files/opened";
 import { imageCache } from "../lib/cache/images";
 import type { Chapter, Page, Series, Source } from "../api/source";
 
@@ -59,6 +60,8 @@ class LibraryState {
   htServer = $state.raw<DalvikHost | null>(null);
   /** What the PC has installed, as its own registry last answered. Managed from here, owned there. */
   hostExtensions = $state<InstalledExtension[]>([]);
+  /** Stops listening for files the system hands over (iOS only). */
+  stopOpenedFiles: (() => void) | null = null;
   /** Repositories the user added, oldest first. */
   repos = $state<RepoRow[]>([]);
   /** Indexes read this session, by repository URL — one fetch per repository per run. */
@@ -92,6 +95,13 @@ class LibraryState {
       // (T26–T28). With no adapter registered this is inert, and the day one lands nothing else
       // has to be rewired.
       installTrackerSync(this.profile.store);
+      // A comic the system handed over (Files, iCloud Drive, a share sheet). Inert off iOS, and it
+      // is installed after the library is open so an import has somewhere to land.
+      void watchOpenedFiles(this.profile.store, async (result) => {
+        if (result.added > 0) await this.refreshLibrary();
+      }).then((stop) => {
+        this.stopOpenedFiles = stop ?? null;
+      });
       void this.loadSources();
     } catch (error) {
       this.openError = message(error);
@@ -233,9 +243,16 @@ class LibraryState {
    * it is added — with both candidate URLs in the message — instead of leaving a repository
    * row that never works.
    */
-  async addRepository(url: string): Promise<Repository> {
+  /**
+   * Store a repository.
+   *
+   * `preloaded` is the index the screen already read to show its confirmation panel — passing it
+   * back means the user's one tap does not download the same index a second time. Callers that add
+   * without a panel (none, today) leave it out and the index is fetched here.
+   */
+  async addRepository(url: string, preloaded?: Repository): Promise<Repository> {
     if (this.profile === null) throw new Error("the library is not open yet");
-    const repository = await loadRepository(url);
+    const repository = preloaded ?? (await loadRepository(url));
     const row: RepoRow = { url: repository.url, indexUrl: repository.indexUrl, name: repository.name, at: Date.now() };
     await this.profile.store.putRepo(row);
     this.repos = await this.profile.store.listRepos();
