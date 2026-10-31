@@ -54,7 +54,9 @@
   --t-xl: 22px;
   --t-2xl: 28px;
 
-  --nav-h: 56px;
+  /* The phone bar's real height: 48px of icon, 4px of padding top and bottom, and the hairline.
+   * It is what `main` reserves at the bottom and what a view's floating button clears. */
+  --nav-h: 57px;
   --rail-w: 76px;
   --sidebar-w: 224px;
   --safe-b: env(safe-area-inset-bottom, 0px);

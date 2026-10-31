@@ -67,10 +67,11 @@
           class="item"
           class:on={active === destination.id}
           aria-current={active === destination.id ? "page" : undefined}
+          aria-label={destination.label}
+          title={destination.label}
           onclick={() => go(destination.href)}
         >
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d={destination.icon} /></svg>
-          <span>{destination.label}</span>
         </button>
       {/each}
     </nav>
@@ -224,11 +225,12 @@
 
   .bar .item {
     flex: 1;
-    flex-direction: column;
-    gap: 2px;
-    padding: var(--s1) 0;
-    font-size: 10px;
-    min-height: 44px;
+    /* Icon-only: the labels were taken off the phone bar, so the button is the icon and the tap
+     * target. 48px of content keeps the target at Apple's 44pt minimum while the bar stays a
+     * single row of glyphs — `--nav-h` in app.css is this height plus the padding and the hairline. */
+    height: 48px;
+    min-height: 48px;
+    padding: 0;
     justify-content: center;
   }
 
