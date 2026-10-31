@@ -9,7 +9,8 @@
    */
   import { library } from "../state/library.svelte";
   import { planUpdates, updateState, type ExtensionEntry } from "../lib/extensions/index";
-  import { RepositoryError, type Repository } from "../lib/extensions/repository";
+  import { RepositoryError, loadRepository, type Repository } from "../lib/extensions/repository";
+  import { packagesLabel, proposalOf, type RepoProposal } from "../lib/extensions/proposal";
   import { extensionLabel, extensionLanguages, sourcesOfExtension } from "../lib/extensions/installed";
   import { proxiedImage } from "../lib/pages";
   import { go, pathTo } from "../lib/nav";
@@ -33,6 +34,15 @@ import {
 
   let repoUrl = $state("");
   let adding = $state(false);
+  /**
+   * A repository that has been read but not added: what the confirmation panel is about.
+   *
+   * Nothing is stored while this is set. That is the whole point — a link can propose a repository,
+   * only a tap can add one.
+   */
+  let proposal = $state<RepoProposal | null>(null);
+  /** The index that produced the proposal, so Add Repository does not download it twice. */
+  let loaded = $state<Repository | null>(null);
   let error = $state<string | null>(null);
   let notice = $state<string | null>(null);
 
@@ -213,8 +223,11 @@ import {
   const shown = $derived(matched.slice(0, 120));
 
   /**
-   * An install link opened this screen: put it in the field, then add it, so the user sees what was
-   * added and can correct it if the link was wrong.
+   * An install link opened this screen: read the index and *offer* it.
+   *
+   * It used to add the repository on arrival, which meant a URL somebody else wrote could put
+   * third-party code sources into the app with no tap. Now the link fills the field and opens the
+   * confirmation panel; `addRepository()` runs only from the panel's own button.
    */
   let consumedRepo: string | null = null;
   $effect(() => {
@@ -222,18 +235,46 @@ import {
     consumedRepo = repo;
     repoUrl = repo;
     section = "repositories";
-    void addRepository();
+    void inspect(repo);
   });
 
-  async function addRepository(): Promise<void> {
-    const url = repoUrl.trim();
-    if (url === "") return;
+  /** Read a repository index without storing anything, and show what it is. */
+  async function inspect(url: string): Promise<void> {
+    const target = url.trim();
+    if (target === "") return;
     adding = true;
     error = null;
     notice = null;
     try {
-      const repository: Repository = await library.addRepository(url);
+      const repository = await loadRepository(target);
+      loaded = repository;
+      proposal = proposalOf(repository);
+    } catch (e) {
+      proposal = null;
+      loaded = null;
+      error = e instanceof RepositoryError && e.tried.length > 0 ? `${e.message} — tried ${e.tried.join(", ")}` : e instanceof Error ? e.message : String(e);
+    } finally {
+      adding = false;
+    }
+  }
+
+  /**
+   * Store the repository the panel is about.
+   *
+   * The only caller is the panel's Add Repository button: the index was already read to build the
+   * proposal, so it is handed over rather than fetched a second time.
+   */
+  async function addRepository(): Promise<void> {
+    const wanted = proposal;
+    if (wanted === null) return;
+    adding = true;
+    error = null;
+    notice = null;
+    try {
+      const repository: Repository = await library.addRepository(wanted.url, loaded ?? undefined);
       repoUrl = "";
+      proposal = null;
+      loaded = null;
       notice = `${repository.name} — ${repository.extensions.length} extensions`;
       section = "available";
       await openRepository(repository.url);
@@ -721,11 +762,29 @@ import {
       {/if}
     {/if}
   {:else}
+    {#if proposal !== null}
+      <!-- A repository is third-party code. It is offered here, with what it is and who serves it,
+           and it is stored only when this button is pressed. -->
+      <div class="proposal" role="group" aria-label="Add repository">
+        <h2>Add Repository?</h2>
+        <p class="pname">{proposal.name}</p>
+        <p class="pmeta">{proposal.host} · {proposal.ecosystemLabel} · {packagesLabel(proposal.packages)}</p>
+        <p class="purl mono selectable">{proposal.indexUrl}</p>
+        <p class="pnotice">{proposal.notice}</p>
+        <div class="pacts">
+          <button class="btn ghost" onclick={() => { proposal = null; loaded = null; }}>Cancel</button>
+          <button class="btn primary" disabled={adding} onclick={() => void addRepository()}>
+            {adding ? "Adding…" : "Add Repository"}
+          </button>
+        </div>
+      </div>
+    {/if}
+
     <form
       class="add"
       onsubmit={(event) => {
         event.preventDefault();
-        void addRepository();
+        void inspect(repoUrl);
       }}
     >
       <input
@@ -737,7 +796,7 @@ import {
         aria-label="Repository URL or install link"
         spellcheck="false"
       />
-      <button class="btn primary" type="submit" disabled={adding}>{adding ? "Reading…" : "Add repository"}</button>
+      <button class="btn primary" type="submit" disabled={adding}>{adding ? "Reading…" : "Check repository"}</button>
     </form>
 
     {#if library.repos.length === 0}
@@ -762,6 +821,57 @@ import {
 </section>
 
 <style>
+  .proposal {
+    display: grid;
+    gap: var(--s1);
+    padding: var(--s3);
+    margin-bottom: var(--s3);
+    border: 1px solid var(--line);
+    border-radius: var(--r3);
+    background: var(--surface-2);
+  }
+
+  .proposal h2 {
+    font-size: var(--t-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-3);
+    margin: 0;
+  }
+
+  .pname {
+    margin: 0;
+    font-size: var(--t-lg);
+    font-weight: 600;
+  }
+
+  .pmeta {
+    margin: 0;
+    font-size: var(--t-sm);
+    color: var(--text-2);
+  }
+
+  .purl {
+    margin: 0;
+    font-size: var(--t-xs);
+    color: var(--text-3);
+    overflow-wrap: anywhere;
+  }
+
+  .pnotice {
+    margin: var(--s2) 0 0;
+    font-size: var(--t-sm);
+    color: var(--text-2);
+    max-width: 60ch;
+  }
+
+  .pacts {
+    display: flex;
+    gap: var(--s2);
+    margin-top: var(--s2);
+    flex-wrap: wrap;
+  }
+
   .hostform {
     display: grid;
     gap: var(--s1);
