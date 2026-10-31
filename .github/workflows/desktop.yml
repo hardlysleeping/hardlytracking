@@ -200,7 +200,9 @@ jobs:
           sevenz=$(command -v 7z || true)
           [ -n "$sevenz" ] || sevenz="/c/Program Files/7-Zip/7z.exe"
           [ -x "$sevenz" ] || { echo "::error::no 7-Zip at $sevenz"; exit 1; }
-          "$sevenz" a -tzip -mx=5 "$zip" portable/HardlyTracking > /dev/null
+          # Run from inside `portable` so the archive root is `HardlyTracking/` — unzipping gives one
+          # folder with the exe in it, not a `portable/` folder nobody asked for.
+          ( cd portable && "$sevenz" a -tzip -mx=5 "../$zip" HardlyTracking > /dev/null )
           ls -lh "$zip"
           # Prove the archive carries the host, rather than trusting the folder it came from. 7-Zip
           # lists Windows paths with backslashes, so normalise before grepping — a grep for
@@ -302,7 +304,7 @@ jobs:
           # attempt failed here with "release not found" after a good build. Create it if it is
           # missing (the release job's own create is idempotent and tolerates this).
           if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" \
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false \
               --title "HardlyTracking ${version}" --generate-notes || true
           fi
           gh release upload "$TAG" "HardlyTracking_${version}_macos-x86_64.dmg" --clobber --repo "$GITHUB_REPOSITORY"
@@ -375,3 +377,6 @@ jobs:
               --title "HardlyTracking ${TAG#v}" --generate-notes
           fi
           gh release upload "$TAG" HardlyTracking_* --clobber --repo "$GITHUB_REPOSITORY"
+          # A release that exists but is a draft is a release nobody can download, and 0.5.1 was
+          # published as one because the Intel job created the page first. Stated here, not assumed.
+          gh release edit "$TAG" --draft=false --repo "$GITHUB_REPOSITORY"

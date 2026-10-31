@@ -103,7 +103,7 @@ extension APKs run on the machine with nothing else to install. Builds come from
 
 | Platform | Installer | Portable (no install, no uninstaller) |
 | --- | --- | --- |
-| Windows 10/11 x64 | `HardlyTracking_<version>_windows-x86_64.exe` (NSIS, no admin needed) · `.msi` | `..._windows-x86_64-portable.zip` — unzip, run `HardlyTracking.exe`, delete the folder to remove |
+| Windows 10/11 x64 | `HardlyTracking_<version>_windows-x86_64.exe` (NSIS, no admin needed) · `.msi` | `..._windows-x86_64-portable.zip` — unzip, run `hardlytracking.exe`, delete the folder to remove |
 | macOS 11+ | `..._macos-arm64.dmg` (Apple silicon) · `..._macos-x86_64.dmg` (Intel) | `..._macos-arm64-portable.zip` · `..._macos-x86_64-portable.zip` — a zipped `.app` |
 | Linux x64 | `.deb` (Debian/Ubuntu, glibc 2.35+) · `.AppImage` | `..._linux-x86_64-portable.tar.gz` — the binary and its `runtime/` folder |
 
