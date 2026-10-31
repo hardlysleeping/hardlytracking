@@ -103,9 +103,13 @@ jobs:
           cp README.md LICENSE "$stage/" 2>/dev/null || true
           tar -C portable -czf "HardlyTracking_${version}_linux-x86_64.tar.gz" HardlyTracking
           ls -lh "HardlyTracking_${version}_linux-x86_64.tar.gz"
-          # The same two files the installer is checked for, in the tarball.
-          tar -tzf "HardlyTracking_${version}_linux-x86_64.tar.gz" | grep -q 'HardlyTracking/runtime/runner.jar'
-          tar -tzf "HardlyTracking_${version}_linux-x86_64.tar.gz" | grep -q 'HardlyTracking/runtime/jre/bin/java'
+          # The same two files the installer is checked for, in the tarball. One listing, then grep
+          # the file: `tar | grep -q` fails under `pipefail` because grep exits at the first match and
+          # tar dies of SIGPIPE, which reads as "the tarball is wrong".
+          tar -tzf "HardlyTracking_${version}_linux-x86_64.tar.gz" > /tmp/tarball-list.txt
+          grep -q 'HardlyTracking/runtime/runner.jar' /tmp/tarball-list.txt
+          grep -q 'HardlyTracking/runtime/jre/bin/java' /tmp/tarball-list.txt
+          echo "✓ the tarball carries runner.jar and a JRE"
 
       # A bundle that compiles but carries no JVM opens a window with no extension host, and the user
       # cannot tell that from a broken source. Check the packaged output, not the build tree.
