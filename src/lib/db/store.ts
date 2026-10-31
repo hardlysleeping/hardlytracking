@@ -12,6 +12,7 @@ import type { InstalledExtension } from "../../api/dalvik";
 import type { TrackerAccountRow, TrackerRow } from "../trackers/types";
 import { normaliseCategories, type Category } from "../categories";
 import { normaliseSourceMarks, type SourceMark } from "../marks";
+import type { AlternateMapping } from "../migrate";
 import type { LibraryFilter } from "../library/filter";
 import type { Database } from "./open";
 
@@ -134,6 +135,21 @@ export interface SourceMappingRow {
   sourceId: string;
   packageId?: string;
   at: number;
+  /**
+   * The series id inside the active provider's own id space, when it differs from ours.
+   *
+   * A title that has been migrated keeps its library id (`seriesId`) and reads from another
+   * source's series: `remoteSeriesId` is that source's id. Absent on rows written before
+   * migrations existed, where the two were the same string.
+   */
+  remoteSeriesId?: string;
+  /**
+   * Sources this title used to live on, oldest first.
+   *
+   * A migration is a remap, not a one-way door: the previous home stays recorded so the same
+   * operation can be run back. `lib/migrate.ts` owns the shape.
+   */
+  alternates?: AlternateMapping[];
 }
 
 interface ChapterRow extends Chapter {
@@ -302,6 +318,17 @@ export class LibraryStore {
     await this.db.put("prefs", { key, value });
   }
 
+  /**
+   * Forget one preference row.
+   *
+   * A read mark that has moved to another chapter id is not a mark any more — leaving the old
+   * `read:<old id>` row behind would carry a dead fact into every export and could mark a chapter
+   * that later happens to reuse that id.
+   */
+  async removePref(key: string): Promise<void> {
+    await this.db.remove("prefs", key);
+  }
+
   // ---- extensions: the APKs this device installed --------------------------
   //
   // The runtime keeps the extension in memory and hands back an id (the sha256 of the
@@ -416,6 +443,16 @@ export class LibraryStore {
     return this.db.get<PositionRow>("position", seriesId);
   }
 
+  /**
+   * Forget where the reader was in a series.
+   *
+   * Only a migration uses this, and only when the chapter the row names did not come across: a
+   * bookmark into a chapter the title no longer has would offer Continue at a dead end.
+   */
+  async removePosition(seriesId: string): Promise<void> {
+    await this.db.remove("position", seriesId);
+  }
+
   async listPositions(): Promise<PositionRow[]> {
     const rows = await this.db.all<PositionRow>("position");
     return rows.sort((a, b) => b.at - a.at);
@@ -435,6 +472,59 @@ export class LibraryStore {
 
   async listMappings(): Promise<SourceMappingRow[]> {
     return this.db.all<SourceMappingRow>("mappings");
+  }
+
+  // ---- migrating a title between sources -----------------------------------
+  //
+  // A migration rewrites what belongs to one chapter id (a read mark, a position, a history row, a
+  // download) onto another, and replaces the title's chapter list. These are the primitives for
+  // that; the rules that decide *which* chapter maps to which are in `lib/migrate.ts`, and the
+  // sequence is in `state/library.svelte.ts#migrate`. Keeping them primitive is what lets the
+  // migration be one pass with no second interpretation of the same rules.
+
+  /** Write a progress row verbatim, including `completed` and `at` from where it came. */
+  async putProgress(row: ProgressRow): Promise<void> {
+    await this.db.put("progress", { ...row } as unknown as Record<string, unknown>);
+  }
+
+  async removeProgress(chapterId: string): Promise<void> {
+    await this.db.remove("progress", chapterId);
+  }
+
+  /** Remove one history row. Not a deletion the user made, so it writes no tombstone. */
+  async removeHistory(chapterId: string): Promise<void> {
+    await this.db.remove("history", chapterId);
+  }
+
+  async removeChapter(chapterId: string): Promise<void> {
+    await this.db.remove("chapters", chapterId);
+  }
+
+  /** Patch the stored series row without restamping `addedAt` — a migration is not a re-add. */
+  async updateSeries(seriesId: string, patch: Partial<Series>): Promise<void> {
+    const row = await this.db.get<Record<string, unknown>>("series", seriesId);
+    if (row === undefined) return;
+    await this.db.put("series", { ...row, ...patch, id: seriesId });
+  }
+
+  /**
+   * Move a downloaded chapter's pages onto another chapter id.
+   *
+   * The bytes are the same images; only the id the reader asks under changed. A page row is keyed
+   * `${chapterId}#${index}`, so each one is rewritten — the blob is passed through, never copied
+   * through a decode.
+   */
+  async rekeyDownload(fromChapterId: string, toChapterId: string): Promise<void> {
+    if (fromChapterId === toChapterId) return;
+    const row = await this.db.get<DownloadRow>("downloads", fromChapterId);
+    if (row === undefined) return;
+    await this.db.put("downloads", { ...row, chapterId: toChapterId } as unknown as Record<string, unknown>);
+    for (const page of await this.db.all<{ id: string; chapterId: string; index: number; blob: Blob }>("downloadPages")) {
+      if (page.chapterId !== fromChapterId) continue;
+      await this.db.put("downloadPages", { ...page, id: `${toChapterId}#${page.index}`, chapterId: toChapterId });
+      await this.db.remove("downloadPages", page.id);
+    }
+    await this.db.remove("downloads", fromChapterId);
   }
 
   // ---- extension repositories ----------------------------------------------

@@ -83,7 +83,9 @@
         // A `mihon:` title's source is only knowable from its mapping.
         store.listMappings(),
       ]);
-      mappedSource = new Map(mappings.map((row) => [row.seriesId, row.sourceId]));
+      // The whole mapping, not just the source id: a migrated title is governed by the source it
+    // reads from now, and only the mapping knows which one that is.
+    mappedSource = new Map(mappings.map((row) => [row.seriesId, { provider: row.provider, sourceId: row.sourceId }]));
       const byId = new Map(series.map((row) => [row.id, row]));
       const positionOf = new Map(positions.map((row) => [row.chapterId, row.page]));
       const chapterNames = new Map(allChapters.map((chapter) => [chapter.id, chapter.name]));
@@ -132,7 +134,7 @@
   }
 
   /** seriesId -> source id, from the stored mapping. */
-  let mappedSource = $state<Map<string, string>>(new Map());
+  let mappedSource = $state<Map<string, { provider: string; sourceId: string }>>(new Map());
 
   /**
    * The same rule the library uses, so hiding a category or a source takes its history with it.

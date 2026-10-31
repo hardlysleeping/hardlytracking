@@ -274,7 +274,7 @@
    * are gathered together: a filter or a sort must never ask the database anything mid-render.
    */
   /** seriesId -> the source id its mapping names, when one exists. */
-  let mappedSource = $state<Map<string, string>>(new Map());
+  let mappedSource = $state<Map<string, { provider: string; sourceId: string }>>(new Map());
 
   let counts = $state<{
     unread: Map<string, number>;
@@ -302,7 +302,9 @@
       // dalvik one instead of silently doing nothing.
       store.listMappings(),
     ]);
-    mappedSource = new Map(mappings.map((row) => [row.seriesId, row.sourceId]));
+    // The whole mapping, not just the source id: a migrated title is governed by the source it
+    // reads from now, and only the mapping knows which one that is.
+    mappedSource = new Map(mappings.map((row) => [row.seriesId, { provider: row.provider, sourceId: row.sourceId }]));
     const read = new Set(
       prefs.filter((row) => String(row.key).startsWith("read:")).filter((row) => row.value === true).map((row) => String(row.key).slice(5)),
     );

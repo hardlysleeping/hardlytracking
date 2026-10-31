@@ -14,6 +14,7 @@
   import type { Chapter, Series } from "../api/source";
   import Cover from "../components/Cover.svelte";
   import Sheet from "../components/Sheet.svelte";
+  import MigrateSheet from "../components/MigrateSheet.svelte";
   import { go, pathTo } from "../lib/nav";
   import { flipOrder, orderChapters, orderLabel, type ChapterOrder } from "../lib/chapter-order";
   import { chapterLabel } from "../lib/titles";
@@ -40,6 +41,8 @@
   let expanded = $state(false);
   let menuOpen = $state(false);
   let chapterMenu = $state<Chapter | null>(null);
+  /** The title the migration sheet is about; `null` closes it. */
+  let migrating = $state<Series | null>(null);
 
   $effect(() => {
     void load(seriesId);
@@ -50,8 +53,9 @@
     busy = true;
     error = null;
     try {
-      const provider = providerFor(library.profile.providers, id);
-      series = await provider.details(id);
+      // Through the library, not the provider: a migrated title asks the source its mapping names,
+      // which is not the one its id was born on.
+      series = await library.details(id);
       void library.rememberSeriesMeta(series);
       saved = await library.isSaved(id);
       position = (await library.profile.store.getPosition(id)) ?? null;
@@ -305,9 +309,18 @@
       Download {shown.length} listed chapters
     </button>
     <button class="menu-item" onclick={() => void downloads.removeSeries(seriesId)}>Delete downloads</button>
+    {#if saved}
+      <button class="menu-item" onclick={() => { menuOpen = false; migrating = series; }}>Migrate to another source</button>
+    {/if}
     <button class="menu-item" onclick={share}>Copy link to this series</button>
   </div>
 </Sheet>
+
+<MigrateSheet
+  series={migrating}
+  onclose={() => (migrating = null)}
+  onmigrated={() => void load(seriesId)}
+/>
 
 <Sheet open={chapterMenu !== null} title={chapterMenu === null ? "Chapter" : label(chapterMenu)} onclose={() => (chapterMenu = null)}>
   {#if chapterMenu}

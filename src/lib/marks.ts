@@ -45,18 +45,52 @@ export function normaliseSourceMarks(raw: unknown): SourceMark[] {
 }
 
 /**
+ * The key a source mark is stored under, from the parts a mapping row has.
+ *
+ * `dalvik`/`htserver`/`mihon` sources live inside an extension and are named by their own source id;
+ * a provider that is a single server (Komga, Archive) is its own source and needs no suffix. One
+ * function, because `sourceKeyOf` derives the same key from an id and the two must never disagree.
+ */
+export function sourceKeyOfMapping(provider: string, sourceId: string): string {
+  if (provider === "dalvik" || provider === "htserver" || provider === "mihon") return `${provider}:src:${sourceId}`;
+  // This device's own source is `local:src:library` — its mapping already spells the `src:` half, so
+  // the key is the provider plus that, not a second prefix.
+  if (provider === "local") return sourceId === "" ? "local:src:library" : `local:${sourceId}`;
+  return provider;
+}
+
+/** The stored mapping a title has, in the only two fields this file needs. */
+export interface MappedSource {
+  provider?: string;
+  sourceId?: string;
+}
+
+/**
  * Which source a title came from, as a source id.
  *
- * `dalvik` ids carry it (`dalvik:<sourceId>:<manga url>` — see `api/dalvik.ts`), so they need no
- * help. `mihon` ids do not (`mihon:12` is a manga id, not a source), so the caller passes the source
- * id from the stored mapping when it has one; without a mapping the title is not attributable and is
- * left alone rather than guessed at. `undefined` therefore means "no source known", never "hidden".
+ * `dalvik` and `htserver` ids carry it (`dalvik:<sourceId>:<manga url>` — see `api/dalvik.ts`), so
+ * they need no help. `mihon` ids do not (`mihon:12` is a manga id, not a source), so the caller
+ * passes what the stored mapping knows; without a mapping the title is not attributable and is left
+ * alone rather than guessed at. `undefined` therefore means "no source known", never "hidden".
+ *
+ * **A mapping wins over the id.** After a migration the id still spells the source the title was
+ * added from while the title now reads from another one — so the mark that governs it has to be the
+ * new source's, or a title would stay hidden because of a source it no longer uses.
  */
-export function sourceKeyOf(seriesId: string, mappedSourceId?: string): string | undefined {
+export function sourceKeyOf(seriesId: string, mapped?: string | MappedSource): string | undefined {
+  if (mapped !== undefined && typeof mapped === "object") {
+    const provider = (mapped.provider ?? "").trim();
+    const sourceId = (mapped.sourceId ?? "").trim();
+    if (provider !== "" && sourceId !== "") return sourceKeyOfMapping(provider, sourceId);
+  }
   const [provider, second] = seriesId.split(":");
-  if (provider === "dalvik") return second === undefined || second === "" ? undefined : `dalvik:src:${second}`;
+  if (provider === "dalvik" || provider === "htserver") {
+    return second === undefined || second === "" ? undefined : `${provider}:src:${second}`;
+  }
   if (provider === "mihon") {
-    return mappedSourceId === undefined || mappedSourceId === "" ? undefined : `mihon:src:${mappedSourceId}`;
+    // The older call shape: a bare source id from the mapping.
+    const sourceId = typeof mapped === "string" ? mapped : "";
+    return sourceId === "" ? undefined : `mihon:src:${sourceId}`;
   }
   if (provider === "local") return "local:src:library";
   if (provider === undefined || provider === "") return undefined;
