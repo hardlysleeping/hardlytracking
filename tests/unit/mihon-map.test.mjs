@@ -91,7 +91,8 @@ test("pages and read state address the runtime by bare numeric id", async () => 
   const pages = await provider.pages("mihon:ch:1");
   assert.equal(pages[0].url, "/api/mihon/v1/manga/12/chapter/1/page/0");
   await provider.setRead("mihon:ch:1", true);
-  assert.deepEqual(t.calls[1].variables, { id: 1, read: true });
+  // `page: null` is deliberate: the patch field is optional, and 0 would mean "top of the chapter".
+  assert.deepEqual(t.calls[1].variables, { id: 1, read: true, page: null });
 });
 
 test("a provider rejects on a foreign id instead of guessing", async () => {
@@ -111,6 +112,59 @@ test("a runtime error is surfaced, not swallowed", async () => {
 
 test("mihon does not own progress", () => {
   assert.equal(createMihonProvider(fakeTransport(() => ({}))).ownsProgress, false);
+});
+
+// ---- read state, both ways --------------------------------------------------
+//
+// Verified against the owner's Suwayomi (v2.4.2366): ChapterType carries `isRead`, `lastPageRead`
+// and `lastReadAt`, and the patch input is `{ isBookmarked, isRead, lastPageRead }` — no `lastReadAt`,
+// because the server stamps that itself.
+
+test("the chapter list carries the server's read state and its timestamp", async () => {
+  const t = fakeTransport(() => ({
+    chapters: {
+      nodes: [
+        { id: 11, name: "1", chapterNumber: 1, pageCount: 20, isRead: true, lastPageRead: 20, lastReadAt: "2026-10-29T10:00:00Z", uploadDate: null },
+        { id: 12, name: "2", chapterNumber: 2, pageCount: 20, isRead: false, lastPageRead: 0, lastReadAt: null, uploadDate: null },
+      ],
+    },
+  }));
+  const provider = createMihonProvider(t);
+  const remote = await provider.readState("mihon:7");
+
+  assert.deepEqual(remote, [
+    { chapterId: "mihon:ch:11", read: true, page: 20, at: Date.parse("2026-10-29T10:00:00Z") },
+    { chapterId: "mihon:ch:12", read: false },
+  ]);
+});
+
+test("asking for the list and then the read state is one request, not two", async () => {
+  const t = fakeTransport(() => ({
+    chapters: { nodes: [{ id: 5, name: "1", chapterNumber: 1, pageCount: 3, isRead: true, lastPageRead: 3 }] },
+  }));
+  const provider = createMihonProvider(t);
+  await provider.chapters("mihon:9");
+  const remote = await provider.readState("mihon:9");
+
+  assert.equal(t.calls.length, 1, "the read state came from the response chapters() already had");
+  assert.equal(remote[0].read, true);
+});
+
+test("a read mark carries the page, and an unknown page is null rather than zero", async () => {
+  const t = fakeTransport(() => ({ updateChapter: { chapter: { id: 3, isRead: true } } }));
+  const provider = createMihonProvider(t);
+
+  await provider.setRead("mihon:ch:3", true, 12);
+  assert.equal(t.calls[0].variables.page, 12);
+
+  await provider.setRead("mihon:ch:3", true);
+  assert.equal(t.calls[1].variables.page, null, "0 would move a reader on page 12 back to the top");
+});
+
+test("a server with no read state is not given one", () => {
+  // The archive provider has no server to reconcile with; the method being absent is the answer.
+  const provider = createMihonProvider(fakeTransport(() => ({})));
+  assert.equal(typeof provider.readState, "function", "Suwayomi keeps read state, so it answers");
 });
 
 test("the browser transport reports a GraphQL error instead of returning empty data", async () => {

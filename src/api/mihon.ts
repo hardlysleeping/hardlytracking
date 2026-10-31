@@ -78,6 +78,10 @@ export interface RawChapter {
   chapterNumber: number;
   pageCount: number;
   isRead: boolean;
+  /** Suwayomi's bookmark inside the chapter; 0 when it has none. */
+  lastPageRead?: number | null;
+  /** When the server says it was read — server-set, never ours to write. */
+  lastReadAt?: string | null;
   uploadDate?: string | null;
 }
 
@@ -136,7 +140,7 @@ const Q_MANGA = `query Manga($id: Int!) {
 
 const Q_CHAPTERS = `query Chapters($mangaId: Int!, $limit: Int!) {
   chapters(condition: { mangaId: $mangaId }, first: $limit) {
-    nodes { id name chapterNumber pageCount isRead uploadDate }
+    nodes { id name chapterNumber pageCount isRead lastPageRead lastReadAt uploadDate }
   }
 }`;
 
@@ -144,13 +148,34 @@ const M_CHAPTER_PAGES = `mutation Pages($chapterId: Int!) {
   fetchChapterPages(input: { chapterId: $chapterId }) { pages }
 }`;
 
-const M_SET_READ = `mutation SetRead($id: Int!, $read: Boolean!) {
-  updateChapter(input: { id: $id, patch: { isRead: $read } }) { chapter { id isRead } }
+const M_SET_READ = `mutation SetRead($id: Int!, $read: Boolean!, $page: Int) {
+  updateChapter(input: { id: $id, patch: { isRead: $read, lastPageRead: $page } }) { chapter { id isRead } }
 }`;
 
 type FetchType = "POPULAR" | "LATEST" | "SEARCH";
 
 export function createMihonProvider(t: MihonTransport): SourceProvider {
+  /**
+   * The last chapter rows fetched per series.
+   *
+   * `library.chapters()` asks for the list and then for the server's read state, and both are the
+   * same GraphQL response. Keeping the last few series' rows turns that into one request without
+   * inventing a TTL: every `chapters()` call overwrites its own entry, so a stale row cannot
+   * survive a refresh of the series it belongs to.
+   */
+  const lastRows = new Map<string, RawChapter[]>();
+  const STASH = 8;
+
+  const remember = (seriesId: string, rows: RawChapter[]): void => {
+    lastRows.delete(seriesId);
+    lastRows.set(seriesId, rows);
+    while (lastRows.size > STASH) {
+      const oldest = lastRows.keys().next();
+      if (oldest.done === true) break;
+      lastRows.delete(oldest.value);
+    }
+  };
+
   const browse = async (sourceId: string, type: FetchType, page: number, query?: string): Promise<Paged<Series>> => {
     const native = nativeId(sourceId, "mihon").replace(/^src:/, "");
     const data = await t.gql<{ fetchSourceManga: { mangas: RawManga[]; hasNextPage: boolean } }>(M_FETCH_SOURCE, {
@@ -187,6 +212,7 @@ export function createMihonProvider(t: MihonTransport): SourceProvider {
         mangaId: Number(nativeId(seriesId, "mihon")),
         limit: 2000,
       });
+      remember(seriesId, data.chapters.nodes);
       return data.chapters.nodes.map((c) => mapChapter(c, seriesId));
     },
 
@@ -197,8 +223,39 @@ export function createMihonProvider(t: MihonTransport): SourceProvider {
       return mapPages(data.fetchChapterPages.pages, t.asset);
     },
 
-    async setRead(chapterId, read) {
-      await t.gql(M_SET_READ, { id: Number(nativeId(chapterId, "mihon").replace(/^ch:/, "")), read });
+    async setRead(chapterId, read, page) {
+      await t.gql(M_SET_READ, {
+        id: Number(nativeId(chapterId, "mihon").replace(/^ch:/, "")),
+        read,
+        // Absent rather than 0: 0 is a real answer ("top of the chapter") and would move a reader
+        // who is on page 12 back to page 1.
+        page: typeof page === "number" && page > 0 ? page : null,
+      });
+    },
+
+    /**
+     * What Suwayomi says is read — the half that was missing.
+     *
+     * It is the same query `chapters()` runs, because the caller already has that response: asking
+     * again for every series open would double the requests to a server that may be a Raspberry Pi.
+     */
+    async readState(seriesId) {
+      const stashed = lastRows.get(seriesId);
+      const rows =
+        stashed ??
+        (
+          await t.gql<{ chapters: { nodes: RawChapter[] } }>(Q_CHAPTERS, {
+            mangaId: Number(nativeId(seriesId, "mihon")),
+            limit: 2000,
+          })
+        ).chapters.nodes;
+      if (stashed === undefined) remember(seriesId, rows);
+      return rows.map((row) => ({
+        chapterId: joinId("mihon", `ch:${row.id}`),
+        read: row.isRead,
+        ...(typeof row.lastPageRead === "number" && row.lastPageRead > 0 ? { page: row.lastPageRead } : {}),
+        ...(row.lastReadAt ? { at: Date.parse(row.lastReadAt) || undefined } : {}),
+      }));
     },
   };
 }

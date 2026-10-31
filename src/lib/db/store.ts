@@ -249,9 +249,16 @@ export class LibraryStore {
   onReadMark?: (chapter: { id: string; seriesId: string; number: number }) => void;
 
   /** Local read marks. The providers that own these are `local` and `dalvik`. */
-  async setRead(chapterId: string, read: boolean): Promise<void> {
+  /**
+   * Mark a chapter read or unread.
+   *
+   * `push: false` is for a *pull*: reconciling a server's own read state must not look like a read
+   * that just happened here, or every sync would fire the tracker queue with chapters the user read
+   * somewhere else. The mark is written; nothing is announced.
+   */
+  async setRead(chapterId: string, read: boolean, options: { push?: boolean } = {}): Promise<void> {
     await this.setPref(`read:${chapterId}`, read);
-    if (!read || this.onReadMark === undefined) return;
+    if (!read || options.push === false || this.onReadMark === undefined) return;
     // Unreading never pushes: a list is a high-water mark, and "I unread chapter 3" is not a fact
     // any tracker can express. The number comes from our own chapter row, because the caller only
     // knows an id.

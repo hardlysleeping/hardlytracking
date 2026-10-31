@@ -16,6 +16,8 @@ import { BACKGROUND_GRACE_MS, viewStateKey } from "../lib/history";
 import { nextUnread } from "../lib/library/continue";
 import { settings } from "./settings.svelte";
 import { installTrackerSync } from "../lib/trackers/sync";
+import { planReadState, remoteReadCount } from "../lib/read-state";
+import type { RemoteRead, SourceProvider } from "../api/source";
 import { startNativeRuntime, shellFetch } from "../lib/mihon-runtime";
 import { imageCache } from "../lib/cache/images";
 import type { Chapter, Page, Series, Source } from "../api/source";
@@ -312,7 +314,57 @@ class LibraryState {
     if (provider.ownsProgress || (await this.isSaved(seriesId))) {
       await this.profile.store.putChapters(seriesId, chapters);
     }
+    // The server keeps its own read state, so the list just fetched is also the answer to "what is
+    // read" — reconciled here, on the response already in hand, rather than by a sweep later.
+    await this.pullReadState(seriesId, provider, chapters).catch(() => undefined);
     return chapters;
+  }
+
+  /**
+   * Take the server's read state into ours.
+   *
+   * Quiet on purpose (`setRead(..., { push: false })`): a chapter read in the server's own web UI
+   * is not a read that just happened on this device, and announcing it would push it back through
+   * the tracker queue on every open. Returns what changed, so a caller can say so.
+   */
+  async pullReadState(
+    seriesId: string,
+    provider: SourceProvider,
+    chapters: Chapter[],
+  ): Promise<{ read: number; pages: number; remoteRead: number }> {
+    if (this.profile === null || provider.readState === undefined) return { read: 0, pages: 0, remoteRead: 0 };
+    const remote: RemoteRead[] = await provider.readState(seriesId);
+    if (remote.length === 0) return { read: 0, pages: 0, remoteRead: 0 };
+
+    const store = this.profile.store;
+    const known = new Set(chapters.map((chapter) => chapter.id));
+    const localRead = new Set<string>();
+    const localPage = new Map<string, number>();
+    for (const chapter of chapters) {
+      if (await store.isRead(chapter.id)) localRead.add(chapter.id);
+      const progress = await store.getProgress(chapter.id);
+      if (progress !== undefined && progress.page > 0) localPage.set(chapter.id, progress.page);
+    }
+
+    const plan = planReadState(remote, { read: localRead, page: localPage }, known);
+
+    for (const row of plan.markRead) {
+      await store.setRead(row.chapterId, true, { push: false });
+      // The server's own timestamp, so History says when it was read rather than when we noticed.
+      if (row.at !== undefined && !settings.historyPaused) {
+        await store.recordHistory(seriesId, row.chapterId, row.at);
+      }
+    }
+
+    for (const row of plan.movePage) {
+      const chapter = chapters.find((candidate) => candidate.id === row.chapterId);
+      if (chapter === undefined) continue;
+      const total = chapter.pageCount > 0 ? chapter.pageCount : row.page;
+      await store.setProgress(row.chapterId, row.page, total);
+      await store.setPosition(seriesId, row.chapterId, row.page);
+    }
+
+    return { read: plan.markRead.length, pages: plan.movePage.length, remoteRead: remoteReadCount(remote) };
   }
 
   async pages(chapterId: string): Promise<Page[]> {

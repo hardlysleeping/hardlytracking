@@ -63,6 +63,16 @@ export interface Chapter {
   uploadedAt?: number;
 }
 
+/** What a server says about one chapter's read state. */
+export interface RemoteRead {
+  chapterId: string;
+  read: boolean;
+  /** The page the server has the reader on, 1-based as the source reports it. */
+  page?: number;
+  /** When the server says it was read, in ms. */
+  at?: number;
+}
+
 export interface Page {
   index: number;
   url: string;
@@ -98,8 +108,21 @@ export interface SourceProvider {
   details(seriesId: string): Promise<Series>;
   chapters(seriesId: string): Promise<Chapter[]>;
   pages(chapterId: string): Promise<Page[]>;
-  /** No-op semantics are not allowed: when `ownsProgress` is false this writes through to the server. */
-  setRead(chapterId: string, read: boolean): Promise<void>;
+  /**
+   * No-op semantics are not allowed: when `ownsProgress` is false this writes through to the server.
+   *
+   * `page` is the bookmark to carry along where the server keeps one (Suwayomi's `lastPageRead`),
+   * so a chapter read to page 7 on this device is at page 7 on the server too.
+   */
+  setRead(chapterId: string, read: boolean, page?: number): Promise<void>;
+
+  /**
+   * The server's own read state for a series, or absent when this provider keeps none.
+   *
+   * Absent is the honest answer for a source that has no server (Archive, a local folder, a dalvik
+   * extension): there is nothing to reconcile, and a caller must not invent one.
+   */
+  readState?(seriesId: string): Promise<RemoteRead[]>;
 }
 
 const KINDS: ProviderKind[] = ["mihon", "dalvik", "htserver", "komga", "local", "archive"];
