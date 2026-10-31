@@ -27,6 +27,14 @@ export const BUILTIN_ARCHIVE_ID = "builtin:internet-archive";
  */
 export const BUILTIN_HT_SERVER_ID = "builtin:ht-server";
 
+/**
+ * Komga: a comic server the user runs, used as a **source**.
+ *
+ * Built in for the same reason as the HT-Server — the code is ours, there is no APK — and its card
+ * holds the address and the login. Sources come from the live provider, never from this row.
+ */
+export const BUILTIN_KOMGA_ID = "builtin:komga";
+
 /** The id this row had before it was named after what it is. Removed on the next boot. */
 export const LEGACY_HT_SERVER_ID = "builtin:read-server";
 
@@ -45,6 +53,17 @@ export const BUILTIN_EXTENSIONS: InstalledExtension[] = [
     iconUrl: "https://archive.org/apple-touch-icon.png",
     sources: [{ id: ARCHIVE_SOURCE.id, name: ARCHIVE_SOURCE.name, lang: ARCHIVE_SOURCE.lang ?? "en" }],
     versionName: "1.0.0",
+    enabled: true,
+    builtin: true,
+  },
+  {
+    extensionId: BUILTIN_KOMGA_ID,
+    packageId: "ing.hardlysleep.hardlytracking.builtin.komga",
+    name: "Komga",
+    // Filled by the live provider, never here: an empty list on this row means "ask the server".
+    sources: [],
+    versionName: "1.0.0",
+    // Off until an address and a login are entered; `komgaEnabled()` is the switch's real answer.
     enabled: true,
     builtin: true,
   },

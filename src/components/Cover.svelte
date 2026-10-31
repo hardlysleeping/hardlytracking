@@ -7,7 +7,7 @@
    * every image at once; the fixed aspect ratio means nothing reflows when they arrive.
    */
   interface Props {
-    series: { title: string; cover?: string };
+    series: { title: string; cover?: string; coverHeaders?: Record<string, string> };
     size?: "grid" | "hero" | "row";
   }
   let { series, size = "grid" }: Props = $props();
@@ -27,7 +27,8 @@
     }
     let live = true;
     src = url;
-    void imageCache.resolve(url).then((resolved) => {
+    const headers = series.coverHeaders;
+    void imageCache.resolve(url, headers === undefined ? {} : { headers }).then((resolved) => {
       if (live && resolved !== url) src = resolved;
     });
     return () => {

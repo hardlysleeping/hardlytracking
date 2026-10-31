@@ -39,6 +39,13 @@ export interface Series {
   provider: ProviderKind;
   title: string;
   cover?: string;
+  /**
+   * Headers the cover needs, for a server that will not serve it to an anonymous `<img>` (Komga).
+   *
+   * An `<img>` cannot send them, so the image cache fetches the bytes itself and the UI gets a blob.
+   * Absent for every source that serves its covers openly.
+   */
+  coverHeaders?: Record<string, string>;
   author?: string;
   description?: string;
   status?: string;

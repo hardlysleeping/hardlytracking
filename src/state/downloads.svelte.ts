@@ -18,7 +18,7 @@ import type { Chapter, Page } from "../api/source";
 import type { DownloadRow } from "../lib/db/store";
 import { DownloadEngine, type DownloadHost, type LocalChapter } from "../lib/downloads/engine";
 import { isComplete, type Progress, type QueueItem } from "../lib/downloads/state";
-import { imageSrc } from "../lib/pages";
+import { pageSrc } from "../lib/pages";
 import { workBudget } from "../lib/performance";
 import { settings } from "./settings.svelte";
 
@@ -124,7 +124,10 @@ async function fetchPage(page: Page, timeoutMs?: number): Promise<Blob> {
   // The timeout comes from the work level: a request left hanging is work the machine keeps paying
   // for, and a stalled page would hold the queue forever.
   const signal = timeoutMs === undefined ? undefined : AbortSignal.timeout(timeoutMs);
-  const response = await fetch(imageSrc(page), signal === undefined ? {} : { signal });
+  // `pageSrc` answers with a URL *or* a blob URL it fetched with the source's own headers, so a
+  // download from a server that needs a login is the same code path as any other page.
+  const src = await pageSrc(page);
+  const response = await fetch(src, signal === undefined ? {} : { signal });
   if (!response.ok) throw new Error(`page ${page.index + 1}: HTTP ${response.status}`);
   return response.blob();
 }

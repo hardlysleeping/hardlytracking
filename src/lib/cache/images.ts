@@ -64,7 +64,7 @@ export class ImageCache {
    * Cached → an object URL. Not cached → the network URL *and* a background fetch that stores it,
    * so the second visit is instant. `null` means "do not cache this" (a blob:, a data:).
    */
-  async resolve(url: string, options: { fetch?: boolean } = {}): Promise<string> {
+  async resolve(url: string, options: { fetch?: boolean; headers?: Record<string, string> } = {}): Promise<string> {
     if (this.db === null || !this.policy.cacheImages) return url;
     // Covers and page images go through the app's own `/api/img` proxy, so the interesting URLs are
     // same-origin paths, not absolute ones. A blob: or data: URL is already local — never cached.
@@ -89,7 +89,9 @@ export class ImageCache {
           void this.touch(url);
           return objectUrl;
         }
-        const response = await fetch(url);
+        // A source that will not serve an image to an anonymous request (Komga) hands its URL with
+        // the header it needs; this is the only place those bytes are fetched.
+        const response = await fetch(url, options.headers === undefined ? {} : { headers: options.headers });
         if (!response.ok) return url;
         const type = response.headers.get("content-type") ?? "";
         if (!ALLOWED.test(type)) return url;

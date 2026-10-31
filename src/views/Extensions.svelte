@@ -14,6 +14,14 @@
   import { proxiedImage } from "../lib/pages";
   import { go, pathTo } from "../lib/nav";
   import { htServerEnabled, hostToken, remoteHost, setHostToken, setRemoteHost } from "../lib/host";
+import {
+  komgaBaseUrl,
+  komgaPassword,
+  komgaUsername,
+  probeKomga,
+  setKomgaEnabled,
+  setKomgaSettings,
+} from "../lib/komga";
 
   interface Props {
     /** A repository from an install link (`mihon://…`, `?repo=…`), added on arrival. */
@@ -38,6 +46,37 @@
   let busy = $state<string | null>(null);
   // The HT-Server's settings belong on its own card: it is a source you point at a machine, and a
   // second copy in Settings would be two places to keep right.
+  // ---- Komga ---------------------------------------------------------------
+  //
+  // Its own card, like the HT-Server: a source you point at a machine. The login is a username and
+  // a password, because that is what every Komga client asks for and what a person already has.
+  let komgaBase = $state(komgaBaseUrl());
+  let komgaUser = $state(komgaUsername());
+  let komgaSecret = $state(komgaPassword());
+  let komgaProbe = $state<string | null>(null);
+  let komgaBusy = $state(false);
+
+  function komgaSaved(): void {
+    setKomgaSettings({ baseUrl: komgaBase, username: komgaUser, password: komgaSecret });
+    komgaBase = komgaBaseUrl();
+    komgaUser = komgaUsername();
+    void library.refreshKomga().catch(() => undefined);
+  }
+
+  async function testKomga(): Promise<void> {
+    const settings = { baseUrl: komgaBase, username: komgaUser, password: komgaSecret };
+    komgaBusy = true;
+    komgaProbe = null;
+    try {
+      const probe = await probeKomga(settings);
+      komgaProbe = probe.ok
+        ? `Signed in${probe.libraries === undefined || probe.libraries.length === 0 ? " — but no libraries are visible to that user" : ` · ${probe.libraries.join(", ")}`}`
+        : (probe.error ?? "Komga did not answer");
+    } finally {
+      komgaBusy = false;
+    }
+  }
+
   let hostValue = $state(remoteHost());
   let hostTokenValue = $state(hostToken());
 
@@ -58,7 +97,12 @@
   async function toggle(row: (typeof library.extensions)[number]): Promise<void> {
     busy = row.extensionId;
     try {
+      // Komga's switch is a preference read live by the registry, so the row alone would not turn
+      // its sources off. Both are written: the row is what the card draws, the preference is what
+      // the provider asks.
+      if (row.extensionId === "builtin:komga") setKomgaEnabled(row.enabled === false);
       await library.setExtensionEnabled(row.extensionId, row.enabled === false);
+      if (row.extensionId === "builtin:komga") await library.refreshKomga();
     } finally {
       busy = null;
     }
@@ -290,6 +334,9 @@
                   {#if row.extensionId === "builtin:ht-server"}
                     <!-- A host is not a source itself: what matters is which machine it is. -->
                     {row.versionName ?? "1.0.0"} · {hostValue === "" ? "no host set" : hostValue}{#if !htServerEnabled()} · paired but off{/if}
+                  {:else if row.extensionId === "builtin:komga"}
+                    <!-- Same idea: what matters is which server, and whether the login works. -->
+                    {row.versionName ?? "1.0.0"} · {komgaBase === "" ? "no server set" : komgaBase}{#if komgaBase !== "" && !row.enabled} · switched off{/if}
                   {:else}
                     {row.versionName ?? "unknown version"} · {row.sources.length} source{row.sources.length === 1 ? "" : "s"}{#if langs.length > 0} · {langs.join(", ")}{/if}
                   {/if}
@@ -308,6 +355,69 @@
                 <span class="track" aria-hidden="true"><span class="knob"></span></span>
               </label>
             </div>
+
+            {#if row.extensionId === "builtin:komga"}
+              <div class="hostform">
+                <label>
+                  <span>Address</span>
+                  <input
+                    class="field"
+                    type="text"
+                    value={komgaBase}
+                    placeholder="http://192.168.1.20:25600"
+                    spellcheck="false"
+                    onchange={(event) => {
+                      komgaBase = event.currentTarget.value;
+                      komgaSaved();
+                    }}
+                  />
+                </label>
+                <label>
+                  <span>Username</span>
+                  <input
+                    class="field"
+                    type="text"
+                    value={komgaUser}
+                    autocomplete="username"
+                    spellcheck="false"
+                    onchange={(event) => {
+                      komgaUser = event.currentTarget.value;
+                      komgaSaved();
+                    }}
+                  />
+                </label>
+                <label>
+                  <span>Password</span>
+                  <input
+                    class="field"
+                    type="password"
+                    value={komgaSecret}
+                    autocomplete="current-password"
+                    onchange={(event) => {
+                      komgaSecret = event.currentTarget.value;
+                      komgaSaved();
+                    }}
+                  />
+                </label>
+                <div class="hosthead">
+                  <button class="chip small" disabled={komgaBusy || komgaBase === ""} onclick={() => void testKomga()}>
+                    {komgaBusy ? "Asking…" : "Test login"}
+                  </button>
+                  {#if komgaProbe !== null}<span class="hoststate">{komgaProbe}</span>{/if}
+                </div>
+                <p class="hint">
+                  {#if komgaBase === ""}
+                    No server set — Komga's shelves are not offered.
+                  {:else if komgaUser === "" || komgaSecret === ""}
+                    Add the username and password you sign in to Komga with.
+                  {:else if komgaProbe !== null && !komgaProbe.startsWith("Signed in")}
+                    Login saved, but it did not work — read the answer above.
+                  {:else}
+                    Login saved as {komgaUser} · read state syncs both ways
+                  {/if}
+                </p>
+              </div>
+            {/if}
 
             {#if row.extensionId === "builtin:ht-server"}
               <div class="hostform">

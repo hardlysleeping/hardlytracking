@@ -168,6 +168,18 @@ class LibraryState {
   // PC's screen and the phone's agree even when the change was made on the PC.
 
   /** Re-probe the paired host: its runtime, its list, and the sources this device offers from it. */
+  /**
+   * Rebuild the Komga provider from the saved address and login, and say so when it did not answer.
+   *
+   * The sources list is reloaded too: Browse groups by source, and a provider swapped underneath it
+   * would otherwise keep drawing the old server's sources.
+   */
+  async refreshKomga(): Promise<void> {
+    if (this.profile === null) return;
+    this.error = await this.profile.refreshKomga();
+    await this.loadSources();
+  }
+
   async refreshHost(): Promise<void> {
     if (this.profile === null) return;
     this.error = await this.profile.refreshHtServer();

@@ -16,6 +16,7 @@
  * host.
  */
 import { apiUrl, htServerBase, hostToken, remoteHost } from "../lib/host";
+import { komgaEnabled, komgaSettings } from "../lib/komga";
 import { browserMihonTransport, createMihonProvider } from "./mihon";
 import { createLocalProvider } from "./local";
 import { createArchiveProvider } from "./archive";
@@ -27,6 +28,7 @@ import {
   type InstalledExtension,
 } from "./dalvik";
 import { listHtServerExtensions } from "./htserver";
+import { createKomgaProvider } from "./komga";
 import { splitId, type SourceProvider } from "./source";
 import type { LibraryStore } from "../lib/db/store";
 import type { CookieJar } from "../lib/webview/store";
@@ -53,6 +55,10 @@ export interface RegistryConfig {
    * restart (the runtime's own jar is memory-only). Absent means no session is carried.
    */
   cookies?: CookieJar;
+  /** The user's own Komga, when one is configured; absent means "read the saved setting". */
+  komga?: { baseUrl: string; username: string; password: string } | null;
+  /** Its switch, read live so turning it off takes effect without a restart. */
+  komgaEnabled?: () => boolean;
   /** The UA the webview logged in with, read per call (matrix row WEB-10). */
   userAgent?: () => string | undefined;
   /** Loopback port of the app's webview bridge, when this build hosts one. */
@@ -179,6 +185,28 @@ export async function createProviders(config: RegistryConfig): Promise<ProviderS
       ...(config.archiveEnabled === undefined ? {} : { enabled: config.archiveEnabled }),
     }),
   );
+
+  /**
+   * Komga, when the user has entered an address and a login.
+   *
+   * A Komga that is configured but unreachable is a *warning*, not a silent empty shelf: the
+   * difference between "nothing here" and "your server is off" is the whole point of the flag.
+   */
+  const komga = config.komga === undefined ? komgaSettings() : config.komga;
+  if (komga !== null && (config.komgaEnabled === undefined ? komgaEnabled() : config.komgaEnabled())) {
+    const provider = createKomgaProvider({
+      ...komga,
+      ...(config.fetchImpl === undefined ? {} : { fetchImpl: config.fetchImpl }),
+    });
+    try {
+      // One cheap question at boot: the login is proven by asking who we are.
+      const sources = await provider.sources();
+      providers.push(provider);
+      if (sources.length === 0) warnings.push(`Komga ${komga.baseUrl}: signed in, but no libraries are visible to that user`);
+    } catch (error) {
+      warnings.push(`Komga ${komga.baseUrl}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
 
   let dalvik: DalvikHost | null = null;
   const dalvikBase = config.dalvikBase === undefined ? apiUrl("/api/dalvik") : config.dalvikBase;

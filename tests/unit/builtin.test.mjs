@@ -15,12 +15,17 @@ function store() {
   return new LibraryStore(memoryDatabase());
 }
 
-test("the built-ins are archive.org and the HT-Server, and nothing else", () => {
-  assert.equal(BUILTIN_EXTENSIONS.length, 2);
+test("the built-ins are archive.org, Komga and the HT-Server, and nothing else", () => {
+  assert.equal(BUILTIN_EXTENSIONS.length, 3);
   assert.deepEqual(
     BUILTIN_EXTENSIONS.map((entry) => entry.extensionId),
-    ["builtin:internet-archive", "builtin:ht-server"],
+    ["builtin:internet-archive", "builtin:komga", "builtin:ht-server"],
   );
+  // Both servers are built in for the same reason: the code is ours, and the card holds where it
+  // lives. Their sources come from the live provider, never from the row.
+  const komga = BUILTIN_EXTENSIONS.find((entry) => entry.extensionId === "builtin:komga");
+  assert.deepEqual(komga.sources, [], "a Komga row has no sources until a server answers");
+  assert.equal(komga.builtin, true);
   // The Mihon runtime is a service the app talks to, not an extension anyone can uninstall.
   assert.equal(BUILTIN_EXTENSIONS.some((entry) => /mihon|runtime/i.test(entry.name)), false);
   const row = BUILTIN_EXTENSIONS[0];
@@ -36,11 +41,11 @@ test("the built-ins are archive.org and the HT-Server, and nothing else", () => 
 test("a fresh install gets the row, and seeding twice does not duplicate it", async () => {
   const library = store();
   const first = await ensureBuiltinExtensions(library);
-  assert.equal(first.length, 2, "archive.org and the read server");
+  assert.equal(first.length, 3, "archive.org, Komga and the HT-Server");
   assert.equal(first[0].extensionId, BUILTIN_ARCHIVE_ID);
 
   const second = await ensureBuiltinExtensions(library);
-  assert.equal(second.length, 2, "one row each, not four");
+  assert.equal(second.length, 3, "one row each, not six");
   assert.equal(second[0].enabled, true);
 });
 

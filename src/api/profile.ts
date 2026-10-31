@@ -18,6 +18,8 @@ import { dbCookieJar, type CookieJar } from "../lib/webview/store";
 import { hostOf } from "../lib/webview/cookies";
 import { loginSource, type LoginResult } from "./mihon-bridge";
 import { openHostRegistry } from "../lib/extensions/host-registry";
+import { komgaEnabled, komgaSettings } from "../lib/komga";
+import { createKomgaProvider } from "./komga";
 
 export interface LibraryProfile {
   readonly kind: "device";
@@ -41,6 +43,13 @@ export interface LibraryProfile {
   listExtensions(): Promise<InstalledExtension[]>;
   /** Re-probe the paired HT-Server. Resolves to a warning line, or `null` when it answered. */
   refreshHtServer(): Promise<string | null>;
+  /**
+   * Rebuild the Komga provider from the saved address and login.
+   *
+   * Called when the card is saved: a provider built from the old address would leave the card and
+   * Browse disagreeing, which reads as "the setting did nothing".
+   */
+  refreshKomga(): Promise<string | null>;
   /** Configured hosts that did not answer — a banner, not silence. */
   readonly warnings: string[];
   /**
@@ -152,6 +161,23 @@ export async function openLibraryProfile(options: OpenProfileOptions = {}): Prom
     htServer: registry.htServer,
     extensionWhere: hostRegistry === null ? "device" : "host",
     listExtensions,
+    async refreshKomga(): Promise<string | null> {
+      const at = providers.findIndex((provider) => provider.kind === "komga");
+      if (at >= 0) providers.splice(at, 1);
+      const saved = komgaSettings();
+      if (saved === null || !komgaEnabled()) return null;
+      const provider = createKomgaProvider({
+        ...saved,
+        ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
+      });
+      try {
+        const sources = await provider.sources();
+        providers.push(provider);
+        return sources.length === 0 ? `Komga ${saved.baseUrl}: signed in, but no libraries are visible to that user` : null;
+      } catch (error) {
+        return `Komga ${saved.baseUrl}: ${error instanceof Error ? error.message : String(error)}`;
+      }
+    },
     async refreshHtServer(): Promise<string | null> {
       const next = await openHtServer(config);
       const at = providers.findIndex((provider) => provider.kind === "htserver");

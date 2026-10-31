@@ -20,6 +20,44 @@ export function proxiedImage(url: string): string {
  * downloader cannot disagree about it.
  */
 import type { Page } from "../api/source";
+import { imageCache } from "./cache/images";
+
+/**
+ * The URL to put in an `<img>` for one page, asynchronously, when the source needs a header.
+ *
+ * `/api/img` is the right answer for a *remote* source that wants a `Referer`: our server can send
+ * what a browser cannot. It is the wrong answer for a server on the private network — that route
+ * refuses private addresses, and a Komga is nearly always one — so a page that carries a header is
+ * fetched here instead and handed back as a blob. Both paths end in one string the reader uses.
+ */
+export async function pageSrc(page: Page): Promise<string> {
+  if (page.headers === undefined || Object.keys(page.headers).length === 0) return page.url;
+  // Two reasons to fetch the bytes here instead of pointing at the proxy: there is no proxy (a
+  // packaged app), or the source is on the private network and `/api/img` refuses those by design.
+  if (!hasLocalServer() || isPrivate(page.url)) {
+    return imageCache.resolve(page.url, { headers: page.headers });
+  }
+  return imageSrc(page);
+}
+
+/** Loopback and the RFC1918 ranges: an address `/api/img` will refuse. */
+export function isPrivate(url: string): boolean {
+  try {
+    const host = new URL(url).hostname;
+    return (
+      host === "localhost" ||
+      host === "::1" ||
+      host === "[::1]" ||
+      /^127\./.test(host) ||
+      /^10\./.test(host) ||
+      /^192\.168\./.test(host) ||
+      /^172\.(1[6-9]|2\d|3[01])\./.test(host) ||
+      /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(host)
+    );
+  } catch {
+    return false;
+  }
+}
 
 export function imageSrc(page: Page): string {
   if (page.headers === undefined || Object.keys(page.headers).length === 0) return page.url;

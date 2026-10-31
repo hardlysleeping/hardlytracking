@@ -22,7 +22,7 @@
   import { providerFor } from "../api/registry";
   import type { Chapter, Page } from "../api/source";
   import { go, pathTo } from "../lib/nav";
-  import { imageSrc } from "../lib/pages";
+  import { pageSrc } from "../lib/pages";
   import { INACTIVITY_TIMEOUT_MS, shouldEndForBackground } from "../lib/history";
   import Sheet from "../components/Sheet.svelte";
 
@@ -189,12 +189,14 @@
         remote = [];
       }
     }
-    const filled = local.urls.map((url, index) => {
-      if (url !== null) return { index, url } as Page;
-      const fallback = remote[index];
-      if (fallback === undefined) return { index, url: "" } as Page;
-      return { index, url: imageSrc(fallback) } as Page;
-    });
+    const filled = await Promise.all(
+      local.urls.map(async (url, index) => {
+        if (url !== null) return { index, url } as Page;
+        const fallback = remote[index];
+        if (fallback === undefined) return { index, url: "" } as Page;
+        return { index, url: await pageSrc(fallback) } as Page;
+      }),
+    );
     pages = filled;
     urls = filled.map((page) => page.url);
     const stillMissing = filled.filter((page) => page.url === "").length;
@@ -219,9 +221,10 @@
       } else {
         fromDownload = false;
         pages = await library.pages(id);
-        // A page that needs headers is loaded through our own server; one that does not is
-        // loaded straight from its URL. `imageSrc` is the single place that decides.
-        urls = pages.map((page) => imageSrc(page));
+        // A page that needs headers is resolved by `pageSrc` — through our own server for a remote
+        // source, or as a blob when the source is on the private network or there is no server at
+        // all. One place decides, so the reader and the downloader cannot disagree.
+        urls = await Promise.all(pages.map((page) => pageSrc(page)));
       }
       const progress = await library.profile.store.getProgress(id);
       index = Math.min(progress?.page ?? 0, Math.max(pages.length - 1, 0));
