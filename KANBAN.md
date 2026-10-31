@@ -124,3 +124,29 @@ outside the grid — `History.svelte` never consults them.
 Rule: a series is hidden when every category it is filed under is hidden, **or** its source is hidden. The
 source half is deliberately absolute — a source is where a title comes from, so hiding it hides everything
 from it even when a category would have shown it.
+
+## T36 — HardlyReading's patterns, in search / extensions / settings (done)
+
+Owner: *"i want all of hardlyreadings functionality in hardlytrackings search and extension and its
+settings, everything that makes sense, i also like how there in search the grid shifts and open the
+card info in search without getting to a new page"*. The reference is the **Python** HardlyReading
+(`~/apps/HardlyReading/index.html`, `showDetail` + `.stage.split`), not the Flutter rewrite.
+
+Landed in three commits:
+
+- `d1c5dca` — **Search opens a result in place.** The grid narrows (`minmax(0,1fr) minmax(320px,380px)`)
+  and the record paints beside it; under 940 px the pane is `position:fixed; inset:0` and the search stays
+  underneath. The description comes from `details()` (cached per id), the pane says "In your library" with
+  Remove when saved, and **Select mode** ticks results instead of opening them so one button can file them
+  all — a stray click never queues anything, which is HardlyReading's rule.
+- `61581e5` — **Settings has the Disk panel.** `navigator.storage.estimate()` as a bar (1.5 % floor,
+  80/92 % tints) labelled as this app's quota, never as free disk space; the search cache is measured
+  (`store.searchCacheSize()`, rows + bytes) and clearable.
+- `39af2ed` — **Extensions**: an installed card lists its own sources (`▾ sources (n)`), and
+  "Check for updates" asks **every** repository, not only the open one — pure `planUpdates()` with three
+  tests (built-ins skipped, no version code skipped, downgrades refused).
+
+Not ported, with reasons in the plan file: archive.org's Lucene advanced search (our equivalent is a
+source's filters — needs `SourceProvider.filters?`), the password gate and `local_only` (this app's
+server already takes `HARDLYTRACKING_TOKEN`), the support pill (archive.org-specific), and the autostart
+toggle (exists as a user unit + `scripts/service.sh`; a webview would need a new Tauri command).
