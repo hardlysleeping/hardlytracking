@@ -129,3 +129,40 @@ test("a stored mark is read defensively", () => {
     { id: "a", hidden: false, pinned: false },
   ]);
 });
+
+test("a migrated title is governed by the source it reads from now, not the one its id spells", async () => {
+  const { sourceKeyOfMapping } = await import("../../src/lib/marks.ts");
+  const oldSource = sourceKeyOfMapping("dalvik", "1");
+  const newSource = sourceKeyOfMapping("dalvik", "2");
+  assert.equal(oldSource, "dalvik:src:1");
+  assert.equal(newSource, "dalvik:src:2");
+
+  const migrated = { provider: "dalvik", sourceId: "2" };
+  // The id still says source 1; the mapping says 2. The mark that applies is 2's.
+  assert.equal(sourceKeyOf("dalvik:1:x", migrated), "dalvik:src:2");
+  assert.equal(sourceKeyOf("dalvik:1:x"), "dalvik:src:1");
+
+  // Hidden source 1, pinned source 2: the migrated title is pinned and visible, not hidden.
+  const marks = [
+    { id: "dalvik:src:1", hidden: true, pinned: false },
+    { id: "dalvik:src:2", hidden: false, pinned: true },
+  ];
+  const row = { id: "dalvik:1:x", categoryIds: [] };
+  const context = contextOf({ categories, sources: marks, sourceOf: (id) => sourceKeyOf(id, migrated) });
+  assert.equal(isHidden(row, context), false);
+  assert.equal(isPinned(row, context), true);
+});
+
+test("a title migrated onto this device is attributed to this device's own source", async () => {
+  const { sourceKeyOfMapping } = await import("../../src/lib/marks.ts");
+  // The device source's own id already carries `src:`.
+  assert.equal(sourceKeyOfMapping("local", "src:library"), "local:src:library");
+  assert.equal(sourceKeyOfMapping("local", ""), "local:src:library");
+  assert.equal(sourceKeyOf("mihon:12", { provider: "local", sourceId: "src:library" }), "local:src:library");
+});
+
+test("an HT-Server title is attributed to its own source, like a dalvik one", async () => {
+  const { sourceKeyOfMapping } = await import("../../src/lib/marks.ts");
+  assert.equal(sourceKeyOf("htserver:7:https://pc/manga/x"), "htserver:src:7");
+  assert.equal(sourceKeyOfMapping("htserver", "7"), "htserver:src:7");
+});

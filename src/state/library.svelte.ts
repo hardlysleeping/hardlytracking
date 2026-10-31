@@ -17,11 +17,36 @@ import { nextUnread } from "../lib/library/continue";
 import { settings } from "./settings.svelte";
 import { installTrackerSync } from "../lib/trackers/sync";
 import { planReadState, remoteReadCount } from "../lib/read-state";
+import { providerLabel } from "../api/source";
 import type { RemoteRead, SourceProvider } from "../api/source";
+import { sourceKeyOfMapping } from "../lib/marks";
+import { applyMigration, type AppliedMigration } from "../lib/migrate-apply";
+import {
+  describeMigration,
+  mappingFromId,
+  planMigration,
+  type MigrationFacts,
+  type MigrationPlan,
+  type MigrationTarget,
+  type SummaryRow,
+} from "../lib/migrate";
 import { startNativeRuntime, shellFetch } from "../lib/mihon-runtime";
 import { watchOpenedFiles } from "../lib/files/opened";
 import { imageCache } from "../lib/cache/images";
 import type { Chapter, Page, Series, Source } from "../api/source";
+
+/**
+ * What a migration would do, or why it will not.
+ *
+ * `rows` is the confirm panel, built from the same plan the write uses — the panel cannot promise a
+ * number the migration does not deliver.
+ */
+export type MigrationPreview =
+  | { ok: true; plan: MigrationPlan; rows: SummaryRow[]; pages: Map<string, number> }
+  | { ok: false; message: string };
+
+/** What a migration did. A refusal is the same shape as a failure: nothing moved. */
+export type MigrationOutcome = ({ ok: true } & AppliedMigration) | { ok: false; message: string };
 
 /** One row of the Updates list: a chapter, and the title it belongs to. */
 export interface UpdateRow {
@@ -338,7 +363,34 @@ class LibraryState {
   /** The source's own page for a series: what a pasted link is turned into before it is queued. */
   async details(seriesId: string): Promise<Series> {
     if (this.profile === null) throw new Error("no library is open");
-    return providerFor(this.profile.providers, seriesId).details(seriesId);
+    const target = await this.remoteOf(seriesId);
+    const series = await target.provider.details(target.seriesId);
+    // A migrated title answers with the target's metadata under *our* id: the entry keeps its
+    // identity, so a link, a category or a position that names this series still names it.
+    return target.seriesId === seriesId ? series : { ...series, id: seriesId };
+  }
+
+  /**
+   * Where this entry actually lives now.
+   *
+   * Normally that is the series id itself. After a migration it is the target source's series,
+   * recorded on the mapping row — and every read of the title (details, chapters, the server's own
+   * read state) goes through here, so nothing else has to know a migration happened.
+   */
+  async remoteOf(seriesId: string): Promise<{ seriesId: string; provider: SourceProvider }> {
+    if (this.profile === null) throw new Error("no library is open");
+    const providers = this.profile.providers;
+    const mapping = await this.profile.store.getMapping(seriesId);
+    const remote = mapping?.remoteSeriesId;
+    if (remote !== undefined && remote !== "" && remote !== seriesId) {
+      try {
+        return { seriesId: remote, provider: providerFor(providers, remote) };
+      } catch {
+        // The target's provider is gone (its extension was uninstalled). The title falls back to
+        // its own id, which is where it came from — a warning, not a title that cannot be opened.
+      }
+    }
+    return { seriesId, provider: providerFor(providers, seriesId) };
   }
 
   /** One page of a source's search, for a link that names a site rather than a series. */
@@ -350,15 +402,17 @@ class LibraryState {
 
   async chapters(seriesId: string): Promise<Chapter[]> {
     if (this.profile === null) return [];
-    const provider = providerFor(this.profile.providers, seriesId);
-    const chapters = await provider.chapters(seriesId);
-    // Mirror the server's list locally: the series page opens instantly next time.
-    if (provider.ownsProgress || (await this.isSaved(seriesId))) {
+    const target = await this.remoteOf(seriesId);
+    const chapters = await target.provider.chapters(target.seriesId);
+    // Mirror the server's list locally: the series page opens instantly next time. The rows are
+    // stored under *our* id, so a migrated title's chapters are its chapters whichever source
+    // answered — that is what keeps unread counts, Continue and Updates on one entry.
+    if (target.provider.ownsProgress || (await this.isSaved(seriesId))) {
       await this.profile.store.putChapters(seriesId, chapters);
     }
     // The server keeps its own read state, so the list just fetched is also the answer to "what is
     // read" — reconciled here, on the response already in hand, rather than by a sweep later.
-    await this.pullReadState(seriesId, provider, chapters).catch(() => undefined);
+    await this.pullReadState(seriesId, target.provider, chapters, target.seriesId).catch(() => undefined);
     return chapters;
   }
 
@@ -368,14 +422,18 @@ class LibraryState {
    * Quiet on purpose (`setRead(..., { push: false })`): a chapter read in the server's own web UI
    * is not a read that just happened on this device, and announcing it would push it back through
    * the tracker queue on every open. Returns what changed, so a caller can say so.
+   *
+   * `remoteId` is the series id the provider answers to when it is not ours (a migrated title); the
+   * history row it writes is still keyed by the library entry, so History keeps one title.
    */
   async pullReadState(
     seriesId: string,
     provider: SourceProvider,
     chapters: Chapter[],
+    remoteId: string = seriesId,
   ): Promise<{ read: number; pages: number; remoteRead: number }> {
     if (this.profile === null || provider.readState === undefined) return { read: 0, pages: 0, remoteRead: 0 };
-    const remote: RemoteRead[] = await provider.readState(seriesId);
+    const remote: RemoteRead[] = await provider.readState(remoteId);
     if (remote.length === 0) return { read: 0, pages: 0, remoteRead: 0 };
 
     const store = this.profile.store;
@@ -558,25 +616,117 @@ class LibraryState {
    * The id already carries the provider and, for a Mihon host, the source id and the
    * manga's own url — so the mapping is derived from the id rather than guessed, and a
    * source we cannot name is left out instead of being invented.
+   *
+   * **An existing mapping is never overwritten here.** A migrated title's mapping names the source
+   * it reads from now, which is not what its id spells; re-deriving it on the next save would undo
+   * the migration quietly.
    */
   async recordMapping(seriesId: string, packageId?: string): Promise<void> {
     if (this.profile === null) return;
-    const [provider, ...rest] = seriesId.split(":");
-    const native = rest.join(":");
-    if (provider === undefined || native === "") return;
-    // `dalvik:<sourceId>:<url>` — the source id is the first segment after the kind. The HT-Server's
-    // rows have the same shape under its own kind, and a row that came from a PC is still a row whose
-    // source we want to name.
-    const sourceId =
-      provider === "dalvik" || provider === "htserver" ? native.split(":")[0] : provider === "mihon" ? "" : native;
-    if (sourceId === undefined || sourceId === "") return;
-    await this.profile.store.putMapping({
-      seriesId,
-      provider,
-      sourceId,
-      ...(packageId === undefined ? {} : { packageId }),
-      at: Date.now(),
-    });
+    const derived = mappingFromId(seriesId, packageId);
+    if (derived === null) return;
+    if ((await this.profile.store.getMapping(seriesId)) !== undefined) return;
+    await this.profile.store.putMapping({ seriesId, ...derived, at: Date.now() });
+  }
+
+  // ---- migrating a title to another source ---------------------------------
+  //
+  // The rules are in `lib/migrate.ts`; this is the sequence, and the order of the writes is part of
+  // the design. The per-chapter facts (marks, positions, history, downloads) and the chapter list go
+  // first and the mapping last, so a write that dies half way leaves the title still reading from the
+  // source its mapping names — the mirror rows are refetched on the next open, so nothing is stuck.
+
+  /**
+   * What a migration would move, without moving anything.
+   *
+   * Everything the confirm panel says comes from here, so the panel cannot promise a number the
+   * write does not deliver. A refusal is a message, not an exception: the entry stays where it is.
+   */
+  async previewMigration(seriesId: string, target: MigrationTarget): Promise<MigrationPreview> {
+    if (this.profile === null) return { ok: false, message: "No library is open." };
+    const store = this.profile.store;
+    const saved = await store.getSeries(seriesId);
+    if (saved === undefined) return { ok: false, message: "Only a title in your library can be migrated — add it first." };
+
+    let from: Chapter[];
+    try {
+      from = await this.chapters(seriesId);
+    } catch (error) {
+      return { ok: false, message: `The source this title is on did not answer: ${message(error)}` };
+    }
+    let to: Chapter[];
+    try {
+      to = await providerFor(this.profile.providers, target.seriesId).chapters(target.seriesId);
+    } catch (error) {
+      return { ok: false, message: `${target.sourceName} did not answer: ${message(error)}` };
+    }
+
+    const read = new Set<string>();
+    const pages = new Map<string, number>();
+    for (const chapter of from) {
+      if (await store.isRead(chapter.id)) read.add(chapter.id);
+      const progress = await store.getProgress(chapter.id);
+      if (progress !== undefined && progress.page > 0) pages.set(chapter.id, progress.page);
+    }
+
+    const current = await this.remoteOf(seriesId);
+    const result = planMigration({ seriesId, target, currentSeriesId: current.seriesId, from, to, read, pages });
+    if (!result.ok) return { ok: false, message: result.message };
+    const plan = result.plan;
+
+    const pairs = new Map(plan.pairs.map((pair) => [pair.from.id, pair.to]));
+    let downloadsKeep = 0;
+    let downloadsDrop = 0;
+    for (const row of (await store.listDownloads()).filter((download) => download.seriesId === seriesId)) {
+      const counterpart = pairs.get(row.chapterId);
+      if (counterpart !== undefined && counterpart.pageCount === row.pages) downloadsKeep += 1;
+      else downloadsDrop += 1;
+    }
+
+    const mapping = await store.getMapping(seriesId);
+    const fromKey = mapping === undefined ? undefined : sourceKeyOfMapping(mapping.provider, mapping.sourceId);
+    const fromSource = this.sources.find((source) => source.id === fromKey)?.name ?? providerLabel(saved.provider);
+
+    const facts: MigrationFacts = {
+      fromSource,
+      toSource: target.sourceName,
+      categories: (saved.categoryIds ?? []).length,
+      trackers: (await store.listTrackersForSeries(seriesId)).length,
+      history: (await store.listHistory(Number.POSITIVE_INFINITY)).filter((row) => row.seriesId === seriesId).length,
+      downloadsKeep,
+      downloadsDrop,
+    };
+
+    return { ok: true, plan, pages, rows: describeMigration(plan, facts, pages) };
+  }
+
+  /**
+   * Move a library entry to another source, keeping its identity.
+   *
+   * The entry's id does not change — categories, hidden/pinned marks, tracker links, the position row
+   * and every history row keep pointing at it. What changes is which series it reads from, and that
+   * is one mapping row; the old home is kept as an alternate so the move can be reversed.
+   */
+  async migrate(seriesId: string, target: MigrationTarget): Promise<MigrationOutcome> {
+    if (this.profile === null) return { ok: false, message: "No library is open." };
+    const preview = await this.previewMigration(seriesId, target);
+    if (!preview.ok) return preview;
+
+    const packageId = this.extensions.find((extension) => extension.sources.some((source) => source.id === target.sourceId))?.packageId;
+    try {
+      // The sequence lives in `lib/migrate-apply.ts`: one clock, one order, and a test that can run
+      // it against a memory database without a view or a provider.
+      const applied = await applyMigration({
+        store: this.profile.store,
+        plan: preview.plan,
+        target,
+        ...(packageId === undefined ? {} : { packageId }),
+      });
+      await this.refreshLibrary();
+      return { ok: true, ...applied };
+    } catch (error) {
+      return { ok: false, message: message(error) };
+    }
   }
 
   /**
