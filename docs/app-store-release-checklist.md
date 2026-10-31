@@ -21,7 +21,7 @@ reading-history consent prompt.
 | 5 | Report Source | **Not done** |
 | 6 | Runtime boundary | **Done** — recorded in `docs/runtime-boundary.md`; the test `tests/unit/runtime-boundary.test.mjs` ("a downloaded extension reaches no native API") passes |
 | 7 | iOS networking | **Done in the tree** — `NSAllowsArbitraryLoads` is gone; `NSAllowsLocalNetworking` plus loopback and private-range `NSExceptionDomains`, pinned by `tests/unit/ios-ats.test.mjs`. The device half needs the iPhone |
-| 8 | iOS project hygiene | **Not done** — `UIBackgroundModes=fetch`, `armv7`, `IPHONEOS_DEPLOYMENT_TARGET = 14.0`, no `PrivacyInfo.xcprivacy`, no entitlements |
+| 8 | iOS project hygiene | **Done in the tree** — `UIBackgroundModes` and `armv7` gone, `IPHONEOS_DEPLOYMENT_TARGET = 15.0` everywhere, `PrivacyInfo.xcprivacy` in the app target, all pinned by `tests/unit/ios-hygiene.test.mjs`; the archive and the device half need his hand (§8) |
 | 9 | Billing on iOS | **Decide** — sync unlocks through Stripe (`billing.hardlysleep.ing`); that cannot ship in-app |
 
 ---
@@ -163,15 +163,48 @@ your Komga server and to the PC running HardlyTracking on your local network." T
 
 ## 8. iOS project hygiene — blocker
 
-- [ ] Remove `UIBackgroundModes → fetch` unless a feature uses it
-- [ ] Remove the stale `armv7` device capability
-- [ ] Raise `IPHONEOS_DEPLOYMENT_TARGET` from 14.0 to the current baseline (15+)
-- [ ] Archive on the current required Xcode/iOS SDK
-- [ ] Add `ios/App/App/PrivacyInfo.xcprivacy` to the app target and declare the required-reason APIs actually used (UserDefaults, file timestamps, disk space, SQLite/storage) across Capacitor, WebKit, the embedded OpenJDK and Supabase
-- [ ] Xcode privacy report shows no unexplained entries
-- [ ] Physical-device run after the target change: embedded JVM starts, `/capabilities` answers, a chapter reads
+- [x] Remove `UIBackgroundModes → fetch` unless a feature uses it — nothing fetches in the
+      background. The download queue only runs while the app does; there is no `BackgroundFetch`,
+      `BGTaskScheduler` or `backgroundFetch` call anywhere in the tree.
+- [x] Remove the stale `armv7` device capability — the whole `UIRequiredDeviceCapabilities` key is
+      gone, not just the entry. No armv7 device can run iOS 15, so the deployment target is the
+      capability.
+- [x] Raise `IPHONEOS_DEPLOYMENT_TARGET` from 14.0 to **15.0** — all four build configurations in
+      `project.pbxproj`, `ios/App/Podfile` (`platform :ios, '15.0'`) and
+      `plugins/mihon-runtime/MihonRuntime.podspec`. The podspec matters: one of the three left at
+      14.0 is a pod whose target is older than the app's.
+- [ ] Archive on the current required Xcode/iOS SDK — **the workflow does it, the run is unobserved.**
+      `.github/workflows/ios-ipa.yml` now selects the newest non-beta Xcode on the runner, refuses an
+      `iphoneos` SDK below 18.0, and checks the archive rather than the source tree. It is
+      `workflow_dispatch` only and this workstation has no `gh` and no GitHub token, so the run needs
+      his hand: `gh workflow run ios-ipa.yml --ref master`.
+- [x] Add `ios/App/App/PrivacyInfo.xcprivacy` to the app target and declare the required-reason APIs
+      actually used — see below for what each one is and the call that proves it.
+- [ ] Xcode privacy report shows no unexplained entries — needs the archive above; the manifest is
+      the input to that report, not the report.
+- [ ] Physical-device run after the target change: embedded JVM starts, `/capabilities` answers, a
+      chapter reads — needs the iPhone on the desk (T13 runs the matrix). Nothing in this change can
+      be proven by a simulator: the framework is device-arch only.
 
 *Done when:* the archive validates and the device smoke test below passes on the new target.
+
+### What the manifest declares, and the call that proves it
+
+`ios/App/App/PrivacyInfo.xcprivacy` is a member of the app target's Resources phase (a file in the
+group but not in the target builds into nothing and still fails upload), `NSPrivacyTracking` is
+false, and no collected data is declared — the optional paid sync's collection is an App Store
+Connect answer, which is the authoritative place for an app's collected data.
+
+| category | reason | the call |
+|---|---|---|
+| `NSPrivacyAccessedAPICategoryUserDefaults` | `CA92.1` | Capacitor's `KeyValueStore.standard` — `AppUUID` keeps `CapacitorAppUUID` there, `CapacitorStorage` is the webview's localStorage bridge |
+| `NSPrivacyAccessedAPICategoryFileTimestamp` | `C617.1`, `3B52.1` | `C617.1`: the runtime's own state in `Library/Application Support/MihonExtensions` (`MihonRuntime.mm`) and the JVM/WebKit caches in the container. `3B52.1`: a CBZ tapped in Files or iCloud Drive, opened in place and read once (`src/lib/files/opened.ts`) |
+| `NSPrivacyAccessedAPICategoryDiskSpace` | `85F4.1` | Settings → Storage draws "X used of Y this app may use" from `navigator.storage.estimate()` (`src/views/Settings.svelte`). Nothing checks free space before a write, so `E174.1` is deliberately **not** claimed |
+
+`tests/unit/ios-hygiene.test.mjs` (7 tests) pins all of it: the four deployment-target lines plus
+the Podfile and podspec, the absence of `UIBackgroundModes` and `armv7`, the manifest's membership
+in the Resources phase, and the exact category → reason-code set against the codes Apple publishes
+per category. The plist reader it shares with the ATS test lives in `tests/unit/plist.mjs`.
 
 ## 9. Billing — blocker only if paid sync ships
 
