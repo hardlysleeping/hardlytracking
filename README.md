@@ -85,11 +85,16 @@ The PC app is a real desktop app — Tauri, not a browser tab — and it carries
 extension APKs run on the machine with nothing else to install. Builds come from the
 [releases page](https://github.com/hardlysleeping/hardlytracking/releases):
 
-| Platform | File |
-| --- | --- |
-| Windows 10/11 x64 | `HardlyTracking_<version>_windows-x86_64.exe` (NSIS installer, no admin needed) |
-| macOS 11+ | `HardlyTracking_<version>_macos-arm64.dmg` (Apple silicon) · `..._macos-x86_64.dmg` (Intel) |
-| Linux x64 | `HardlyTracking_<version>_linux-x86_64.AppImage` · `.deb` (Debian/Ubuntu, glibc 2.35+) |
+| Platform | Installer | Portable (no install, no uninstaller) |
+| --- | --- | --- |
+| Windows 10/11 x64 | `HardlyTracking_<version>_windows-x86_64.exe` (NSIS, no admin needed) · `.msi` | `..._windows-x86_64-portable.zip` — unzip, run `HardlyTracking.exe`, delete the folder to remove |
+| macOS 11+ | `..._macos-arm64.dmg` (Apple silicon) · `..._macos-x86_64.dmg` (Intel) | `..._macos-arm64-portable.zip` · `..._macos-x86_64-portable.zip` — a zipped `.app` |
+| Linux x64 | `.deb` (Debian/Ubuntu, glibc 2.35+) · `.AppImage` | `..._linux-x86_64-portable.tar.gz` — the binary and its `runtime/` folder |
+
+Every file carries the extension host — the server jar and a JVM for that platform — so nothing else
+has to be installed. The portable builds are the same tree the installers are built from, which means
+`runtime/` sits beside the executable exactly where the app looks for it: move the whole folder, keep
+the folder together.
 
 All of them are **unsigned**: there is no code-signing certificate behind this project, so Windows
 SmartScreen shows "Windows protected your PC" (More info → Run anyway) and macOS refuses the first

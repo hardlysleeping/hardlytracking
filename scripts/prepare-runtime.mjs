@@ -2,8 +2,9 @@
 /**
  * Put the extension host inside the desktop app: the server jar and a JRE, for this platform.
  *
- *   node scripts/prepare-runtime.mjs            # download once, unpack into src-tauri/runtime/
- *   node scripts/prepare-runtime.mjs --force    # redo it
+ *   node scripts/prepare-runtime.mjs                    # download once, unpack into src-tauri/runtime/
+ *   node scripts/prepare-runtime.mjs --force             # redo it
+ *   node scripts/prepare-runtime.mjs --platform=macos-x64 # cross-build: the target's JRE, not this host's
  *
  * The desktop shell starts `MExtensionServer` as a child process (`src-tauri/src/runtime.rs`), so a
  * packaged app needs two things it cannot invent: the jar, and a JVM. Both come from
@@ -60,6 +61,19 @@ export function javaRelativePath(platform = process.platform) {
   return platform === "win32" ? "jre/bin/java.exe" : "jre/bin/java";
 }
 
+/**
+ * The platform bundle a build needs. Normally this host's own — but a cross-build (an Intel `.dmg`
+ * produced on an Apple-silicon runner) must carry the *target's* JVM, so `--platform` overrides it.
+ * Guessing from the runner here would put an arm64 JRE inside an x86_64 app, which installs and then
+ * cannot start its own extension host.
+ */
+export function requestedPlatform(argv = process.argv.slice(2)) {
+  const inline = argv.find((argument) => argument.startsWith("--platform="));
+  if (inline) return inline.slice("--platform=".length);
+  const index = argv.indexOf("--platform");
+  return index >= 0 ? argv[index + 1] : null;
+}
+
 function sha256(buffer) {
   return createHash("sha256").update(buffer).digest("hex");
 }
@@ -81,14 +95,21 @@ function alreadyPrepared(platform) {
 
 async function main() {
   const force = process.argv.includes("--force");
-  const key = platformKey();
+  const override = requestedPlatform();
+  if (override !== null && !(override in ASSETS)) {
+    console.error(`unknown --platform=${override}: one of ${Object.keys(ASSETS).join(", ")}`);
+    process.exit(1);
+  }
+  const key = override ?? platformKey();
   if (key === null) {
     console.error(`no extension host for ${process.platform}/${process.arch}: this app ships x64 Linux and`);
     console.error("Windows, and both macOS architectures. The browser build still works everywhere.");
     process.exit(1);
   }
+  /** The bundle's own OS, which decides whether the JVM is `java` or `java.exe`. */
+  const hostPlatform = key.startsWith("windows") ? "win32" : "darwin";
 
-  if (!force && alreadyPrepared(process.platform)) {
+  if (!force && alreadyPrepared(hostPlatform)) {
     console.log(`runtime already prepared: ${JAR}`);
     return;
   }
@@ -137,9 +158,9 @@ async function main() {
     throw new Error(`runner.jar hash ${digest} does not match the pinned ${JAR_SHA256}`);
   }
 
-  const java = join(RUNTIME, javaRelativePath(process.platform));
+  const java = join(RUNTIME, javaRelativePath(hostPlatform));
   if (!existsSync(java)) throw new Error(`the bundle carried no JVM at ${java}`);
-  if (process.platform !== "win32") chmodSync(java, 0o755);
+  if (hostPlatform !== "win32") chmodSync(java, 0o755);
 
   const megabytes = (total) => `${(total / 1024 / 1024).toFixed(0)} MB`;
   console.log(`  runner.jar ${megabytes(readFileSync(JAR).length)} (sha256 ok)`);

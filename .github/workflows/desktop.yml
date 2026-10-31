@@ -24,14 +24,17 @@ jobs:
           - os: ubuntu-22.04
             name: linux-x86_64
             target: x86_64-unknown-linux-gnu
+            platform: linux-x64
             bundles: deb
           - os: windows-latest
             name: windows-x86_64
             target: x86_64-pc-windows-msvc
+            platform: windows-x64
             bundles: nsis,msi
           - os: macos-latest
             name: macos-arm64
             target: aarch64-apple-darwin
+            platform: macos-arm64
             bundles: app,dmg
 
     steps:
@@ -64,7 +67,7 @@ jobs:
       # The jar and the JRE, pinned by version and checked by SHA-256. Before the Rust build, because
       # `tauri.conf.json` lists them as bundle resources and the build fails without them.
       - name: Prepare the extension host
-        run: node scripts/prepare-runtime.mjs
+        run: node scripts/prepare-runtime.mjs --platform=${{ matrix.platform }}
 
       - run: npm run build
 
@@ -142,6 +145,24 @@ jobs:
           "$app/Contents/Resources/runtime/jre/bin/java" -version
           echo "✓ $app carries runner.jar and a working JRE"
 
+      # A `.dmg` is how a Mac app is normally handed over, but it needs mounting, and unsigned it
+      # needs Gatekeeper talked round either way. A zipped `.app` is the plain alternative, and
+      # `ditto` is the one tool that preserves the symlinks and permissions a bundle depends on.
+      - name: A portable macOS build
+        if: startsWith(matrix.os, 'macos')
+        run: |
+          set -euo pipefail
+          app=$(find "src-tauri/target/${{ matrix.target }}/release/bundle" -name '*.app' -maxdepth 3 -print -quit)
+          [ -n "$app" ] || { echo "✗ no .app"; exit 1; }
+          version=$(node -p "require('./package.json').version")
+          zip="HardlyTracking_${version}_${{ matrix.name }}-portable.zip"
+          ditto -c -k --sequesterRsrc --keepParent "$app" "$zip"
+          ls -lh "$zip"
+          unzip -l "$zip" > /tmp/zip-list.txt
+          grep -q 'runtime/runner.jar' /tmp/zip-list.txt
+          grep -q 'runtime/jre/bin/java' /tmp/zip-list.txt
+          echo "✓ $zip carries runner.jar and a JRE"
+
       - name: The bundle carries the host (Windows)
         if: matrix.os == 'windows-latest'
         shell: bash
@@ -156,6 +177,32 @@ jobs:
           ls -la "$release"/bundle/nsis/*.exe "$release"/bundle/msi/*.msi
           echo "✓ the installer is built from a tree that carries the host"
 
+      # An installer is not always what someone wants: it writes to Program Files, adds an entry to
+      # Add/Remove Programs and needs an uninstaller. A portable folder is the whole app in one
+      # directory — unzip, run `HardlyTracking.exe`, delete the folder to remove it. Same tree the
+      # installer is built from, so the runtime sits beside the executable exactly where
+      # `src-tauri/src/runtime.rs` looks for it.
+      - name: A portable Windows build
+        if: matrix.os == 'windows-latest'
+        shell: bash
+        run: |
+          set -euo pipefail
+          release="src-tauri/target/${{ matrix.target }}/release"
+          version=$(node -p "require('./package.json').version")
+          stage="portable/HardlyTracking"
+          mkdir -p "$stage"
+          cp "$release/hardlytracking.exe" "$stage/"
+          cp -r "$release/runtime" "$stage/"
+          cp README.md LICENSE "$stage/" 2>/dev/null || true
+          zip="HardlyTracking_${version}_windows-x86_64-portable.zip"
+          # 7z, not Compress-Archive: the latter takes minutes on a 140 MB tree and the runner has 7z.
+          7z a -tzip -mx=5 "$zip" portable/HardlyTracking > /dev/null
+          ls -lh "$zip"
+          # Prove the archive carries the host, rather than trusting the folder it came from.
+          7z l "$zip" | grep -q 'runtime/runner.jar'
+          7z l "$zip" | grep -q 'runtime/jre/bin/java.exe'
+          echo "✓ the portable zip carries runner.jar and a JRE"
+
       - uses: actions/upload-artifact@v4
         with:
           name: hardlytracking-${{ matrix.name }}
@@ -167,13 +214,19 @@ jobs:
             src-tauri/target/${{ matrix.target }}/release/bundle/msi/*.msi
             src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
             HardlyTracking_*_linux-x86_64.tar.gz
+            HardlyTracking_*_windows-x86_64-portable.zip
+            HardlyTracking_*_macos-*-portable.zip
 
-  # Intel Macs get their own job, outside the matrix, because `macos-13` is the scarcest runner on
-  # GitHub and a queued one holds the whole matrix — and with it the release — hostage. This job
-  # uploads its own `.dmg` to the release when it finishes, and the release does not wait for it.
+  # Intel Macs get their own job, outside the matrix, because they are a cross-build and must never be
+  # able to fail the release: `continue-on-error` keeps the release green while this one works or
+  # does not. It used to run on `macos-13`, the scarcest runner on GitHub — a job that sat queued for
+  # over an hour and made every run look unfinished, including the ones that had already published.
+  # Apple-silicon runners cross-compile the x86_64 target happily, so the queue is gone; the JRE is
+  # the only thing that cannot be guessed, and `--platform=macos-x64` says which one to carry.
   intel:
     name: macos-x86_64
-    runs-on: macos-13
+    runs-on: macos-latest
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
 
@@ -191,7 +244,7 @@ jobs:
           workspaces: src-tauri -> target
 
       - run: npm ci
-      - run: node scripts/prepare-runtime.mjs
+      - run: node scripts/prepare-runtime.mjs --platform=macos-x64
       - run: npm run build
       - run: npx tauri build --target x86_64-apple-darwin --bundles app,dmg
 
@@ -201,13 +254,26 @@ jobs:
           app="src-tauri/target/x86_64-apple-darwin/release/bundle/macos/HardlyTracking.app"
           [ -f "$app/Contents/Resources/runtime/runner.jar" ] || { echo "✗ no runner.jar"; exit 1; }
           [ -x "$app/Contents/Resources/runtime/jre/bin/java" ] || { echo "✗ no JRE"; exit 1; }
+          # The JRE must be Intel, not the runner's own: `file` is the only thing that says so.
+          file "$app/Contents/Resources/runtime/jre/bin/java" | tee /tmp/jre-arch.txt
+          grep -q 'x86_64' /tmp/jre-arch.txt || { echo "✗ the JRE in the Intel app is not x86_64"; exit 1; }
           "$app/Contents/Resources/runtime/jre/bin/java" -version
+
+      - name: A portable Intel build
+        run: |
+          set -euo pipefail
+          app="src-tauri/target/x86_64-apple-darwin/release/bundle/macos/HardlyTracking.app"
+          version=$(node -p "require('./package.json').version")
+          ditto -c -k --sequesterRsrc --keepParent "$app" "HardlyTracking_${version}_macos-x86_64-portable.zip"
+          ls -lh HardlyTracking_*_macos-x86_64-portable.zip
 
       - uses: actions/upload-artifact@v4
         with:
           name: hardlytracking-macos-x86_64
           if-no-files-found: error
-          path: src-tauri/target/x86_64-apple-darwin/release/bundle/dmg/*.dmg
+          path: |
+            src-tauri/target/x86_64-apple-darwin/release/bundle/dmg/*.dmg
+            HardlyTracking_*_macos-x86_64-portable.zip
 
       - name: Attach to the release
         if: startsWith(github.ref, 'refs/tags/v')
@@ -221,6 +287,7 @@ jobs:
           [ -n "$dmg" ] || { echo "✗ no dmg"; exit 1; }
           cp "$dmg" "HardlyTracking_${version}_macos-x86_64.dmg"
           gh release upload "$TAG" "HardlyTracking_${version}_macos-x86_64.dmg" --clobber --repo "$GITHUB_REPOSITORY"
+          gh release upload "$TAG" "HardlyTracking_${version}_macos-x86_64-portable.zip" --clobber --repo "$GITHUB_REPOSITORY"
 
   release:
     needs: build
@@ -247,6 +314,15 @@ jobs:
           mkdir -p out
           while IFS= read -r file; do
             base=$(basename "$file")
+            # Already named for the release page by the job that built it (the portable archives are
+            # named by hand because no bundler produces them): copy as-is, or the guess below renames
+            # `..._windows-x86_64-portable.zip` into something wrong.
+            case "$base" in
+              HardlyTracking_*)
+                cp "$file" "out/$base"
+                continue
+                ;;
+            esac
             case "$base" in
               *arm64*|*aarch64*) platform=macos-arm64 ;;
               *.dmg)             platform=macos-x86_64 ;;
@@ -260,7 +336,7 @@ jobs:
               *)        ext="${base##*.}" ;;
             esac
             cp "$file" "out/HardlyTracking_${version}_${platform}.${ext}"
-          done < <(find dist -type f \( -name '*.exe' -o -name '*.msi' -o -name '*.deb' -o -name '*.AppImage' -o -name '*.dmg' -o -name '*.tar.gz' \))
+          done < <(find dist -type f \( -name '*.exe' -o -name '*.msi' -o -name '*.deb' -o -name '*.AppImage' -o -name '*.dmg' -o -name '*.tar.gz' -o -name '*portable.zip' \))
           ls -la out
           test -n "$(ls -A out)" || { echo "✗ nothing to publish"; exit 1; }
 
