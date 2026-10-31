@@ -24,7 +24,7 @@ jobs:
           - os: ubuntu-22.04
             name: linux-x86_64
             target: x86_64-unknown-linux-gnu
-            bundles: deb,appimage
+            bundles: deb
           - os: windows-latest
             name: windows-x86_64
             target: x86_64-pc-windows-msvc
@@ -73,11 +73,39 @@ jobs:
       - run: npm run build
 
       - name: Build the bundles
-        env:
-          # linuxdeploy is itself an AppImage, and the runner has no FUSE mount for it. This makes it
-          # unpack and run instead of mounting, which is the supported way in a container.
-          APPIMAGE_EXTRACT_AND_RUN: "1"
         run: npx tauri build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
+
+      # linuxdeploy is the fragile part of a Linux bundle: it is itself an AppImage, it strips every
+      # ELF it finds (the extension host's JRE is 60 MB of them), and it reports one sentence whatever
+      # went wrong. It must not be able to fail the release, because the `.deb` and the tarball below
+      # are complete installs on their own.
+      - name: AppImage (best effort)
+        if: matrix.os == 'ubuntu-22.04'
+        continue-on-error: true
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+          NO_STRIP: "1"
+        run: npx tauri build --target ${{ matrix.target }} --bundles appimage
+
+      # A `.deb` is no use on Fedora, Arch or an immutable distro, and the AppImage is the one file
+      # that runs anywhere. This tarball is the third option and the simplest: the binary and the
+      # runtime folder it expects beside it, nothing to install.
+      - name: A portable Linux build
+        if: matrix.os == 'ubuntu-22.04'
+        run: |
+          set -euo pipefail
+          release="src-tauri/target/${{ matrix.target }}/release"
+          version=$(node -p "require('./package.json').version")
+          stage="portable/HardlyTracking"
+          mkdir -p "$stage"
+          cp "$release/hardlytracking" "$stage/"
+          cp -r "$release/runtime" "$stage/"
+          cp README.md LICENSE "$stage/" 2>/dev/null || true
+          tar -C portable -czf "HardlyTracking_${version}_linux-x86_64.tar.gz" HardlyTracking
+          ls -lh "HardlyTracking_${version}_linux-x86_64.tar.gz"
+          # The same two files the installer is checked for, in the tarball.
+          tar -tzf "HardlyTracking_${version}_linux-x86_64.tar.gz" | grep -q 'HardlyTracking/runtime/runner.jar'
+          tar -tzf "HardlyTracking_${version}_linux-x86_64.tar.gz" | grep -q 'HardlyTracking/runtime/jre/bin/java'
 
       # A bundle that compiles but carries no JVM opens a window with no extension host, and the user
       # cannot tell that from a broken source. Check the packaged output, not the build tree.
@@ -94,11 +122,14 @@ jobs:
           echo "✓ $deb carries runner.jar and a JRE"
 
           appimage=$(find "$out/appimage" -name '*.AppImage' -print -quit)
-          [ -n "$appimage" ] || { echo "✗ no AppImage"; exit 1; }
-          "$appimage" --appimage-extract >/dev/null
-          find squashfs-root -path '*runtime/runner.jar' -print -quit | grep -q . || { echo "✗ no runner.jar in the AppImage"; exit 1; }
-          find squashfs-root -path '*runtime/jre/bin/java' -print -quit | grep -q . || { echo "✗ no JRE in the AppImage"; exit 1; }
-          echo "✓ $appimage carries runner.jar and a JRE"
+          if [ -n "$appimage" ]; then
+            APPIMAGE_EXTRACT_AND_RUN=1 "$appimage" --appimage-extract >/dev/null
+            find squashfs-root -path '*runtime/runner.jar' -print -quit | grep -q . || { echo "✗ no runner.jar in the AppImage"; exit 1; }
+            find squashfs-root -path '*runtime/jre/bin/java' -print -quit | grep -q . || { echo "✗ no JRE in the AppImage"; exit 1; }
+            echo "✓ $appimage carries runner.jar and a JRE"
+          else
+            echo "• no AppImage this run (linuxdeploy); the .deb and the tarball are the Linux installs"
+          fi
 
       - name: The bundle carries the host (macOS)
         if: startsWith(matrix.os, 'macos')
@@ -135,6 +166,7 @@ jobs:
             src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*.exe
             src-tauri/target/${{ matrix.target }}/release/bundle/msi/*.msi
             src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
+            HardlyTracking_*_linux-x86_64.tar.gz
 
   release:
     needs: build
@@ -157,15 +189,19 @@ jobs:
           set -euo pipefail
           version="${TAG#v}"
           cd dist
-          for file in *.exe *.msi *.deb *.AppImage *.dmg; do
+          for file in *.exe *.msi *.deb *.AppImage *.dmg *.tar.gz; do
             [ -e "$file" ] || continue
             case "$file" in
               *arm64*|*aarch64*) platform=macos-arm64 ;;
               *.dmg)             platform=macos-x86_64 ;;
               *.exe|*.msi)       platform=windows-x86_64 ;;
+              *.tar.gz)          platform=linux-x86_64-portable ;;
               *)                 platform=linux-x86_64 ;;
             esac
-            ext="${file##*.}"
+            case "$file" in
+              *.tar.gz) ext=tar.gz ;;
+              *)        ext="${file##*.}" ;;
+            esac
             cp "$file" "HardlyTracking_${version}_${platform}.${ext}"
           done
           ls -la
