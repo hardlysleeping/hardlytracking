@@ -4,17 +4,149 @@
 <dict>
 	<key>NSAppTransportSecurity</key>
 	<dict>
-		<!-- The phone pairs with a desktop over plain http on the local network; the token is the
-		     gate, and every /api route requires it. -->
-		<key>NSAllowsArbitraryLoads</key>
+		<!-- Plain HTTP is allowed only on the addresses the app can meet it on, and nowhere else.
+		     There is no blanket allow: remote sources are fetched by the extension runtime's own
+		     HTTP stack (Java, inside the app process), which ATS does not govern, and every public
+		     host the app itself talks to is https.
+
+		     1. The loopback runtime: http://127.0.0.1:8747 (and its IPv6 twin), where /dalvik and
+		        the runtime's /image/<uuid> page proxy answer.
+		     2. Komga and the HT-Server: the address is the user's own, so it is an IP literal on
+		        the LAN or the tailnet. From iOS 17 ATS no longer permits IP connections by default,
+		        and Apple's documented fix is an entry per address or CIDR range here — so the
+		        private ranges are listed, and no public name is.
+		     3. A PC paired by name: .local and unqualified host names, which is what
+		        NSAllowsLocalNetworking exists for. -->
+		<key>NSAllowsLocalNetworking</key>
 		<true/>
+		<key>NSExceptionDomains</key>
+		<dict>
+			<key>localhost</key>
+			<dict>
+				<key>NSExceptionAllowsInsecureHTTPLoads</key>
+				<true/>
+			</dict>
+			<key>127.0.0.1</key>
+			<dict>
+				<key>NSExceptionAllowsInsecureHTTPLoads</key>
+				<true/>
+			</dict>
+			<key>::1</key>
+			<dict>
+				<key>NSExceptionAllowsInsecureHTTPLoads</key>
+				<true/>
+			</dict>
+			<!-- RFC 1918, the tailnet's CGNAT range and its IPv6 ULA. -->
+			<key>10.0.0.0/8</key>
+			<dict>
+				<key>NSExceptionAllowsInsecureHTTPLoads</key>
+				<true/>
+			</dict>
+			<key>172.16.0.0/12</key>
+			<dict>
+				<key>NSExceptionAllowsInsecureHTTPLoads</key>
+				<true/>
+			</dict>
+			<key>192.168.0.0/16</key>
+			<dict>
+				<key>NSExceptionAllowsInsecureHTTPLoads</key>
+				<true/>
+			</dict>
+			<key>100.64.0.0/10</key>
+			<dict>
+				<key>NSExceptionAllowsInsecureHTTPLoads</key>
+				<true/>
+			</dict>
+			<key>fd7a:115c:a1e0::/48</key>
+			<dict>
+				<key>NSExceptionAllowsInsecureHTTPLoads</key>
+				<true/>
+			</dict>
+		</dict>
 	</dict>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>HardlyTracking connects to the desktop running your extension host on this network.</string>
+	<string>HardlyTracking connects to your Komga server and to the PC running HardlyTracking on your local network.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>fetch</string>
 	</array>
+	<!-- The comics a user already owns, handed over by Files or iCloud Drive. Declaring the document
+	     types is what puts "Copy to HardlyTracking" in the share sheet for a CBZ or PDF, and
+	     `LSSupportsOpeningDocumentsInPlace` is what makes the app open the file where it already is
+	     (in iCloud Drive, say) instead of demanding a copy first. Without the `UTExportedTypeDeclarations`
+	     for cbz/cbr, iOS has no idea what a .cbz is and never offers this app for one. -->
+	<key>CFBundleDocumentTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>Comic book archive</string>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>LSHandlerRank</key>
+			<string>Alternate</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>com.hardlytracking.cbz</string>
+				<string>com.hardlytracking.cbr</string>
+				<string>public.zip-archive</string>
+			</array>
+		</dict>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>PDF</string>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>LSHandlerRank</key>
+			<string>Alternate</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>com.adobe.pdf</string>
+			</array>
+		</dict>
+	</array>
+	<key>UTExportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.hardlytracking.cbz</string>
+			<key>UTTypeDescription</key>
+			<string>Comic book archive (ZIP)</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.zip-archive</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>cbz</string>
+				</array>
+			</dict>
+		</dict>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.hardlytracking.cbr</string>
+			<key>UTTypeDescription</key>
+			<string>Comic book archive (RAR)</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>cbr</string>
+				</array>
+			</dict>
+		</dict>
+	</array>
+	<key>LSSupportsOpeningDocumentsInPlace</key>
+	<true/>
+	<!-- The app's own Documents folder shows up in Files, which is how a comic already on the phone
+	     (or in iCloud Drive) is dragged into the app without a round trip through a computer. -->
+	<key>UIFileSharingEnabled</key>
+	<true/>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleDisplayName</key>

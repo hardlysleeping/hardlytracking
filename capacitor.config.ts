@@ -23,8 +23,9 @@ const config: CapacitorConfig = {
   plugins: {
     // The on-device extension runtime serves `/dalvik` on `http://127.0.0.1:8747`, which is a
     // different origin from `capacitor://localhost`. CapacitorHttp sends those calls through native
-    // URLSession, so the loopback runtime needs no CORS headers of its own — and ATS never sees a
-    // cross-origin plain-http fetch from the webview.
+    // URLSession, so the loopback runtime needs no CORS headers of its own — and URLSession is what
+    // ATS governs, so the loopback address is exempted by name in `ios/App/App/Info.plist`
+    // (`NSExceptionDomains`), not by a blanket allow.
     CapacitorHttp: { enabled: true },
   },
 };

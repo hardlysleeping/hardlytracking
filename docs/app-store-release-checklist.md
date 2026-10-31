@@ -20,7 +20,7 @@ reading-history consent prompt.
 | 4 | Software detail route + universal link | **Not done** — routes are `#/<name>/<id>`; the Extensions list is the only entry point |
 | 5 | Report Source | **Not done** |
 | 6 | Runtime boundary | **Done in shape** — `/dalvik` is the only JVM bridge; verify and record, do not rebuild |
-| 7 | iOS networking | **Not done** — `NSAllowsArbitraryLoads = true` in `ios/App/App/Info.plist` |
+| 7 | iOS networking | **Done in the tree** — `NSAllowsArbitraryLoads` is gone; `NSAllowsLocalNetworking` plus loopback and private-range `NSExceptionDomains`, pinned by `tests/unit/ios-ats.test.mjs`. The device half needs the iPhone |
 | 8 | iOS project hygiene | **Not done** — `UIBackgroundModes=fetch`, `armv7`, `IPHONEOS_DEPLOYMENT_TARGET = 14.0`, no `PrivacyInfo.xcprivacy`, no entitlements |
 | 9 | Billing on iOS | **Decide** — sync unlocks through Stripe (`billing.hardlysleep.ing`); that cannot ship in-app |
 
@@ -93,13 +93,62 @@ compliance test below passes.
 
 ## 7. iOS networking — blocker
 
-- [ ] Replace `NSAllowsArbitraryLoads = true` with the narrow exceptions actually needed
-- [ ] Keep plain HTTP working for the loopback runtime, Komga and HT-Server (`NSAllowsLocalNetworking` / scoped `NSExceptionDomains`)
-- [ ] Confirm remote HTTP sources still work through the runtime/proxy path rather than through ATS
-- [ ] Keep `NSLocalNetworkUsageDescription` accurate
+- [x] Replace `NSAllowsArbitraryLoads = true` with the narrow exceptions actually needed
+- [x] Keep plain HTTP working for the loopback runtime, Komga and HT-Server (`NSAllowsLocalNetworking` / scoped `NSExceptionDomains`)
+- [x] Confirm remote HTTP sources still work through the runtime/proxy path rather than through ATS
+- [x] Keep `NSLocalNetworkUsageDescription` accurate
 
 *Done when:* the plist has no blanket allow, and a device can still reach the desktop host, Komga, and
-a plain-HTTP source.
+a plain-HTTP source. The plist half is done and pinned by a test; the device half needs the iPhone
+from the smoke test below and has not been observed.
+
+### What the plist now says
+
+`ios/App/App/Info.plist` carries `NSAllowsLocalNetworking = true` and an `NSExceptionDomains` of
+loopback and private ranges only: `localhost`, `127.0.0.1`, `::1`, `10.0.0.0/8`, `172.16.0.0/12`,
+`192.168.0.0/16`, `100.64.0.0/10` (tailnet IPv4) and `fd7a:115c:a1e0::/48` (tailnet IPv6). No
+`NSAllowsArbitraryLoads`, no media or web-content variant, and no public host name.
+
+Those ranges and not a domain list because Komga's and the HT-Server's addresses are the user's own,
+typed onto a card — they are IP literals, not names. Apple's documentation for
+`NSAllowsLocalNetworking` is explicit that from iOS 17 ATS no longer allows connections to IP
+addresses by default and that the fix is an individual address or CIDR range in `NSExceptionDomains`;
+on iOS 15–16 those connections are already allowed, so the ranges are inert there and one plist covers
+both. A PC paired by name (`mypc.local`, `mypc`) is what `NSAllowsLocalNetworking` is for.
+
+`tests/unit/ios-ats.test.mjs` (6 tests) reads the real plist and fails if a blanket allow comes back,
+if an exception names anything that is not loopback or a private range, if an exception grants more
+than insecure HTTP, or if the prompt string stops naming Komga and the PC.
+
+### Why a plain-HTTP source still works — the path, not ATS
+
+ATS governs the URL Loading System (`URLSession` and what sits on it). It does not govern a JVM's own
+sockets, and the extension is the thing that talks to a source.
+
+| what | who makes the request | ATS |
+|---|---|---|
+| `/dalvik` calls to the on-device runtime | `CapacitorHttp` → URLSession → `http://127.0.0.1:8747` | yes — loopback entry (`src/lib/mihon-runtime.ts`: `NATIVE_RUNTIME_PORT`, `nativeRuntimeBase()`) |
+| a source's own HTTP, cookies, redirects | the extension, inside the JVM (`MExtensionServer` → Java HTTP) | **no** — `docs/ios-embedded-runtime.md` |
+| page images from a dalvik source | the runtime mints `/image/<uuid>`, loaded over loopback | yes — loopback entry (`src/api/dalvik.ts`) |
+| Komga REST and page images | the `komga` provider's `fetch` at the user's `baseUrl` | yes — private-range entry (`src/api/komga.ts`) |
+| HT-Server REST | `htServerRoot()` on the paired PC | yes — private-range entry (`src/api/htserver.ts`) |
+| repository indexes and APKs | `raw.githubusercontent.com` / `objects.githubusercontent.com`, https | no exception needed |
+| Internet Archive | `archive.org`, https | no exception needed |
+
+Two shapes this plist deliberately does not cover, both of which must be answered with a narrower
+mechanism than a wider allow:
+
+- **A page image on a public plain-HTTP host that also needs headers.** `pageSrc()` fetches those
+  bytes itself through `imageCache.resolve` when there is no local proxy (`src/lib/pages.ts`), and that
+  fetch is URLSession's. The answer for such a source is the runtime's own image proxy, not an ATS
+  entry for a public host.
+- **A login page served over plain HTTP in the extension webview.** The iOS `WebviewLogin` plugin is
+  not built yet; when it is, a webview-only exemption (`NSAllowsArbitraryLoadsInWebContent`) with its
+  own review justification is the tool. Do not add it before a source needs it.
+
+`NSLocalNetworkUsageDescription` now names both reasons for the prompt: "HardlyTracking connects to
+your Komga server and to the PC running HardlyTracking on your local network." There is no
+`NSBonjourServices` entry because nothing browses for services — the user types an address.
 
 ## 8. iOS project hygiene — blocker
 
@@ -132,10 +181,12 @@ a source's cookies are not handed over before the consent tap
 a downloaded extension reaches no native API
 a software detail link opens and installs nothing
 Report Source opens with only repo, id, version, reason
-ATS is not globally disabled
+ATS is not globally disabled                    # tests/unit/ios-ats.test.mjs
 PrivacyInfo.xcprivacy exists in the built app
 UIBackgroundModes does not declare an unused mode
 ```
+
+`ATS is not globally disabled` is six assertions in `tests/unit/ios-ats.test.mjs`, run by `npm test`.
 
 ## Physical iPhone smoke test
 
