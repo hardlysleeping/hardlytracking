@@ -14,6 +14,7 @@
   import { viewport } from "../lib/layout.svelte";
   import { go } from "../lib/nav";
   import { onMount } from "svelte";
+  import SyncAccount from "../components/SyncAccount.svelte";
   import { hostInfo, hostToken, pairingLink, remoteHost, setHostToken, setRemoteHost, type HostInfo } from "../lib/host";
   import { imageCache } from "../lib/cache/images";
   import { CACHE_LIMIT_CHOICES, describeCache, formatBytes, type CacheEntry } from "../lib/cache/policy";
@@ -462,6 +463,8 @@
     </button>
     <p class="hint">Manual backup is free and always available. Automatic sync is a paid extra and never required to read.</p>
   </section>
+
+  <SyncAccount />
 </section>
 
 <style>

@@ -5,6 +5,11 @@ dist.orphan-*/
 *.log
 .vite/
 
+# Environment: public values only (the anon key ships in every bundle by design), but a file that
+# holds them is still not source. Never the service_role key — that one bypasses row-level security.
+.env
+.env.local
+
 # working notes: private, never published (same rule as HardlyReader)
 BACKLOG.md
 
@@ -25,3 +30,6 @@ plugins/mihon-runtime/ios/Runtime/
 # a worktree symlink, never part of the tree
 node_modules
 dist-bench/
+
+# The desktop extension host jar: a 100 MB build output, downloaded or copied in, never committed.
+plugins/mihon-runtime/linux/*.jar
