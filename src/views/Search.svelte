@@ -15,6 +15,7 @@
   import { providerFor } from "../api/registry";
   import type { Series, Source } from "../api/source";
   import SeriesGrid from "../components/SeriesGrid.svelte";
+  import SeriesActions from "../components/SeriesActions.svelte";
   import Cover from "../components/Cover.svelte";
   import { settings } from "../state/settings.svelte";
   import { isFresh, searchCacheKey, type CachedSearch } from "../lib/search/index";
@@ -45,6 +46,8 @@
 
   /** The result whose pane is open, and the fuller version once the source has answered. */
   let shown = $state<Series | null>(null);
+  /** The title whose quick actions are open, or null. */
+  let actions = $state<Series | null>(null);
   let detailed = $state<Series | null>(null);
   let detailState = $state<"idle" | "loading" | "error">("idle");
   let detailError = $state("");
@@ -360,6 +363,7 @@
               current={shown?.id ?? null}
               selection={selectMode ? selected : null}
               onpick={(series) => show(series)}
+              onlongpress={(series) => (actions = series)}
               onselect={(series) => toggleSelect(series.id)}
             />
           {/if}
@@ -395,6 +399,7 @@
             <p class="ddesc muted">This source gives no description for this title.</p>
           {/if}
           <div class="dact">
+            <button class="btn ghost" onclick={() => (actions = record)}>Read, keep, download…</button>
             {#if inLibrary}
               <button class="btn" onclick={() => go(pathTo("series", record.id))}>Open</button>
               <button class="btn ghost" onclick={() => void library.unsave(record.id)}>Remove from library</button>
@@ -408,6 +413,15 @@
     {/if}
   </div>
 
+  <SeriesActions
+    series={actions}
+    onclose={() => (actions = null)}
+    ondetails={(series) => {
+      actions = null;
+      go(pathTo("series", series.id));
+    }}
+  />
+
   {#if selectMode}
     <div class="selbar">
       <span class="selcount">{selected.size === 0 ? "Tick the results you want" : `${selected.size} selected`}</span>
@@ -417,6 +431,7 @@
       </button>
     </div>
   {/if}
+
 </section>
 
 <style>

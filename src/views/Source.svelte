@@ -11,8 +11,9 @@
   import { needsLogin } from "../api/mihon-bridge";
   import type { Series } from "../api/source";
   import SeriesGrid from "../components/SeriesGrid.svelte";
+  import SeriesActions from "../components/SeriesActions.svelte";
   import SourceSettings from "../components/SourceSettings.svelte";
-  import { go } from "../lib/nav";
+  import { go, pathTo } from "../lib/nav";
 
   interface Props {
     sourceId: string;
@@ -21,6 +22,8 @@
   let { sourceId, embedded = false }: Props = $props();
 
   let mode = $state<"popular" | "latest" | "search">("popular");
+  /** The title whose quick actions are open, or null. */
+  let actions = $state<Series | null>(null);
   let query = $state("");
   let items = $state<Series[]>([]);
   let hasNext = $state(false);
@@ -161,7 +164,15 @@
   {/if}
   {#if busy && items.length === 0}<p class="empty">Loading…</p>{/if}
 
-  <SeriesGrid series={items} cover={132} empty={mode === "search" ? "This source found nothing." : "This source returned nothing."} />
+  <!-- A tap asks what to do with the title — read it, keep it, download it, file it — instead of
+       assuming the series page. The page is still one tap away inside the sheet. -->
+  <SeriesGrid
+    series={items}
+    cover={132}
+    empty={mode === "search" ? "This source found nothing." : "This source returned nothing."}
+    onpick={(series) => (actions = series)}
+  />
+  <SeriesActions series={actions} onclose={() => (actions = null)} ondetails={(series) => go(pathTo("series", series.id))} />
 
   {#if hasNext}
     <button class="btn more" disabled={busy} onclick={() => void run(page + 1)}>{busy ? "Loading…" : "Load more"}</button>
