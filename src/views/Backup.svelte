@@ -261,7 +261,7 @@
               <p class="sub">The file names {pending.summary.reposNotInstalled.length === 1 ? "a repository" : `${pending.summary.reposNotInstalled.length} repositories`} this device has not added:</p>
               <ul class="sources">
                 {#each pending.summary.reposNotInstalled as url (url)}
-                  <li><span class="sub mono">{url}</span></li>
+                  <li><span class="sub mono selectable">{url}</span></li>
                 {/each}
               </ul>
               <button class="btn" disabled={addingRepos || busy !== null} onclick={() => void addRepositories()}>

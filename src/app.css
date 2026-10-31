@@ -142,6 +142,46 @@ body {
   text-size-adjust: 100%;
 }
 
+/*
+ * Native feel, not web page.
+ *
+ * A WKWebView will happily select a label, show Copy / Look Up / Share on a long press, flash a grey
+ * tap highlight and drag a cover image out of the window. A native iOS app does none of those, and
+ * each one is a tell. So: no selection and no callout on the chrome, `manipulation` to drop the tap
+ * delay, and image dragging off.
+ *
+ * Selection comes back only where it is useful — a field you are typing in, the boot-error box, and
+ * anything marked `.selectable` (a repository URL, an error worth pasting into an issue). Novel text
+ * will join that list when the text reader lands; turning selection off there would be wrong.
+ */
+html {
+  /* Kills the 300 ms tap delay; the double-tap zoom itself is cancelled in `lib/native-gestures.ts`. */
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+input,
+textarea,
+select,
+[contenteditable="true"],
+.selectable,
+#boot-error {
+  -webkit-user-select: text;
+  user-select: text;
+  -webkit-touch-callout: default;
+}
+
+img {
+  -webkit-user-drag: none;
+  user-drag: none;
+}
+
 h1,
 h2,
 h3 {
