@@ -79,6 +79,32 @@ those stay on the device and in the user's own cloud storage. If a subscription 
 nothing else changes. Plan section: "Sync & monetization — post-launch". The sync document, merge engine and folder/WebDAV
 transports already exist in `src/lib/sync/` and are tested; they are deliberately not wired into the app.
 
+## Install
+
+The PC app is a real desktop app — Tauri, not a browser tab — and it carries its own JVM, so Mihon
+extension APKs run on the machine with nothing else to install. Builds come from the
+[releases page](https://github.com/hardlysleeping/hardlytracking/releases):
+
+| Platform | File |
+| --- | --- |
+| Windows 10/11 x64 | `HardlyTracking_<version>_windows-x86_64.exe` (NSIS installer, no admin needed) |
+| macOS 11+ | `HardlyTracking_<version>_macos-arm64.dmg` (Apple silicon) · `..._macos-x86_64.dmg` (Intel) |
+| Linux x64 | `HardlyTracking_<version>_linux-x86_64.AppImage` · `.deb` (Debian/Ubuntu, glibc 2.35+) |
+
+All of them are **unsigned**: there is no code-signing certificate behind this project, so Windows
+SmartScreen shows "Windows protected your PC" (More info → Run anyway) and macOS refuses the first
+launch until you right-click the app → Open. That is the whole cost of not paying Apple and Microsoft
+a yearly fee; the binaries are built in the open by `.github/workflows/desktop.yml`.
+
+The extension host is inside the bundle: M-Extension-Server's own release ships the server jar and a
+trimmed JRE together per platform, and `scripts/prepare-runtime.mjs` pins that release by version and
+checks the jar's SHA-256. The app prefers its own JRE, then one beside the executable, then `java` on
+`PATH` — so a machine with no Java still works, and a developer can point at their own JDK with
+`HARDLYTRACKING_JAVA`.
+
+The library lives in SQLite in the platform's app-data folder, so it is a file you can find, copy and
+back up rather than storage hidden in a browser origin.
+
 ## Run it
 
 ```bash
