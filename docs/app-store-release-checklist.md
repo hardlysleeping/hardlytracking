@@ -19,7 +19,7 @@ reading-history consent prompt.
 | 3 | Per-source cookie consent | **Not done** — login is user-initiated and the jar is per-domain, but nothing is asked or remembered |
 | 4 | Software detail route + universal link | **Not done** — routes are `#/<name>/<id>`; the Extensions list is the only entry point |
 | 5 | Report Source | **Not done** |
-| 6 | Runtime boundary | **Done in shape** — `/dalvik` is the only JVM bridge; verify and record, do not rebuild |
+| 6 | Runtime boundary | **Done** — recorded in `docs/runtime-boundary.md`; the test `tests/unit/runtime-boundary.test.mjs` ("a downloaded extension reaches no native API") passes |
 | 7 | iOS networking | **Done in the tree** — `NSAllowsArbitraryLoads` is gone; `NSAllowsLocalNetworking` plus loopback and private-range `NSExceptionDomains`, pinned by `tests/unit/ios-ats.test.mjs`. The device half needs the iPhone |
 | 8 | iOS project hygiene | **Not done** — `UIBackgroundModes=fetch`, `armv7`, `IPHONEOS_DEPLOYMENT_TARGET = 14.0`, no `PrivacyInfo.xcprivacy`, no entitlements |
 | 9 | Billing on iOS | **Decide** — sync unlocks through Stripe (`billing.hardlysleep.ing`); that cannot ship in-app |
@@ -83,13 +83,20 @@ installs anything by itself.
 
 ## 6. The runtime boundary — verify and record, do not rebuild
 
-- [ ] Confirm what a loaded extension can reach through `/dalvik`: HTTP, source cookies, source preferences/state, WebView login, manga/chapter/page calls — and nothing else
-- [ ] Confirm no path from extension code to a Capacitor plugin, the app's SQLite, Photos, Contacts, Location or Notifications
-- [ ] Keep the chain as it is: APK → OpenJDK Zero → M-Extension-Server → `/dalvik` methods → app
-- [ ] Same rule for any future Aidoku/Paperback/Suwatte execution: limited host, no native surface
+- [x] Confirm what a loaded extension can reach through `/dalvik`: HTTP, source cookies, source preferences/state, WebView login, manga/chapter/page calls — and nothing else
+- [x] Confirm no path from extension code to a Capacitor plugin, the app's SQLite, Photos, Contacts, Location or Notifications
+- [x] Keep the chain as it is: APK → OpenJDK Zero → M-Extension-Server → `/dalvik` methods → app
+- [x] Same rule for any future Aidoku/Paperback/Suwatte execution: limited host, no native surface
 
 *Done when:* a written answer per bullet in `docs/` with the file or call that proves it, and the
 compliance test below passes.
+
+**Recorded in `docs/runtime-boundary.md`** — one answer per bullet with the file and call that proves
+it, the honest limits (no per-extension sandbox in the JVM; in-process on iOS), and a live probe
+against the real host. The compliance test is `tests/unit/runtime-boundary.test.mjs`; it pins the
+twelve-method surface, that a full provider session sends only `POST {base}/dalvik`, that the provider
+chain imports no native or database module, that the one native plugin is four control calls, that no
+privacy plugin or usage description exists, and that no extension-supplied string is ever evaluated.
 
 ## 7. iOS networking — blocker
 
