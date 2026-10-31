@@ -1,0 +1,22 @@
+[Unit]
+Description=HardlyTracking — the app and its proxy on :8460
+Documentation=file://%h/apps/hardlytracking/README.md
+# The app itself needs nothing from the network, but the extension hosts it proxies to might be
+# containers that come up after this unit; `network-online` keeps the first request from racing them.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/apps/hardlytracking
+# Optional, and the `-` matters: a machine with no overrides must still start. Put HOST, PORT,
+# RUNTIME_URL, DALVIK_URL or HARDLYTRACKING_TOKEN here.
+EnvironmentFile=-%h/.config/hardlytracking/env
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/node server/proxy.mjs
+# A server, not a job: it comes back whatever took it down, including a clean exit.
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=default.target

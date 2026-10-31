@@ -95,6 +95,41 @@ npm run serve          # http://127.0.0.1:8460 (PORT / RUNTIME_URL override)
 
 Or the whole stack: `docker compose up -d` (app on :8460, runtime behind it).
 
+### Run it at startup
+
+The server can be a service, so the app is simply there — after a reboot, after a crash, without a
+terminal open:
+
+```sh
+scripts/service.sh install     # build if needed, install, enable, start
+scripts/service.sh status      # enabled? running? on which port?
+scripts/service.sh logs        # follow the journal
+scripts/service.sh uninstall   # stop, disable, remove the unit
+```
+
+It is a **systemd user** service (`deploy/hardlytracking.service`, installed to
+`~/.config/systemd/user/`), so it needs no root and touches no root-owned file. `Restart=always`
+brings it back from a crash; `enable` starts it when you log in. To have it run from boot with nobody
+logged in, enable lingering once:
+
+```sh
+sudo loginctl enable-linger "$USER"
+```
+
+Settings live in `~/.config/hardlytracking/env` — every line optional, and the installer writes a
+commented template the first time:
+
+```sh
+HOST=0.0.0.0                        # listen on the network, for a phone
+HARDLYTRACKING_TOKEN=<openssl rand -hex 16>   # required with HOST=0.0.0.0: it gates every /api/*
+RUNTIME_URL=http://127.0.0.1:4567
+DALVIK_URL=http://127.0.0.1:8792
+```
+
+Edit that file, then `scripts/service.sh restart`. While the service holds :8460, a manual
+`npm run serve` needs another port (`PORT=8461 npm run serve`). In Docker the same job is
+`restart: unless-stopped`, which compose already sets.
+
 ### Docker
 
 The app alone, as one container — the built Svelte bundle plus the proxy that gives it a single
