@@ -191,10 +191,15 @@ test("a backup becomes the app's own document", async () => {
   assert.equal(doc.readState[0].chapterId, chapterIdOf(manga, "/chapter/a1"));
   assert.equal(doc.readState[0].read, true);
 
-  // Resume point from lastPageRead, and only where there is one.
+  // Resume point from lastPageRead, and only where there is one. Continue Reading reads
+  // `positions`, so the import must produce one — a progress row alone leaves the strip empty.
   assert.equal(doc.progress.length, 1);
   assert.equal(doc.progress[0].page, 12);
   assert.equal(doc.progress[0].total, 0);
+  assert.equal(doc.positions.length, 1);
+  assert.equal(doc.positions[0].seriesId, seriesId);
+  assert.equal(doc.positions[0].chapterId, chapterIdOf(manga, "/chapter/a1"));
+  assert.equal(doc.positions[0].page, 12);
 
   // History is newest first, as the app's own list is.
   assert.equal(doc.history.length, 2);

@@ -16,9 +16,10 @@
   import { categories } from "../state/categories.svelte";
   import { documentFromStore } from "../lib/sync/from-store";
   import { deviceId } from "../lib/sync/device";
-  import { parseSync, serializeSync, type SyncDocument } from "../lib/sync/document";
+  import { serializeSync, type SyncDocument } from "../lib/sync/document";
   import { applyDocument } from "../lib/sync/apply";
   import { outcomeSentence, summarizeImport, type ImportSummary } from "../lib/backup/report";
+  import { readBackupFile } from "../lib/backup/read";
   import { RepositoryError } from "../lib/extensions/repository";
   import { go } from "../lib/nav";
 
@@ -26,8 +27,21 @@
   let error = $state<string | null>(null);
   let notice = $state<string | null>(null);
 
-  /** A file that has been read and not yet applied — the whole two-step confirm lives in this. */
-  let pending = $state<{ doc: SyncDocument; summary: ImportSummary; name: string } | null>(null);
+  /**
+   * A file that has been read and not yet applied — the whole two-step confirm lives in this.
+   *
+   * `label` is what the file turned out to be ("Mihon backup (.tachibk, gzipped)"), and `warnings`
+   * are the things the reader would want to know before pressing import: settings that were
+   * ignored, entries that were skipped. Neither changes what is written; they exist so nothing
+   * about the file is a surprise afterwards.
+   */
+  let pending = $state<{
+    doc: SyncDocument;
+    summary: ImportSummary;
+    name: string;
+    label: string;
+    warnings: string[];
+  } | null>(null);
   /** The report that stays on screen after an import, so a missing source is still visible. */
   let applied = $state<{ doc: SyncDocument; summary: ImportSummary; message: string } | null>(null);
   let addingRepos = $state(false);
@@ -57,7 +71,13 @@
     }
   }
 
-  /** Step one: read the file and describe it. Nothing is written here. */
+  /**
+   * Step one: read the file and describe it. Nothing is written here.
+   *
+   * The file is not assumed to be ours: `readBackupFile` sniffs it and answers with a document
+   * whichever format it is, so a Mihon `.tachibk` arrives at the same confirm step a HardlyTracking
+   * backup does. The device id is stamped on rows that came from an app that has no such concept.
+   */
   async function chooseFile(event: Event): Promise<void> {
     const input = event.currentTarget as HTMLInputElement;
     const file = input.files?.[0];
@@ -70,11 +90,12 @@
     applied = null;
     pending = null;
     try {
-      const doc = parseSync(await file.text());
-      const summary = summarizeImport(doc, await store.listExtensions(), await store.listRepos());
-      pending = { doc, summary, name: file.name };
+      const device = await deviceId(store);
+      const read = await readBackupFile(new Uint8Array(await file.arrayBuffer()), { device });
+      const summary = summarizeImport(read.doc, await store.listExtensions(), await store.listRepos());
+      pending = { doc: read.doc, summary, name: file.name, label: read.label, warnings: read.warnings };
     } catch (e) {
-      // A bad file is a plain sentence: which rule it broke, from `parseSync`.
+      // A bad file is a plain sentence: which rule it broke, or which app made it.
       error = e instanceof Error ? e.message : String(e);
     } finally {
       busy = null;
@@ -89,13 +110,18 @@
     busy = "Writing the file into this device…";
     error = null;
     try {
-      const result = await applyDocument(store, chosen.doc);
+      // `pending` lives in `$state`, so its rows are Svelte proxies. IndexedDB's structured clone
+      // refuses a proxy with `DataCloneError: [object Array] could not be cloned` — at the write,
+      // with no error on the row that caused it. Snapshot first: what the store writes must be
+      // plain objects.
+      const doc = $state.snapshot(chosen.doc) as SyncDocument;
+      const result = await applyDocument(store, doc);
       // The reattach answer is recomputed against what is installed *now* — adding a repository in
       // the confirm step does not install anything, but the answer must never be stale.
-      const summary = summarizeImport(chosen.doc, await store.listExtensions(), await store.listRepos());
+      const summary = summarizeImport(doc, await store.listExtensions(), await store.listRepos());
       await library.refreshLibrary();
       await categories.load(store);
-      applied = { doc: chosen.doc, summary, message: outcomeSentence(summary, result) };
+      applied = { doc, summary, message: outcomeSentence(summary, result) };
       notice = `${chosen.name} — ${result.series} series, ${result.chapters} chapters, ${result.positions} positions, ${result.read} read marks.`;
       pending = null;
     } catch (e) {
@@ -159,17 +185,25 @@
 
     <section class="card">
       <h2>Import</h2>
-      <p class="sub">Read a backup and see what it holds before anything is written. Existing rows are overwritten by the file; nothing is deleted.</p>
+      <p class="sub">Read a backup and see what it holds before anything is written. Existing rows are overwritten by the file; nothing is deleted. A Mihon/Tachiyomi/Komikku <span class="mono">.tachibk</span> works here too.</p>
       {#if pending === null}
         <label class="btn" class:disabled={busy !== null}>
           Choose a backup file
-          <input type="file" accept="application/json,.json" hidden disabled={busy !== null} onchange={(event) => void chooseFile(event)} />
+          <input type="file" accept=".json,.tachibk,.bin,application/json,application/octet-stream" hidden disabled={busy !== null} onchange={(event) => void chooseFile(event)} />
         </label>
       {/if}
 
       {#if pending !== null}
         <div class="confirm">
           <p class="file">{pending.name}</p>
+          <p class="sub">{pending.label}</p>
+          {#if pending.warnings.length > 0}
+            <ul class="sources">
+              {#each pending.warnings as warning (warning)}
+                <li><span class="sub">{warning}</span></li>
+              {/each}
+            </ul>
+          {/if}
           <div class="chips" aria-label="What the file holds">
             <span class="chip static">{pending.summary.series} series</span>
             <span class="chip static">{pending.summary.chapters} chapters</span>

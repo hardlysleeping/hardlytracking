@@ -334,6 +334,8 @@ export function toDocument(backup: MihonBackup, options: ImportOptions): SyncDoc
   const at = options.at ?? Date.now();
   const device = options.device;
   const doc = emptyDocument(device, at);
+  /** The resume point per series, decided while walking the chapters and written after them. */
+  const resume = new Map<string, { chapterId: string; page: number; at: number }>();
 
   for (const category of backup.categories) {
     doc.categories.push({
@@ -390,6 +392,14 @@ export function toDocument(backup: MihonBackup, options: ImportOptions): SyncDoc
       }
       if (chapter.lastPageRead > 0) {
         doc.progress.push({ chapterId, seriesId, page: chapter.lastPageRead, total: 0, at, device });
+        // Continue Reading reads `positions`, one row per series, so the resume point has to be a
+        // position as well as a progress row — a progress row alone leaves the strip empty. The
+        // newest chapter with a resume point wins, because that is where the reader actually was.
+        const stamp = chapter.dateFetch > 0 ? chapter.dateFetch : at;
+        const best = resume.get(seriesId);
+        if (best === undefined || stamp >= best.at) {
+          resume.set(seriesId, { chapterId, page: chapter.lastPageRead, at: stamp });
+        }
       }
     }
 
@@ -416,6 +426,10 @@ export function toDocument(backup: MihonBackup, options: ImportOptions): SyncDoc
 
   // History is newest-first in the app; a backup's order is not meaningful.
   doc.history.sort((a, b) => b.at - a.at);
+
+  for (const [seriesId, best] of resume) {
+    doc.positions.push({ seriesId, chapterId: best.chapterId, page: best.page, at: best.at, device });
+  }
 
   for (const store of backup.stores) {
     doc.repos.push({ url: store.indexUrl, indexUrl: store.indexUrl, name: store.name, at, device });
