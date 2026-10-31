@@ -13,6 +13,7 @@
   import { sourceMarks } from "../state/source-marks.svelte";
   import { EYE_PATHS, MARKER_PATH, PIN_WORDS } from "../lib/categories";
   import { visibleSources } from "../lib/marks";
+  import { providerLabel } from "../api/source";
 
   let { current = null }: { current?: string | null } = $props();
 
@@ -36,6 +37,8 @@
   const byProvider = $derived(
     [...new Set(sources.map((source) => source.provider))].map((provider) => ({
       provider,
+      // The machine, not the kind: "HT-Server" is what a paired PC's sources sit under.
+      label: providerLabel(provider),
       rows: sources.filter((source) => source.provider === provider),
     })),
   );
@@ -93,7 +96,7 @@
 
     {#each byProvider as group (group.provider)}
       <section class="group">
-        <h2>{group.provider}<span>{group.rows.length}</span></h2>
+        <h2>{group.label}<span>{group.rows.length}</span></h2>
         <div class="rows">
           {#each group.rows as source (source.id)}
             <div class="rowwrap" class:current={current === source.id}>

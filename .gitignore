@@ -34,5 +34,9 @@ dist-bench/
 # The desktop extension host jar: a 100 MB build output, downloaded or copied in, never committed.
 plugins/mihon-runtime/linux/*.jar
 
+# The HT-Server's extension registry (data/host-extensions.json + the APKs beside it). Machine state:
+# a list of what this PC installed, never source.
+data/
+
 # Rust build output: 6 GB of object files, never source.
 src-tauri/target/

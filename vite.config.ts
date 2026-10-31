@@ -12,6 +12,15 @@ import { svelte } from "@sveltejs/vite-plugin-svelte";
  */
 const RUNTIME = process.env.HARDLYTRACKING_RUNTIME ?? "http://127.0.0.1:4567";
 const DALVIK = process.env.HARDLYTRACKING_DALVIK ?? "http://127.0.0.1:8792";
+/**
+ * The proxy that owns the read-only routes dev does not implement itself (`/api/repo`), so a dev tab
+ * can add a repository and download an APK exactly as a served build does.
+ *
+ * `/api/host/*` is deliberately **not** proxied: that registry belongs to whichever machine is
+ * serving the app, and a dev server is this device. Proxying it would make `npm run dev` claim to be
+ * an HT-Server.
+ */
+const LOCAL_PROXY = process.env.HARDLYTRACKING_PROXY ?? "http://127.0.0.1:8460";
 
 export default defineConfig({
   plugins: [svelte()],
@@ -32,6 +41,10 @@ export default defineConfig({
         target: DALVIK,
         changeOrigin: true,
         rewrite: (path: string) => path.replace(/^\/api\/dalvik/, ""),
+      },
+      "/api/repo": {
+        target: LOCAL_PROXY,
+        changeOrigin: true,
       },
     },
   },

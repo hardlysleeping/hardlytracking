@@ -253,7 +253,11 @@ test("a source no installed extension exposes is named, not answered with an emp
   try {
     const client = new DalvikClient({ baseUrl: runtime.baseUrl });
     const provider = createDalvikProvider({ client, extensions: [] });
-    await assert.rejects(provider.popular(source.id, 1), /no installed extension exposes source/);
+    // The machine is named too: a row that came from a host says which host, because "install it" is
+    // an instruction the user can only follow on the right machine.
+    await assert.rejects(provider.popular(source.id, 1), /no installed extension on Extension host exposes source/);
+    const host = createDalvikProvider({ client, extensions: [], kind: "htserver" });
+    await assert.rejects(host.popular(`htserver:src:${source.id}`, 1), /no installed extension on HT-Server exposes source/);
   } finally {
     await runtime.close();
   }

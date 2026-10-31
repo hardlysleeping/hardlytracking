@@ -5,17 +5,28 @@
  * when it is configured: an unconfigured Komga must not appear in the UI as an
  * empty shelf, because "no series" and "no server" are different answers.
  *
- * The dalvik host is the one provider that is probed rather than assumed: a
- * M-Extension-Server is a separate process on a loopback port, so "is it there?" is
- * a question only `/capabilities` can answer. A host that answers gets a provider
- * built from the APKs this device already installed; a host that does not answer is
- * a warning line, not a silent empty shelf.
+ * Two hosts are probed rather than assumed, because both are separate processes on another port
+ * (or another machine): a M-Extension-Server answers `/capabilities`, and so does a paired HT-Server.
+ * A host that answers gets a provider built from the APKs installed there; a host that does not is a
+ * warning line, not a silent empty shelf.
+ *
+ * The two are **different kinds** (`dalvik`, `htserver`) on purpose. Both speak the same `/dalvik`
+ * protocol and their extension ids are SHA-256s that are byte-identical on both machines, so one
+ * shared kind would make `providerFor` hand a phone's id to the PC and every call land on the wrong
+ * host.
  */
-import { apiUrl } from "../lib/host";
+import { apiUrl, htServerBase, hostToken, remoteHost } from "../lib/host";
 import { browserMihonTransport, createMihonProvider } from "./mihon";
 import { createLocalProvider } from "./local";
 import { createArchiveProvider } from "./archive";
-import { DalvikClient, createDalvikProvider, type DalvikCapabilities, type InstalledExtension } from "./dalvik";
+import {
+  DalvikClient,
+  createDalvikProvider,
+  type DalvikCapabilities,
+  type DalvikReadState,
+  type InstalledExtension,
+} from "./dalvik";
+import { listHtServerExtensions } from "./htserver";
 import { splitId, type SourceProvider } from "./source";
 import type { LibraryStore } from "../lib/db/store";
 import type { CookieJar } from "../lib/webview/store";
@@ -46,9 +57,17 @@ export interface RegistryConfig {
   userAgent?: () => string | undefined;
   /** Loopback port of the app's webview bridge, when this build hosts one. */
   webviewPort?: () => number | undefined;
+  /**
+   * Where this build's APK extensions are listed.
+   *
+   * Default: this device's database. A build that is itself an HT-Server passes the host registry
+   * instead, so the PC's own Extensions screen and a paired phone read one list — two lists drift
+   * the moment either side installs something.
+   */
+  extensionList?: () => Promise<InstalledExtension[]>;
 }
 
-/** The live dalvik host: the client to install through, and the list it reads. */
+/** A live host: the client to install through, and the list it reads. */
 export interface DalvikHost {
   baseUrl: string;
   client: DalvikClient;
@@ -61,13 +80,90 @@ export interface ProviderSet {
   providers: SourceProvider[];
   /** `null` when no host answered `/capabilities`. */
   dalvik: DalvikHost | null;
+  /** The paired HT-Server, when one answered. Its own kind, its own ids. */
+  htServer: DalvikHost | null;
   /** Configured hosts that did not answer. Shown, never swallowed. */
   warnings: string[];
+}
+
+/** This device's read marks, as the dalvik provider needs them. */
+function readStateFor(store: LibraryStore): DalvikReadState {
+  return {
+    read: async (chapterIds) => {
+      const marks = await Promise.all(chapterIds.map(async (id) => ((await store.isRead(id)) ? id : null)));
+      return new Set(marks.filter((id): id is string => id !== null));
+    },
+    mark: (chapterId, read) => store.setRead(chapterId, read),
+  };
+}
+
+/**
+ * A source's saved settings, read on every call.
+ *
+ * The runtime's own preference store is memory-only, so this device is the store: a restart would
+ * otherwise forget the address that makes a self-hosted source reachable at all. It is per device on
+ * purpose — the phone's settings for a host source are the phone's, and the PC's own provider sends
+ * the PC's.
+ */
+function preferencesFor(store: LibraryStore): (sourceId: string) => Promise<Array<Record<string, unknown>> | undefined> {
+  return async (sourceId) => {
+    const saved = await store.getSourcePrefs(sourceId);
+    return saved === undefined ? undefined : wirePreferences(saved);
+  };
+}
+
+export interface HtServerResult {
+  host: DalvikHost | null;
+  provider: SourceProvider | null;
+  warning: string | null;
+}
+
+/**
+ * The paired HT-Server, as a provider — or `null` when there is no pairing.
+ *
+ * The list comes from the PC's own routes (`/api/host/extensions`), not from a `/dalvik` call: the
+ * protocol has no way to say what is installed. Those rows carry no APK bytes, so `apkResend` is off
+ * — a phone must never hand its own APK to the PC.
+ */
+export async function openHtServer(config: RegistryConfig): Promise<HtServerResult> {
+  const base = htServerBase();
+  if (base === "") return { host: null, provider: null, warning: null };
+
+  const client = new DalvikClient({
+    baseUrl: base,
+    // The PC's runtime mints `http://127.0.0.1:8792/image/…`, and 127.0.0.1 on the phone is the
+    // phone. Every one of those addresses belongs to the PC's proxy here.
+    rewriteRuntimeAssets: true,
+    token: hostToken,
+    ...(config.fetchImpl === undefined ? {} : { fetchImpl: config.fetchImpl }),
+  });
+  try {
+    const capabilities = await client.capabilities();
+    const extensions = await listHtServerExtensions(remoteHost());
+    const provider = createDalvikProvider({
+      client,
+      extensions,
+      kind: "htserver",
+      apkResend: false,
+      // The PC has no read-state API either, so the marks are this device's — the same store the
+      // local provider writes to.
+      readState: readStateFor(config.store),
+      preferences: preferencesFor(config.store),
+    });
+    return { host: { baseUrl: base, client, capabilities, extensions }, provider, warning: null };
+  } catch (error) {
+    return {
+      host: null,
+      provider: null,
+      warning: `HT-Server ${remoteHost()}: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
 }
 
 export async function createProviders(config: RegistryConfig): Promise<ProviderSet> {
   const providers: SourceProvider[] = [];
   const warnings: string[] = [];
+  const extensionList = config.extensionList ?? (() => config.store.listExtensions());
 
   const mihonBase = config.mihonBase === undefined ? apiUrl("/api/mihon") : config.mihonBase;
   if (mihonBase !== null) providers.push(createMihonProvider(browserMihonTransport(mihonBase)));
@@ -93,7 +189,7 @@ export async function createProviders(config: RegistryConfig): Promise<ProviderS
       // Read once at boot so the sources of an APK installed last launch are there before the
       // first paint; the array stays live afterwards. Built-ins are excluded: they have no APK and
       // no runtime handle, so feeding one to the host would ask it to run a package it never saw.
-      const extensions = (await config.store.listExtensions()).filter((row) => row.builtin !== true);
+      const extensions = (await extensionList()).filter((row) => row.builtin !== true);
       providers.push(
         createDalvikProvider({
           client,
@@ -103,22 +199,8 @@ export async function createProviders(config: RegistryConfig): Promise<ProviderS
           ...(config.cookies === undefined ? {} : { cookies: config.cookies }),
           ...(config.userAgent === undefined ? {} : { userAgent: config.userAgent }),
           ...(config.webviewPort === undefined ? {} : { webviewPort: config.webviewPort }),
-          // A source's saved settings ride on every call, because the runtime's own store is
-          // memory-only: a restart would otherwise forget the address that makes a self-hosted
-          // source reachable at all.
-          preferences: async (sourceId) => {
-            const saved = await config.store.getSourcePrefs(sourceId);
-            return saved === undefined ? undefined : wirePreferences(saved);
-          },
-          // The host keeps no read state, so the marks are ours: the same store the local
-          // provider writes to, which is what `ownsProgress: true` promises.
-          readState: {
-            read: async (chapterIds) => {
-              const marks = await Promise.all(chapterIds.map(async (id) => ((await config.store.isRead(id)) ? id : null)));
-              return new Set(marks.filter((id): id is string => id !== null));
-            },
-            mark: (chapterId, read) => config.store.setRead(chapterId, read),
-          },
+          preferences: preferencesFor(config.store),
+          readState: readStateFor(config.store),
         }),
       );
       dalvik = { baseUrl: dalvikBase, client, capabilities, extensions };
@@ -127,7 +209,11 @@ export async function createProviders(config: RegistryConfig): Promise<ProviderS
     }
   }
 
-  return { providers, dalvik, warnings };
+  const htServer = await openHtServer(config);
+  if (htServer.provider !== null) providers.push(htServer.provider);
+  if (htServer.warning !== null) warnings.push(htServer.warning);
+
+  return { providers, dalvik, htServer: htServer.host, warnings };
 }
 
 export function providerFor(providers: SourceProvider[], id: string): SourceProvider {

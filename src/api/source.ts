@@ -102,7 +102,27 @@ export interface SourceProvider {
   setRead(chapterId: string, read: boolean): Promise<void>;
 }
 
-const KINDS: ProviderKind[] = ["mihon", "dalvik", "komga", "local", "archive"];
+const KINDS: ProviderKind[] = ["mihon", "dalvik", "htserver", "komga", "local", "archive"];
+
+/**
+ * What to call a provider on screen.
+ *
+ * A heading that says `htserver` or `dalvik` is the seam leaking into the UI: the user paired a
+ * machine and installed an extension, they did not choose a provider kind. Browse groups sources by
+ * this label, so "HT-Server" is what the PC's sources sit under.
+ */
+const LABELS: Record<ProviderKind, string> = {
+  mihon: "Mihon",
+  dalvik: "Extension host",
+  htserver: "HT-Server",
+  komga: "Komga",
+  local: "On this device",
+  archive: "Internet Archive",
+};
+
+export function providerLabel(kind: ProviderKind): string {
+  return LABELS[kind] ?? kind;
+}
 
 export function joinId(provider: ProviderKind, native: string | number): string {
   return `${provider}:${native}`;

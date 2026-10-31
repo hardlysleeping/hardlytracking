@@ -7,7 +7,7 @@
  * local and whose providers are whatever the build configured.
  */
 import { apiUrl } from "../lib/host";
-import { createProviders, type DalvikHost } from "./registry";
+import { createProviders, openHtServer, type DalvikHost, type RegistryConfig } from "./registry";
 import { BUILTIN_ARCHIVE_ID, BUILTIN_HT_SERVER_ID, ensureBuiltinExtensions, isBuiltin } from "./builtin";
 import { htServerEnabled, setHtServerEnabled } from "../lib/host";
 import type { InstalledExtension } from "./dalvik";
@@ -17,6 +17,7 @@ import { LibraryStore } from "../lib/db/store";
 import { dbCookieJar, type CookieJar } from "../lib/webview/store";
 import { hostOf } from "../lib/webview/cookies";
 import { loginSource, type LoginResult } from "./mihon-bridge";
+import { openHostRegistry } from "../lib/extensions/host-registry";
 
 export interface LibraryProfile {
   readonly kind: "device";
@@ -27,6 +28,19 @@ export interface LibraryProfile {
   readonly providers: SourceProvider[];
   /** The extension host, when one answered `/capabilities`. */
   readonly dalvik: DalvikHost | null;
+  /**
+   * The paired HT-Server, when one answered.
+   *
+   * Replaced by `refreshHtServer()` when the address or the token changes — the pairing is a live
+   * setting, and a card that saves an address while the provider keeps the old one reads as broken.
+   */
+  htServer: DalvikHost | null;
+  /** Where this build's APK extensions live: this device's database, or the host registry serving it. */
+  readonly extensionWhere: "device" | "host";
+  /** Every extension row the UI draws: the built-ins (this device's) plus the APK rows. */
+  listExtensions(): Promise<InstalledExtension[]>;
+  /** Re-probe the paired HT-Server. Resolves to a warning line, or `null` when it answered. */
+  refreshHtServer(): Promise<string | null>;
   /** Configured hosts that did not answer — a banner, not silence. */
   readonly warnings: string[];
   /**
@@ -98,7 +112,11 @@ export async function openLibraryProfile(options: OpenProfileOptions = {}): Prom
     archive: builtins.find((row) => row.extensionId === BUILTIN_ARCHIVE_ID)?.enabled !== false,
     htServer: htServerEnabled(),
   };
-  const registry = await createProviders({
+  // Where the APK rows live. Asked once, at boot: a proxy answering `/api/host/extensions` means
+  // this page is being served by a PC that is an HT-Server, and then its registry is the list — the
+  // same list a paired phone reads, so the two screens cannot disagree.
+  const hostRegistry = await openHostRegistry(store);
+  const config: RegistryConfig = {
     store,
     // `null` is the local-only build; only an absent option means "the default runtime".
     mihonBase: options.mihonBase === undefined ? apiUrl("/api/mihon") : options.mihonBase,
@@ -109,18 +127,53 @@ export async function openLibraryProfile(options: OpenProfileOptions = {}): Prom
     // call, because the runtime's own jar is memory-only and has no read route (matrix row HTTP-07).
     cookies: jar,
     userAgent: () => sessionUserAgent,
-  });
+    ...(hostRegistry === null ? {} : { extensionList: () => hostRegistry.list() }),
+  };
+  const registry = await createProviders(config);
 
   const dalvik = registry.dalvik;
-  return {
+  const providers = registry.providers;
+
+  /** The built-ins are this device's — the archive switch and the HT-Server pairing — so they never
+   * come from a host registry, which holds APKs only. */
+  async function listExtensions(): Promise<InstalledExtension[]> {
+    if (hostRegistry === null) return store.listExtensions();
+    const own = (await store.listExtensions()).filter((row) => row.builtin === true);
+    return [...own, ...(await hostRegistry.list())];
+  }
+
+  const profile: LibraryProfile = {
     kind: "device",
     slug: LOCAL_PROFILE_SLUG,
     label: options.label ?? "HardlyTracking",
     store,
-    providers: registry.providers,
+    providers,
     dalvik,
+    htServer: registry.htServer,
+    extensionWhere: hostRegistry === null ? "device" : "host",
+    listExtensions,
+    async refreshHtServer(): Promise<string | null> {
+      const next = await openHtServer(config);
+      const at = providers.findIndex((provider) => provider.kind === "htserver");
+      if (at >= 0) providers.splice(at, 1);
+      if (next.provider !== null) providers.push(next.provider);
+      this.htServer = next.host;
+      return next.warning;
+    },
     warnings: registry.warnings,
     async installApk(apk: Uint8Array, packageId: string, meta: InstallMeta = {}): Promise<InstalledExtension> {
+      // Served by a PC that is an HT-Server: the registry is the host's, and the APK's bytes travel
+      // once and stay there. This machine then owns them, which is what lets it hand them back to its
+      // own runtime after a restart.
+      if (hostRegistry !== null) {
+        const row = await hostRegistry.install(apk, packageId, meta);
+        if (dalvik !== null) {
+          const at = dalvik.extensions.findIndex((extension) => extension.extensionId === row.extensionId);
+          if (at >= 0) dalvik.extensions[at] = row;
+          else dalvik.extensions.push(row);
+        }
+        return row;
+      }
       if (dalvik === null) {
         throw new Error("no extension host answered /capabilities, so there is nothing to install onto");
       }
@@ -148,21 +201,43 @@ export async function openLibraryProfile(options: OpenProfileOptions = {}): Prom
       return row;
     },
     async setExtensionEnabled(extensionId: string, enabled: boolean): Promise<void> {
-      const row = await store.getExtension(extensionId);
-      if (row === undefined) return;
-      const next: InstalledExtension = { ...row, enabled };
-      await store.putExtension(next);
       // A built-in has no host to tell: its provider reads this flag on the next call.
       if (isBuiltin(extensionId)) {
+        const row = await store.getExtension(extensionId);
+        if (row !== undefined) await store.putExtension({ ...row, enabled });
         if (extensionId === BUILTIN_ARCHIVE_ID) switches.archive = enabled;
         // The HT-Server's switch is the pairing decision: the address and token stay, its sources
         // stop being offered. Nothing else on this device changes.
         if (extensionId === BUILTIN_HT_SERVER_ID) {
           switches.htServer = enabled;
           setHtServerEnabled(enabled);
+          // Its provider was built (or not) from that switch, so the list follows it now instead of
+          // at the next launch.
+          const at = providers.findIndex((provider) => provider.kind === "htserver");
+          if (at >= 0) providers.splice(at, 1);
+          if (enabled) {
+            const next = await openHtServer(config);
+            if (next.provider !== null) providers.push(next.provider);
+            this.htServer = next.host;
+          } else {
+            this.htServer = null;
+          }
         }
         return;
       }
+      if (hostRegistry !== null) {
+        await hostRegistry.setEnabled(extensionId, enabled);
+        const row = (await hostRegistry.list()).find((extension) => extension.extensionId === extensionId);
+        if (row !== undefined && dalvik !== null) {
+          const at = dalvik.extensions.findIndex((extension) => extension.extensionId === extensionId);
+          if (at >= 0) dalvik.extensions[at] = row;
+        }
+        return;
+      }
+      const row = await store.getExtension(extensionId);
+      if (row === undefined) return;
+      const next: InstalledExtension = { ...row, enabled };
+      await store.putExtension(next);
       if (dalvik === null) return;
       const at = dalvik.extensions.findIndex((extension) => extension.extensionId === extensionId);
       if (at >= 0) dalvik.extensions[at] = next;
@@ -171,6 +246,18 @@ export async function openLibraryProfile(options: OpenProfileOptions = {}): Prom
       // There is nothing to uninstall: the code is in the app. Refusing keeps a stray call from
       // deleting a row that would be re-seeded on the next launch and look like a bug.
       if (isBuiltin(extensionId)) throw new Error(`${extensionId} is built in; disable it instead`);
+      if (hostRegistry !== null) {
+        await hostRegistry.remove(extensionId);
+        // The old row may still sit in this device's database from before the registry existed. It is
+        // not the list any more, but leaving it there would resurrect the extension on a build with no
+        // proxy behind it.
+        await store.removeExtension(extensionId);
+        if (dalvik !== null) {
+          const at = dalvik.extensions.findIndex((extension) => extension.extensionId === extensionId);
+          if (at >= 0) dalvik.extensions.splice(at, 1);
+        }
+        return;
+      }
       await store.removeExtension(extensionId);
       if (dalvik === null) return;
       const at = dalvik.extensions.findIndex((extension) => extension.extensionId === extensionId);
@@ -209,6 +296,7 @@ export async function openLibraryProfile(options: OpenProfileOptions = {}): Prom
       return result;
     },
   };
+  return profile;
 }
 
 /**

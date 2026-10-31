@@ -25,6 +25,7 @@ import { networkInterfaces } from "node:os";
 import { readFile } from "node:fs/promises";
 import { extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
+import { createHostExtensions, forgotExtension } from "./host-extensions.mjs";
 
 const PORT = Number(process.env.PORT ?? 8460);
 /**
@@ -40,6 +41,12 @@ const TOKEN = (process.env.HARDLYTRACKING_TOKEN ?? "").trim();
 const RUNTIME = (process.env.RUNTIME_URL ?? "http://127.0.0.1:4567").replace(/\/+$/, "");
 const DALVIK = (process.env.DALVIK_URL ?? "http://127.0.0.1:8792").replace(/\/+$/, "");
 const DIST = process.env.DIST ?? fileURLToPath(new URL("../dist/", import.meta.url));
+/**
+ * Where the HT-Server keeps its extension registry — a sibling of `dist/`, because `dist/` is a build
+ * output that `npm run build` empties. The PC's own app and a paired phone both read this list, so it
+ * is the host's, not a build's.
+ */
+const STATE = process.env.HT_STATE_DIR ?? fileURLToPath(new URL("../data/", import.meta.url));
 
 const MIME = {
   ".html": "text/html; charset=utf-8",
@@ -73,9 +80,8 @@ async function body(request) {
   return Buffer.concat(chunks);
 }
 
-async function proxy(request, response, upstreamBase, prefix, replacement = "") {
-  const incoming = new URL(request.url ?? "/", "http://localhost");
-  const target = `${upstreamBase}${upstreamPath(incoming.pathname, prefix, replacement)}${incoming.search}`;
+/** The request's headers, minus hop-by-hop ones, with the session promoted and identity encoding. */
+function forwardHeaders(request) {
   const headers = {};
   for (const [key, value] of Object.entries(request.headers)) {
     if (!HOP_BY_HOP.has(key) && typeof value === "string") headers[key] = value;
@@ -89,6 +95,13 @@ async function proxy(request, response, upstreamBase, prefix, replacement = "") 
     delete headers["x-hardlytracking-cookies"];
   }
   headers["accept-encoding"] = "identity";
+  return headers;
+}
+
+async function proxy(request, response, upstreamBase, prefix, replacement = "") {
+  const incoming = new URL(request.url ?? "/", "http://localhost");
+  const target = `${upstreamBase}${upstreamPath(incoming.pathname, prefix, replacement)}${incoming.search}`;
+  const headers = forwardHeaders(request);
 
   let upstream;
   try {
@@ -110,6 +123,96 @@ async function proxy(request, response, upstreamBase, prefix, replacement = "") 
   }
   for await (const chunk of upstream.body) response.write(chunk);
   response.end();
+}
+
+const host = createHostExtensions({ dir: STATE, dalvikUrl: DALVIK });
+
+/**
+ * The extension host, with one addition: the host reinstalls its own APK when the runtime forgot it.
+ *
+ * The runtime keeps an APK in memory only, keyed by its SHA-256, so after a restart every call for
+ * that extension answers "Extension handle … is no longer loaded; resend the APK". Until now the
+ * only party that could resend was the client — which, for a phone talking to a PC, meant the phone
+ * sending *its own* APK bytes to the PC and silently installing the phone's extensions there. The
+ * bytes belong to the machine that installed the extension, so this machine keeps them
+ * (`host-store.mjs`) and replays the call here. A client never sees the retry, and a phone never
+ * needs the PC's APKs.
+ *
+ * Only a JSON `/dalvik` call is buffered; an image keeps streaming, because buffering a page is how
+ * a proxy turns a big download into a stalled one.
+ */
+async function serveDalvik(request, response) {
+  const incoming = new URL(request.url ?? "/", "http://localhost");
+  const target = `${DALVIK}${upstreamPath(incoming.pathname, /^\/api\/dalvik/)}${incoming.search}`;
+  const headers = forwardHeaders(request);
+  const payload = await body(request);
+  const isCall = request.method === "POST" && incoming.pathname === "/api/dalvik/dalvik";
+
+  let upstream;
+  try {
+    upstream = await fetch(target, { method: request.method, headers, body: payload });
+  } catch (error) {
+    response.writeHead(502, { "Content-Type": "application/json" });
+    response.end(JSON.stringify({ error: `runtime unreachable at ${DALVIK}`, detail: String(error) }));
+    return;
+  }
+
+  const out = {};
+  upstream.headers.forEach((value, key) => {
+    if (!RESPONSE_DROP.has(key)) out[key] = value;
+  });
+
+  if (!isCall) {
+    response.writeHead(upstream.status, out);
+    if (upstream.body === null) {
+      response.end();
+      return;
+    }
+    for await (const chunk of upstream.body) response.write(chunk);
+    response.end();
+    return;
+  }
+
+  let text = await upstream.text();
+  let status = upstream.status;
+  if (!upstream.ok) {
+    let detail = null;
+    try {
+      detail = JSON.parse(text);
+    } catch {
+      detail = null;
+    }
+    // The id is on the call the client sent; the runtime's error may or may not repeat it.
+    let sent = null;
+    try {
+      sent = payload === undefined ? null : JSON.parse(payload.toString("utf8"));
+    } catch {
+      sent = null;
+    }
+    const extensionId =
+      typeof detail?.extensionId === "string"
+        ? detail.extensionId
+        : typeof sent?.extensionId === "string"
+          ? sent.extensionId
+          : null;
+    if (extensionId !== null && forgotExtension(detail?.error)) {
+      const apk = await host.store.apk(extensionId);
+      if (apk !== null) {
+        try {
+          await host.installOnRuntime(apk.toString("base64"));
+          const replay = await fetch(target, { method: "POST", headers, body: payload });
+          text = await replay.text();
+          status = replay.status;
+          console.log(`dalvik: reinstalled ${extensionId} from the host's own APK and replayed the call (${replay.status})`);
+        } catch (error) {
+          // A replay that fails is the caller's answer: the runtime's first error is what it sees.
+          console.log(`dalvik: could not reinstall ${extensionId}: ${String(error)}`);
+        }
+      }
+    }
+  }
+  response.writeHead(status, out);
+  response.end(text);
 }
 
 /**
@@ -313,8 +416,17 @@ const server = createServer((request, response) => {
   // read the response, not who may make the request.
   if (path.startsWith("/api/")) {
     response.setHeader("Access-Control-Allow-Origin", "*");
-    response.setHeader("Access-Control-Allow-Headers", "content-type, x-hardlytracking-token");
-    response.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    // Every header the `/dalvik` protocol sends has to be allowed, or a phone's call never leaves
+    // the browser: `source-base-url` rides on every call, and the session is `x-hardlytracking-cookies`
+    // (a tab cannot set `Cookie`). A preflight that omits one is a request the browser refuses —
+    // "Failed to fetch", with nothing in the server log.
+    response.setHeader(
+      "Access-Control-Allow-Headers",
+      "content-type, x-hardlytracking-token, x-hardlytracking-cookies, source-base-url, x-mangayomi-webview-port",
+    );
+    // DELETE and PATCH are how a phone uninstalls and disables a PC's extension; a preflight that
+    // does not list them is a request the browser never sends.
+    response.setHeader("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS");
     if (request.method === "OPTIONS") {
       response.writeHead(204);
       response.end();
@@ -356,10 +468,14 @@ const server = createServer((request, response) => {
     : path === "/api/img"
     ? serveImage
     : path.startsWith("/api/dalvik/")
-    ? (req, res) => proxy(req, res, DALVIK, /^\/api\/dalvik/)
+    ? serveDalvik
     : path.startsWith("/api/mihon/")
       ? (req, res) => proxy(req, res, RUNTIME, /^\/api\/mihon/, "/api")
-      : serveStatic;
+      : path.startsWith("/api/host/")
+        // The host's own registry: what this PC has installed, and the four things a phone may do
+        // to it. Not a proxy — these routes are answered here, from `data/host-extensions.json`.
+        ? (req, res) => host.handle(req, res, url)
+        : serveStatic;
   handler(request, response).catch((error) => {
     response.writeHead(500, { "Content-Type": "text/plain; charset=utf-8" });
     response.end(`proxy error: ${String(error)}`);

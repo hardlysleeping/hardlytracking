@@ -44,11 +44,15 @@
   function saveHost(value: string): void {
     setRemoteHost(value);
     hostValue = remoteHost();
+    // The provider was built from the old address, so a save that only writes the setting leaves the
+    // card saying one thing and Browse another. Re-probe now.
+    void library.refreshHost().catch(() => undefined);
   }
 
   function saveHostToken(value: string): void {
     setHostToken(value);
     hostTokenValue = hostToken();
+    void library.refreshHost().catch(() => undefined);
   }
 
   async function toggle(row: (typeof library.extensions)[number]): Promise<void> {
@@ -68,6 +72,76 @@
     } finally {
       busy = null;
     }
+  }
+
+  // ---- the PC's extensions -------------------------------------------------
+  //
+  // The HT-Server card owns them, because they are the host's: its switch, its address, its token and
+  // the list it is actually running. Nothing here writes to this device's own list — the two kinds
+  // (`htserver:` and `dalvik:`) exist so a phone's extensions and a PC's can never be confused.
+
+  let hostBusy = $state<string | null>(null);
+  let hostRemoving = $state<string | null>(null);
+  let hostError = $state<string | null>(null);
+  let installingOnHost = $state<string | null>(null);
+
+  function hostMessage(error: unknown): string {
+    return error instanceof Error ? error.message : String(error);
+  }
+
+  async function reloadHost(): Promise<void> {
+    hostError = null;
+    try {
+      await library.refreshHost();
+    } catch (e) {
+      hostError = hostMessage(e);
+    }
+  }
+
+  async function toggleHost(row: { extensionId: string; enabled?: boolean }): Promise<void> {
+    hostBusy = row.extensionId;
+    hostError = null;
+    try {
+      await library.setHostExtensionEnabled(row.extensionId, row.enabled === false);
+    } catch (e) {
+      hostError = hostMessage(e);
+    } finally {
+      hostBusy = null;
+    }
+  }
+
+  async function uninstallHost(row: { extensionId: string }): Promise<void> {
+    hostBusy = row.extensionId;
+    hostError = null;
+    try {
+      await library.uninstallHostExtension(row.extensionId);
+      hostRemoving = null;
+    } catch (e) {
+      hostError = hostMessage(e);
+    } finally {
+      hostBusy = null;
+    }
+  }
+
+  /** Install one repository entry on the PC instead of this device. */
+  async function installOnHost(entry: ExtensionEntry): Promise<void> {
+    if (activeRepo === null) return;
+    installingOnHost = entry.pkg;
+    hostError = null;
+    notice = null;
+    try {
+      const row = await library.installOnHost(entry, activeRepo);
+      notice = `${entry.name} ${entry.version} installed on ${remoteHost()} — ${row.sources.length} sources`;
+    } catch (e) {
+      error = hostMessage(e);
+    } finally {
+      installingOnHost = null;
+    }
+  }
+
+  /** A PC source's namespaced id: the registry stores the bare one. */
+  function hostSourceId(source: { id: string }): string {
+    return source.id.includes(":") ? source.id : `htserver:src:${source.id}`;
   }
 
   /** The extension's own sources, as the provider lists them — for its browse button. */
@@ -265,6 +339,78 @@
                     : `${hostValue} · ${htServerEnabled() ? "used as a source" : "switched off"}`}
                 </p>
               </div>
+
+              {#if hostValue !== "" && htServerEnabled()}
+                <div class="hostext">
+                  <div class="hosthead">
+                    <span class="hosttitle">On the PC</span>
+                    <span class="hoststate">
+                      {#if library.htServer === null}
+                        not answering
+                      {:else}
+                        {library.hostExtensions.length} extension{library.hostExtensions.length === 1 ? "" : "s"}
+                      {/if}
+                    </span>
+                    <button class="chip small" onclick={() => void reloadHost()}>Reload</button>
+                  </div>
+
+                  {#if library.htServer === null}
+                    <p class="hint">
+                      Nothing answered at {hostValue}. Start HardlyTracking there with <code>npm run serve</code>, check the
+                      address, and check the token — this device's sources keep working either way.
+                    </p>
+                  {:else if library.hostExtensions.length === 0}
+                    <p class="hint">
+                      Nothing is installed on the PC yet. Install one from Available and it lands there, marked “on the PC”.
+                    </p>
+                  {:else}
+                    <ul class="hostrows">
+                      {#each library.hostExtensions as ext (ext.extensionId)}
+                        {@const label = extensionLabel(ext)}
+                        <li class="hostrow" class:off={ext.enabled === false}>
+                          <div class="info">
+                            <span class="name">{label}</span>
+                            <span class="sub">
+                              {ext.versionName ?? "unknown version"} · {ext.sources.length} source{ext.sources.length === 1 ? "" : "s"}
+                              {#if ext.enabled === false}<span class="warn"> · off</span>{/if}
+                            </span>
+                          </div>
+                          <label class="switch" title={ext.enabled === false ? `Enable ${label} on the PC` : `Disable ${label} on the PC`}>
+                            <input
+                              type="checkbox"
+                              checked={ext.enabled !== false}
+                              disabled={hostBusy === ext.extensionId}
+                              aria-label={`${ext.enabled === false ? "Enable" : "Disable"} ${label} on the PC`}
+                              onchange={() => void toggleHost(ext)}
+                            />
+                            <span class="track" aria-hidden="true"><span class="knob"></span></span>
+                          </label>
+                          {#if hostRemoving === ext.extensionId}
+                            <span class="confirm">
+                              <button class="chip small" onclick={() => (hostRemoving = null)}>Cancel</button>
+                              <button
+                                class="chip small danger"
+                                disabled={hostBusy === ext.extensionId}
+                                onclick={() => void uninstallHost(ext)}
+                              >Uninstall on PC</button>
+                            </span>
+                          {:else}
+                            <button class="chip small" onclick={() => (hostRemoving = ext.extensionId)}>Uninstall</button>
+                          {/if}
+                        </li>
+                      {/each}
+                    </ul>
+                    <div class="srcs hostsrcs">
+                      {#each library.hostExtensions.flatMap((ext) => ext.sources).slice(0, 8) as source (source.id)}
+                        <button class="chip small link" title={`Browse ${source.name} on the PC`} onclick={() => go(pathTo("source", hostSourceId(source)))}>
+                          {source.name}{#if source.lang} <span class="lang">{source.lang}</span>{/if}
+                        </button>
+                      {/each}
+                    </div>
+                  {/if}
+                  {#if hostError}<p class="banner">{hostError}</p>{/if}
+                </div>
+              {/if}
             {/if}
 
             <div class="srcs">
@@ -336,14 +482,28 @@
                 </span>
                 <span class="pkg">{entry.pkg}</span>
               </div>
-              <button
-                class="btn"
-                class:primary={state === "new" || state === "update"}
-                disabled={installing === entry.pkg || state === "up-to-date"}
-                onclick={() => void install(entry)}
-              >
-                {installing === entry.pkg ? "Installing…" : state === "new" ? "Install" : state === "update" ? "Update" : state === "downgrade" ? "Reinstall" : "Installed"}
-              </button>
+              <div class="rowacts">
+                <button
+                  class="btn"
+                  class:primary={state === "new" || state === "update"}
+                  disabled={installing === entry.pkg || state === "up-to-date"}
+                  onclick={() => void install(entry)}
+                >
+                  {installing === entry.pkg ? "Installing…" : state === "new" ? "Install" : state === "update" ? "Update" : state === "downgrade" ? "Reinstall" : "Installed"}
+                </button>
+                {#if library.htServer !== null}
+                  <!-- A second, separate list: the PC's extensions are the PC's, and installing there
+                       must not touch what this device runs. -->
+                  <button
+                    class="btn ghost"
+                    disabled={installingOnHost === entry.pkg}
+                    title={`Install ${entry.name} on ${remoteHost()}`}
+                    onclick={() => void installOnHost(entry)}
+                  >
+                    {installingOnHost === entry.pkg ? "Sending…" : "On PC"}
+                  </button>
+                {/if}
+              </div>
             </li>
           {/each}
         </ul>
@@ -413,6 +573,68 @@
     margin: 0;
     color: var(--text-3);
     font-size: var(--t-xs);
+  }
+
+  /* The PC's own extensions: a list inside the HT-Server card, because they belong to that machine
+     and to no other part of this app. */
+  .hostext {
+    display: grid;
+    gap: var(--s2);
+    padding-top: var(--s2);
+    border-top: 1px solid var(--line);
+  }
+
+  .hosthead {
+    display: flex;
+    align-items: baseline;
+    gap: var(--s2);
+  }
+
+  .hosttitle {
+    font-size: var(--t-sm);
+    font-weight: 600;
+  }
+
+  .hoststate {
+    flex: 1;
+    font-size: var(--t-xs);
+    color: var(--text-3);
+  }
+
+  .hostext .hint {
+    margin: 0;
+    font-size: var(--t-xs);
+    line-height: 1.5;
+    color: var(--text-3);
+  }
+
+  .hostext code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11px;
+  }
+
+  .hostrows {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: var(--s1);
+  }
+
+  .hostrow {
+    display: flex;
+    align-items: center;
+    gap: var(--s2);
+    padding: var(--s1) 0;
+  }
+
+  .hostrow.off {
+    opacity: 0.62;
+  }
+
+  .hostsrcs {
+    display: flex;
+    max-width: none;
   }
 
   .view {

@@ -122,14 +122,19 @@ export function apiUrl(path: string): string {
 }
 
 /**
- * Where the HT-Server's own `/dalvik` lives, or `""` when there is no host or the switch is off.
+ * A path on the paired HT-Server, or `""` when there is no host or its switch is off.
  *
  * This is the only place the paired address is turned into an API base, and only the HT-Server
- * provider reads it.
+ * provider (and the card that manages its extensions) reads it.
  */
-export function htServerBase(): string {
+export function htServerUrl(path: string): string {
   const host = htServerEnabled() ? remoteHost() : "";
-  return host === "" ? "" : `${host}/api/dalvik`;
+  return host === "" ? "" : `${host}${path}`;
+}
+
+/** Where the HT-Server's own `/dalvik` lives, or `""` when there is no host. */
+export function htServerBase(): string {
+  return htServerUrl("/api/dalvik");
 }
 
 /** Headers every API call carries: the token, when this device was paired with one. */

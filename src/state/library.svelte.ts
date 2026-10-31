@@ -5,9 +5,11 @@
  * views cannot disagree about whether a series is saved.
  */
 import { openLibraryProfile, progressWriter, type LibraryProfile } from "../api/profile";
-import { providerFor } from "../api/registry";
+import { providerFor, type DalvikHost } from "../api/registry";
 import { packageIdFromApkName, type InstalledExtension } from "../api/dalvik";
+import { installOnHtServer, setHtServerExtensionEnabled, uninstallOnHtServer } from "../api/htserver";
 import { downloadApk, loadRepository, type Repository } from "../lib/extensions/repository";
+import { remoteHost } from "../lib/host";
 import type { ExtensionEntry } from "../lib/extensions/index";
 import type { RepoRow, ViewStateRow } from "../lib/db/store";
 import { BACKGROUND_GRACE_MS, viewStateKey } from "../lib/history";
@@ -27,7 +29,14 @@ export interface UpdateRow {
 }
 
 class LibraryState {
-  profile = $state<LibraryProfile | null>(null);
+  /**
+   * The open profile, as an opaque handle: replaced wholesale, never mutated through this field.
+   *
+   * `$state.raw` and not `$state`: a deep proxy would hand views a *copy* of the arrays inside — the
+   * host's extension list among them — and a push through the proxy would not reach the array the
+   * provider reads. The lists a view draws are the `$state` fields below.
+   */
+  profile = $state.raw<LibraryProfile | null>(null);
   ready = $state(false);
   /** Set when the user clears the reading log, so a screen showing it can react. */
   historyClearedAt = $state(0);
@@ -39,6 +48,15 @@ class LibraryState {
   library = $state<Series[]>([]);
   /** The APKs installed on the extension host, newest install last. */
   extensions = $state<InstalledExtension[]>([]);
+  /**
+   * The paired HT-Server, when one answered. Its own provider, its own id space.
+   *
+   * `null` is the ordinary standalone case: this device runs everything itself. A PC in the list is
+   * not this device's extension — nothing here is ever handed to this device's runtime.
+   */
+  htServer = $state.raw<DalvikHost | null>(null);
+  /** What the PC has installed, as its own registry last answered. Managed from here, owned there. */
+  hostExtensions = $state<InstalledExtension[]>([]);
   /** Repositories the user added, oldest first. */
   repos = $state<RepoRow[]>([]);
   /** Indexes read this session, by repository URL — one fetch per repository per run. */
@@ -59,7 +77,9 @@ class LibraryState {
         ...(fetchImpl === undefined ? {} : { fetchImpl }),
       });
       this.library = await this.profile.store.listSeries();
-      this.extensions = await this.profile.store.listExtensions();
+      this.extensions = await this.profile.listExtensions();
+      this.htServer = this.profile.htServer;
+      this.hostExtensions = [...(this.profile.htServer?.extensions ?? [])];
       this.repos = await this.profile.store.listRepos();
       this.ready = true;
       // Covers and page images live in the same database, behind the user's ceiling.
@@ -122,7 +142,7 @@ class LibraryState {
   async setExtensionEnabled(extensionId: string, enabled: boolean): Promise<void> {
     if (this.profile === null) return;
     await this.profile.setExtensionEnabled(extensionId, enabled);
-    this.extensions = await this.profile.store.listExtensions();
+    this.extensions = await this.profile.listExtensions();
     await this.loadSources();
   }
 
@@ -130,15 +150,64 @@ class LibraryState {
   async uninstallExtension(extensionId: string): Promise<void> {
     if (this.profile === null) return;
     await this.profile.uninstallExtension(extensionId);
-    this.extensions = await this.profile.store.listExtensions();
+    this.extensions = await this.profile.listExtensions();
     await this.loadSources();
+  }
+
+  // ---- the HT-Server's own extensions ---------------------------------------
+  //
+  // A paired PC is a source, and its extensions are managed from here: what is installed on it, what
+  // to add to it, and what to switch off. The list is the PC's registry, so every call below goes to
+  // the PC — this device's own list is never touched, which is the whole point of the two kinds.
+  //
+  // **Every change re-probes the host** instead of patching the array in place. The provider reads the
+  // array it was built with, and that array is not something a view can be trusted to have kept in
+  // step: re-reading the PC's own list is one GET, it is what the card's Reload does, and it means the
+  // PC's screen and the phone's agree even when the change was made on the PC.
+
+  /** Re-probe the paired host: its runtime, its list, and the sources this device offers from it. */
+  async refreshHost(): Promise<void> {
+    if (this.profile === null) return;
+    this.error = await this.profile.refreshHtServer();
+    this.htServer = this.profile.htServer;
+    this.hostExtensions = [...(this.profile.htServer?.extensions ?? [])];
+    await this.loadSources();
+  }
+
+  /** Install a repository entry on the PC. The bytes travel once; the PC keeps them from then on. */
+  async installOnHost(entry: ExtensionEntry, repoUrl: string): Promise<InstalledExtension> {
+    if (this.htServer === null) throw new Error("no HT-Server is paired");
+    const apk = await downloadApk(entry);
+    const row = await installOnHtServer(remoteHost(), apk, entry.pkg, {
+      name: entry.name,
+      ...(entry.iconUrl === undefined ? {} : { iconUrl: entry.iconUrl }),
+      repoUrl,
+      versionName: entry.version,
+      ...(entry.versionCode === undefined ? {} : { versionCode: entry.versionCode }),
+    });
+    await this.refreshHost();
+    return row;
+  }
+
+  /** Turn one of the PC's extensions on or off. Its row stays; its sources stop being offered. */
+  async setHostExtensionEnabled(extensionId: string, enabled: boolean): Promise<void> {
+    if (this.htServer === null) return;
+    await setHtServerExtensionEnabled(remoteHost(), extensionId, enabled);
+    await this.refreshHost();
+  }
+
+  /** Uninstall one of the PC's extensions, from this phone. */
+  async uninstallHostExtension(extensionId: string): Promise<void> {
+    if (this.htServer === null) return;
+    await uninstallOnHtServer(remoteHost(), extensionId);
+    await this.refreshHost();
   }
 
   async installApk(file: File): Promise<InstalledExtension> {
     if (this.profile === null) throw new Error("the library is not open yet");
     const apk = new Uint8Array(await file.arrayBuffer());
     const installed = await this.profile.installApk(apk, packageIdFromApkName(file.name));
-    this.extensions = await this.profile.store.listExtensions();
+    this.extensions = await this.profile.listExtensions();
     await this.loadSources();
     return installed;
   }
@@ -191,7 +260,7 @@ class LibraryState {
       versionName: entry.version,
       versionCode: entry.versionCode,
     });
-    this.extensions = await this.profile.store.listExtensions();
+    this.extensions = await this.profile.listExtensions();
     await this.loadSources();
     return installed;
   }
@@ -401,8 +470,11 @@ class LibraryState {
     const [provider, ...rest] = seriesId.split(":");
     const native = rest.join(":");
     if (provider === undefined || native === "") return;
-    // `dalvik:<sourceId>:<url>` — the source id is the first segment after the kind.
-    const sourceId = provider === "dalvik" ? native.split(":")[0] : provider === "mihon" ? "" : native;
+    // `dalvik:<sourceId>:<url>` — the source id is the first segment after the kind. The HT-Server's
+    // rows have the same shape under its own kind, and a row that came from a PC is still a row whose
+    // source we want to name.
+    const sourceId =
+      provider === "dalvik" || provider === "htserver" ? native.split(":")[0] : provider === "mihon" ? "" : native;
     if (sourceId === undefined || sourceId === "") return;
     await this.profile.store.putMapping({
       seriesId,

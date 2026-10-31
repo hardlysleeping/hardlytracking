@@ -27,7 +27,7 @@
 import { apiHeaders } from "../lib/host";
 import type { CookieJar } from "../lib/webview/store";
 import { hostOf } from "../lib/webview/cookies";
-import { joinId, nativeId, paged, type Chapter, type Page, type Paged, type ProviderKind, type Series, type Source, type SourceProvider } from "./source";
+import { joinId, nativeId, paged, providerLabel, type Chapter, type Page, type Paged, type ProviderKind, type Series, type Source, type SourceProvider } from "./source";
 
 export type DalvikMethod =
   | "sourcesManga"
@@ -529,6 +529,16 @@ export interface DalvikProviderOptions {
    * settings and change its address mid-session, and the next page must go to the new one.
    */
   preferences?: (sourceId: string) => Promise<Array<Record<string, unknown>> | undefined>;
+  /**
+   * Whether this provider may hand the runtime an APK it kept when the runtime forgot one.
+   *
+   * True for this device's own host: the bytes in the row are the bytes that host installed, so
+   * resending them restores exactly what was there. **False for the HT-Server**: those rows are a
+   * list the PC sent, they carry no bytes, and a phone that resent its own APK would install the
+   * phone's extensions on the PC — the fault this provider exists to replace. The PC keeps its own
+   * APKs and replays them itself (`server/host-extensions.mjs`).
+   */
+  apkResend?: boolean;
 }
 
 /** The device's own read marks, as the provider needs them. */
@@ -552,10 +562,21 @@ function splitNative(native: string): { sourceId: string; url: string } {
  * the extension's own source list use the bare `<sourceId>`. Accepting both is not leniency:
  * the namespaced form is what every call site in the app has, and the bare form is what the
  * protocol takes.
+ *
+ * The prefix is this provider's own kind, never a hardcoded `dalvik:`: the HT-Server speaks the same
+ * protocol under `htserver:src:<sourceId>`, and a strip that only knows `dalvik:` leaves that id
+ * namespaced, so the source is never found and every call rejects for the wrong reason.
  */
-function bareSourceId(sourceId: string): string {
-  const native = sourceId.startsWith("dalvik:") ? nativeId(sourceId, "dalvik") : sourceId;
-  return native.startsWith("src:") ? native.slice("src:".length) : native;
+function bareSourceId(namespaced: string, kind: ProviderKind): string {
+  const prefix = `${kind}:`;
+  const native = namespaced.startsWith(prefix) ? nativeId(namespaced, kind) : namespaced;
+  if (!native.includes(":")) return native;
+  const stripped = native.startsWith("src:") ? native.slice("src:".length) : native;
+  if (!stripped.includes(":")) return stripped;
+  // Still namespaced, and not with this provider's own kind: it belongs to another host. `nativeId`
+  // names the mismatch ("htserver:src:1 is not a dalvik id") instead of searching for a source id
+  // that no extension here can have.
+  return nativeId(native, kind);
 }
 
 /**
@@ -574,10 +595,15 @@ export function createDalvikProvider(options: DalvikProviderOptions): SourceProv
   const kind: ProviderKind = options.kind ?? "dalvik";
 
   function extensionFor(namespaced: string): InstalledExtension {
-    const sourceId = bareSourceId(namespaced);
+    const sourceId = bareSourceId(namespaced, kind);
     const found = options.extensions.find((extension) => extension.sources.some((source) => source.id === sourceId));
     if (found === undefined) {
-      throw new Error(`no installed extension exposes source ${sourceId} — install or re-enable it`);
+      // Named, not empty. A library row that came from a host while it was the app's origin is an id
+      // this device may have no source for: answering with an empty chapter list would look like a
+      // series with nothing in it, and answering with a provider's id would look like a broken app.
+      throw new Error(
+        `no installed extension on ${providerLabel(kind)} exposes source ${sourceId} — install or re-enable it there`,
+      );
     }
     return found;
   }
@@ -654,6 +680,7 @@ export function createDalvikProvider(options: DalvikProviderOptions): SourceProv
    * answer and must not be retried — resending megabytes on every failure would hide the real error.
    */
   function apkForRetry(call: DalvikCall, error: unknown): string | undefined {
+    if (options.apkResend === false) return undefined;
     if (!(error instanceof DalvikError)) return undefined;
     if (!/no longer loaded|resend the apk/i.test(error.message)) return undefined;
     if (call.extensionId === undefined) return undefined;
@@ -719,7 +746,7 @@ export function createDalvikProvider(options: DalvikProviderOptions): SourceProv
     },
 
     async popular(namespaced: string, page: number): Promise<Paged<Series>> {
-      const sourceId = bareSourceId(namespaced);
+      const sourceId = bareSourceId(namespaced, kind);
       const extension = extensionFor(sourceId);
       const sourceBaseUrl = baseUrlForSourceId(sourceId);
       const result = await invoke<{ mangas: DalvikManga[]; hasNextPage: boolean }>(
@@ -733,7 +760,7 @@ export function createDalvikProvider(options: DalvikProviderOptions): SourceProv
     },
 
     async latest(namespaced: string, page: number): Promise<Paged<Series>> {
-      const sourceId = bareSourceId(namespaced);
+      const sourceId = bareSourceId(namespaced, kind);
       const extension = extensionFor(sourceId);
       const sourceBaseUrl = baseUrlForSourceId(sourceId);
       const result = await invoke<{ mangas: DalvikManga[]; hasNextPage: boolean }>(
@@ -747,7 +774,7 @@ export function createDalvikProvider(options: DalvikProviderOptions): SourceProv
     },
 
     async search(namespaced: string, query: string, page: number): Promise<Paged<Series>> {
-      const sourceId = bareSourceId(namespaced);
+      const sourceId = bareSourceId(namespaced, kind);
       const extension = extensionFor(sourceId);
       const sourceBaseUrl = baseUrlForSourceId(sourceId);
       const result = await invoke<{ mangas: DalvikManga[]; hasNextPage: boolean }>(
