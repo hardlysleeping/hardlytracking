@@ -90,10 +90,6 @@ export function assignmentLabel(names: string[]): string {
 }
 
 /** The category button's own words, which also carry the count. */
-export function categoryActionLabel(names: string[]): string {
-  if (names.length === 0) return "Categories";
-  return `Categories · ${names.length}`;
-}
 
 /**
  * What "Download" should queue: every chapter this device does not already hold, newest first as the
@@ -120,13 +116,20 @@ export function downloadCandidates<T extends { id: string }>(
 export const DOWNLOAD_LIMIT = 25;
 
 /** The Download row's label, so the count is never a surprise after the tap. */
-export function downloadLabel(candidates: number, busy: boolean, loaded = true): string {
+/**
+ * The line under the Download row.
+ *
+ * It must never repeat the row's own word ("Download / Download") and must never claim the series is
+ * on the device before the chapter list has answered.
+ */
+export function downloadLabel(candidates: number, busy: boolean, loaded = true, downloading = false): string {
   if (busy) return "Checking chapters…";
-  // Before the chapter list has answered, "Downloaded" would be a claim the app cannot make yet.
-  if (!loaded) return "Download";
-  if (candidates === 1) return "Download 1 chapter";
-  if (candidates > 1) return `Download ${candidates} chapters`;
-  return "Downloaded";
+  if (!loaded) return "For offline reading";
+  if (candidates === 1) return "1 chapter to fetch";
+  if (candidates > 1) return `${candidates} chapters to fetch`;
+  // A chapter in the queue is not on the device yet, and it is not something to fetch again.
+  if (downloading) return "Downloading…";
+  return "Already on this device";
 }
 
 /**
@@ -147,3 +150,29 @@ export function readTarget<T extends { id: string; read?: boolean }>(
   }
   return chapters.find((chapter) => chapter.read !== true) ?? chapters[0];
 }
+
+/**
+ * Answer with `fallback` if `work` has not settled in `ms`.
+ *
+ * A source that never answers is the normal failure of an extension host that is down or a repo that
+ * went away. The quick sheet is one tap deep: it must not sit on a spinner with no way out. The
+ * caller treats the fallback exactly like "no chapters", which is the series page.
+ */
+export function withTimeout<T>(work: Promise<T>, ms: number, fallback: T): Promise<T> {
+  return new Promise<T>((resolve) => {
+    const timer = setTimeout(() => resolve(fallback), ms);
+    work.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      () => {
+        clearTimeout(timer);
+        resolve(fallback);
+      },
+    );
+  });
+}
+
+/** How long a tap waits for a chapter list before it settles for the series page. */
+export const CHAPTER_TIMEOUT_MS = 6000;

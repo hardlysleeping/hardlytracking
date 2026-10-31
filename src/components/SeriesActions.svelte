@@ -23,13 +23,14 @@
   import {
     UNCATEGORIZED_ID,
     assignmentLabel,
-    categoryActionLabel,
     DOWNLOAD_LIMIT,
     downloadCandidates,
     downloadLabel,
     pickerModel,
+    CHAPTER_TIMEOUT_MS,
     readTarget,
     toggleAssignment,
+    withTimeout,
   } from "../lib/library/quick-actions";
 
   interface Props {
@@ -58,9 +59,17 @@
   const names = $derived(
     model.rows.filter((entry) => entry.checked).map((entry) => entry.name),
   );
+  // Chapters this tap could still fetch: not on the device and not already waiting in the queue.
   const queued = $derived(
-    loaded ? downloadCandidates(chapters, (chapterId) => downloads.isDownloaded(chapterId)).length : 0,
+    loaded
+      ? downloadCandidates(
+          chapters,
+          (chapterId) => downloads.isDownloaded(chapterId) || downloads.inQueue(chapterId),
+        ).length
+      : 0,
   );
+  /** Chapters of this series already queued or in flight, so the row can say so. */
+  const downloading = $derived(loaded && chapters.some((chapter) => downloads.inQueue(chapter.id)));
 
   // A new title resets the sheet: the last one's state must not leak into this one.
   $effect(() => {
@@ -88,10 +97,12 @@
   /** Chapters once: the read and download rows both need them, and neither should refetch. */
   async function ensureChapters(): Promise<Chapter[]> {
     if (loaded) return chapters;
-    try {
-      chapters = await library.chapters(id);
-    } catch {
-      chapters = [];
+    // A host that is down answers by never answering; six seconds is long enough to know.
+    chapters = await withTimeout(library.chapters(id), CHAPTER_TIMEOUT_MS, []);
+    if (chapters.length === 0) {
+      // The list may still arrive; the next open asks again rather than remembering nothing.
+      loaded = false;
+      return chapters;
     }
     loaded = true;
     return chapters;
@@ -227,14 +238,14 @@
           <span class="glyph" aria-hidden="true">
             <svg viewBox="0 0 24 24"><path d="M12 4v11m0 0 4.5-4.5M12 15l-4.5-4.5M5 19h14" /></svg>
           </span>
-          <span class="words"><strong>Download</strong><em>{downloadLabel(queued, busy === "download", loaded)}</em></span>
+          <span class="words"><strong>Download</strong><em>{downloadLabel(queued, busy === "download", loaded, downloading)}</em></span>
         </button>
 
         <button class="act" onclick={() => (view = "categories")}>
           <span class="glyph bookmark" aria-hidden="true">
             <svg viewBox="0 0 24 24"><path d="M7 4h10v16l-5-3.5L7 20z" /></svg>
           </span>
-          <span class="words"><strong>{categoryActionLabel(names)}</strong><em>{assignmentLabel(names)}</em></span>
+          <span class="words"><strong>Categories</strong><em>{assignmentLabel(names)}</em></span>
           <span class="chev" aria-hidden="true">›</span>
         </button>
       </div>

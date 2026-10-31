@@ -4,13 +4,14 @@ import assert from "node:assert/strict";
 import {
   UNCATEGORIZED_ID,
   assignmentLabel,
-  categoryActionLabel,
   DOWNLOAD_LIMIT,
   downloadCandidates,
   downloadLabel,
   pickerModel,
+  CHAPTER_TIMEOUT_MS,
   readTarget,
   toggleAssignment,
+  withTimeout,
 } from "../../src/lib/library/quick-actions.ts";
 
 const categories = [
@@ -60,8 +61,6 @@ test("the subtitle names the shelves, and never counts without a word", () => {
   assert.equal(assignmentLabel(["Reading"]), "Reading");
   assert.equal(assignmentLabel(["Reading", "Manhwa"]), "Reading, Manhwa");
   assert.equal(assignmentLabel(["Reading", "Manhwa", "Favourites"]), "3 categories");
-  assert.equal(categoryActionLabel([]), "Categories");
-  assert.equal(categoryActionLabel(["Reading"]), "Categories · 1");
 });
 
 test("download queues what the device does not hold, and says how much", () => {
@@ -71,12 +70,17 @@ test("download queues what the device does not hold, and says how much", () => {
     ["1", "3"],
   );
   assert.deepEqual(downloadCandidates(chapters, () => true), [], "nothing to do is not a queue");
-  assert.equal(downloadLabel(0, false), "Downloaded");
-  assert.equal(downloadLabel(1, false), "Download 1 chapter");
-  assert.equal(downloadLabel(4, false), "Download 4 chapters");
+  assert.equal(downloadLabel(0, false), "Already on this device");
+  assert.equal(downloadLabel(1, false), "1 chapter to fetch");
+  assert.equal(downloadLabel(4, false), "4 chapters to fetch");
   assert.equal(downloadLabel(4, true), "Checking chapters…");
-  // Before the list is in hand the row must not claim the series is already on the device.
-  assert.equal(downloadLabel(0, false, false), "Download");
+  // Before the list is in hand the row must not claim the series is already on the device, and the
+  // subtitle must never be the row's own title.
+  assert.equal(downloadLabel(0, false, false), "For offline reading");
+  assert.equal(downloadLabel(0, false, true, true), "Downloading…", "queued is not downloaded");
+  for (const line of [downloadLabel(0, false, false), downloadLabel(0, false), downloadLabel(3, false)]) {
+    assert.notEqual(line.toLowerCase(), "download", "the subtitle repeats the title otherwise");
+  }
 });
 
 test("one tap queues a slice, not a 556-chapter series", () => {
@@ -98,4 +102,16 @@ test("read opens the chapter being read, else the first unread, else the first",
   assert.equal(readTarget(chapters, "gone")?.id, "c2", "a stale position falls back, never throws");
   assert.equal(readTarget([{ id: "x", read: true }], null)?.id, "x", "everything read starts over");
   assert.equal(readTarget([], null), null, "no chapters is the series page, not an empty reader");
+});
+
+test("a host that never answers does not leave the tap hanging", async () => {
+  const never = new Promise(() => {});
+  const started = Date.now();
+  const answer = await withTimeout(never, 40, []);
+  assert.deepEqual(answer, []);
+  assert.ok(Date.now() - started < 1000, "settled on the fallback, not on the promise");
+
+  assert.deepEqual(await withTimeout(Promise.resolve(["a"]), 40, []), ["a"], "a fast answer wins");
+  assert.deepEqual(await withTimeout(Promise.reject(new Error("host down")), 40, []), [], "a throw is empty, not fatal");
+  assert.equal(CHAPTER_TIMEOUT_MS, 6000, "six seconds, so a slow host is not cut off");
 });

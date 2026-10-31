@@ -48,7 +48,8 @@
   >
     <header>
       <h2>{title}</h2>
-      <button class="btn ghost icon" aria-label="Close" onclick={onclose}>✕</button>
+      <!-- 44px is the smallest comfortable finger target; the ghost icon button is 36 by default. -->
+      <button class="btn ghost icon close" aria-label="Close" onclick={onclose}>✕</button>
     </header>
     <div class="body">
       {@render children()}
@@ -106,6 +107,12 @@
     gap: var(--s3);
     padding: var(--s4) var(--s4) var(--s2);
     border-bottom: 1px solid var(--line);
+  }
+
+  /* The close control is the one thing a thumb reaches for; 36px is a miss on a phone. */
+  .close {
+    min-width: 44px;
+    min-height: 44px;
   }
 
   h2 {
