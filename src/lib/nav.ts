@@ -20,6 +20,13 @@ export interface Route {
   name: string;
   id: string | null;
   chapterId: string | null;
+  /**
+   * The repository a package belongs to, for `#/software/<repo>/<pkg>`.
+   *
+   * Only a software route carries it: two repositories can publish the same package id, and the
+   * detail page has to say which one a link meant. Every other route leaves it `null`.
+   */
+  repo: string | null;
 }
 
 function decode(part: string | undefined): string | null {
@@ -34,5 +41,15 @@ function decode(part: string | undefined): string | null {
 
 export function parseRoute(hash: string): Route {
   const parts = hash.replace(/^#\/?/, "").split("/").filter(Boolean);
-  return { name: parts[0] ?? "library", id: decode(parts[1]), chapterId: decode(parts[2]) };
+  const name = parts[0] ?? "library";
+  const first = decode(parts[1]);
+  const second = decode(parts[2]);
+
+  // `#/software/<pkg>` and `#/software/<repo>/<pkg>`: the long form names the repository first,
+  // because the package id is what identifies the thing being shown.
+  if (name === "software") {
+    if (second !== null) return { name, id: second, chapterId: null, repo: first };
+    return { name, id: first, chapterId: null, repo: null };
+  }
+  return { name, id: first, chapterId: second, repo: null };
 }

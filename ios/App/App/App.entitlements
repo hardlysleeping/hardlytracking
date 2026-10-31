@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- A package page is a link: https://hardlytracking.app/source?repo=…&id=… opens the app when
+	     it is installed and the same page in a browser when it is not. The host half of that is
+	     pinned by tests/unit/universal-links.test.mjs against `SOFTWARE_SITE`. -->
+	<key>com.apple.developer.associated-domains</key>
+	<array>
+		<string>applinks:hardlytracking.app</string>
+	</array>
+</dict>
+</plist>

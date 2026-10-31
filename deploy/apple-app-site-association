@@ -1,0 +1,13 @@
+{
+  "applinks": {
+    "details": [
+      {
+        "appIDs": ["TEAMID.ing.hardlysleep.hardlytracking"],
+        "components": [
+          { "/": "/source", "comment": "One package, by repository and package id" },
+          { "/": "/source/*", "comment": "One package, by repository and package id" }
+        ]
+      }
+    ]
+  }
+}

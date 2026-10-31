@@ -60,6 +60,7 @@ const UNDER: Record<string, string> = {
   read: "library",
   source: "browse",
   extensions: "browse",
+  software: "browse",
   settings: "more",
   downloads: "more",
   backup: "more",
@@ -76,5 +77,7 @@ export function backHref(route: Route): string | null {
   if (DESTINATIONS.some((d) => d.id === route.name)) return null;
   if (route.name === "series" || route.name === "read") return "/library";
   if (route.name === "source" || route.name === "extensions") return "/browse";
+  // A package page is reached from the Extensions list, which is the index of packages.
+  if (route.name === "software") return "/extensions";
   return "/more";
 }

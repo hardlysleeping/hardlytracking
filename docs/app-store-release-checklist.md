@@ -65,16 +65,65 @@ from a direct detail link; enabling adult is the only way in.
 
 ## 4. A detail page for every package, reachable by link — blocker
 
-- [ ] Route `#/software/<pkg>` (or `#/software/<repo>/<pkg>` when two repos publish the same id)
-- [ ] Show name, ecosystem, version, repository, languages, content rating, its sources, and installed/enabled state
-- [ ] Actions: Install / Update / Disable / Uninstall — nothing automatic on open
-- [ ] Extensions rows link into it; the Extensions list stays the index
-- [ ] Canonical web link `https://hardlytracking.app/source?repo=…&id=…` that opens the same page
-- [ ] iOS: Associated Domains entitlement + `apple-app-site-association` on that host
-- [ ] Test the four cases: app installed, app not installed (web fallback), malformed repo, package removed upstream
+- [x] Route `#/software/<pkg>` (or `#/software/<repo>/<pkg>` when two repos publish the same id)
+- [x] Show name, ecosystem, version, repository, languages, content rating, its sources, and installed/enabled state
+- [x] Actions: Install / Update / Disable / Uninstall — nothing automatic on open
+- [x] Extensions rows link into it; the Extensions list stays the index
+- [x] Canonical web link `https://hardlytracking.app/source?repo=…&id=…` that opens the same page
+- [x] iOS: Associated Domains entitlement + `apple-app-site-association` on that host
+- [x] Test the four cases: app installed, app not installed (web fallback), malformed repo, package removed upstream
 
 *Done when:* the link opens the detail page on a device with the app and on one without, and never
 installs anything by itself.
+
+### What landed
+
+- `src/lib/software.ts` — the page as data. `softwareFacts()` is pure: it takes the index read, the
+  added repositories and the installed rows, and answers with the facts **and the action list**, so
+  "what may this page offer" is a value a test can read. `softwareRefFromLocation()` parses the
+  canonical link, `softwareHref()` builds the in-app route, `canonicalSoftwareUrl()` builds the link,
+  and `watchSoftwareLinks()` is the iOS `getLaunchUrl` + `appUrlOpen` pair (inert off the shell).
+- `src/views/Software.svelte` — the page: name, rating badge, ecosystem, version (installed and
+  available when they differ), repository and host, languages, rating, sources as chips into Browse,
+  installed state, the four actions, and the canonical link with Copy. One `$effect` runs on open and
+  it only calls `load()`, which reads an index — the same read the Extensions list does. A package
+  whose repository this app has not added is described, its actions are empty, and the page offers
+  **Review repository** (the §1 panel) instead of Install.
+- `src/lib/nav.ts` — `Route.repo`; `parseRoute` reads the two-segment form, `pathTo` already escaped
+  the repository URL so its slashes do not split the route.
+- `src/App.svelte` — `/source?repo=…&id=…` is handled **before** the repository install link (both
+  carry `repo`), the path stays and the route moves into the hash; a warm `appUrlOpen` navigates the
+  same way; an in-app `#/extensions?repo=…` now proposes the §1 panel instead of parsing as an
+  unknown route.
+- `src/views/Extensions.svelte` — an installed row's name and an Available entry's name open the page.
+  A built-in does not link: it ships with the app rather than coming from a repository.
+- `ios/App/App/App.entitlements` (`applinks:hardlytracking.app`) wired into both App build
+  configurations, `deploy/apple-app-site-association`, and `/.well-known/apple-app-site-association`
+  served by `server/proxy.mjs` so the path is testable before a deploy. The three files are pinned
+  against each other by `tests/unit/universal-links.test.mjs`; the deploy steps and the one token
+  that needs the Apple account are in `docs/universal-links.md`.
+
+The four cases are four inputs to `softwareFacts` in `tests/unit/software.test.mjs` (installed, not
+installed with and without the repository added, a malformed repository, a package the index no
+longer carries), plus the compliance line `a software detail link opens and installs nothing` — the
+model reaches no write, the page's one automatic block only reads, and every action is reached from
+an `onclick`.
+
+Live at 440×956 (browser, no app data, against the real Keiyoushi index):
+
+- `https://…/source?repo=…/index.json&id=eu.kanade.tachiyomi.extension.all.mangadex` → MangaDex,
+  Mature, v1.6.0, Keiyoushi · not added to this app, 61 languages, 61 sources, Not installed,
+  **Review repository** and no Install; the repository list still said “No repositories yet.” and the
+  count still read the four built-ins. Review repository opens the §1 panel for that index.
+- `#/software/<repo>/<pkg>` for a package the index does not carry → “This repository no longer lists
+  … Nothing is installed, so there is nothing to remove.”, name from the package id, no actions.
+- `#/software/javascript:alert(1)/<pkg>` → the page opens and says the repository is not an http(s)
+  address; no Review button.
+- With the repository added, an Available row opens the page with **Install 1.6.0**; a built-in
+  (`builtin:komga`) opens with the switch and no Uninstall.
+
+Still needs his hand: a tap on `https://hardlytracking.app/source?…` on an iPhone with the build
+installed, after `hardlytracking.app` serves the association file and the Team ID in it is real.
 
 ## 5. Report Source — blocker (light)
 

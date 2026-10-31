@@ -18,6 +18,7 @@
   import Search from "./views/Search.svelte";
   import Reader from "./views/Reader.svelte";
   import Extensions from "./views/Extensions.svelte";
+  import Software from "./views/Software.svelte";
   import Settings from "./views/Settings.svelte";
   import Downloads from "./views/Downloads.svelte";
   import Backup from "./views/Backup.svelte";
@@ -33,6 +34,7 @@ import { sourceMarks } from "./state/source-marks.svelte";
   import { destinationOf } from "./lib/destinations";
   import { parseRoute, go } from "./lib/nav";
   import { isFetchableRepo, registerProtocolHandler, repoFromLocation } from "./lib/deep-link";
+  import { softwareHref, softwareRefFromLocation, watchSoftwareLinks } from "./lib/software";
   import { pairFromLocation, setHostToken, setRemoteHost } from "./lib/host";
 
   let route = $state(parseRoute(location.hash));
@@ -53,17 +55,42 @@ import { sourceMarks } from "./state/source-marks.svelte";
     if (pair.token !== null) setHostToken(pair.token);
 
     const requested = repoFromLocation(location.href);
-    if (requested !== null && isFetchableRepo(requested)) {
+    // A package page comes first: `/source?repo=…&id=…` carries a `repo` too, and reading it as an
+    // install link would open the repository panel instead of the package the link named. The path
+    // stays — that is the canonical address — and the route moves into the hash, where it belongs.
+    const software = softwareRefFromLocation(location.href);
+    if (software !== null) {
+      history.replaceState(null, "", `${location.pathname}#${softwareHref(software)}`);
+      route = parseRoute(location.hash);
+    } else if (requested !== null && isFetchableRepo(requested)) {
       pendingRepo = requested;
       go("/extensions");
     }
+
+    // iOS hands a universal link to the app instead of loading a page: `getLaunchUrl` for a cold
+    // start, the `appUrlOpen` event for a warm one. Both end on the package page, and neither acts.
+    let stopLinks: (() => void) | null = null;
+    void watchSoftwareLinks((ref) => go(softwareHref(ref)))
+      .then((stop) => (stopLinks = stop))
+      .catch(() => undefined);
+
     // Lets `web+mihon://…` links open this app in a tab; a bare `mihon://` is the packaged build's
     // scheme, and pasting it into the field works here.
     registerProtocolHandler();
     appearance.start();
     startChrome();
     const stopViewport = viewport.start();
-    const onHash = () => (route = parseRoute(location.hash));
+    const onHash = () => {
+      // An in-app `#/extensions?repo=…` — a package page pointing at a repository this app has not
+      // added — proposes the same panel a cold boot does, instead of parsing as an unknown route.
+      const wantedRepo = repoFromLocation(location.href);
+      if (wantedRepo !== null && isFetchableRepo(wantedRepo)) {
+        pendingRepo = wantedRepo;
+        go("/extensions");
+        return;
+      }
+      route = parseRoute(location.hash);
+    };
     addEventListener("hashchange", onHash);
     // Categories and preferences are read once, with the library: a series deep link and the
     // reader both need them before a view mounts, so no view owns this.
@@ -76,6 +103,7 @@ import { sourceMarks } from "./state/source-marks.svelte";
     return () => {
       removeEventListener("hashchange", onHash);
       stopViewport();
+      stopLinks?.();
     };
   });
 </script>
@@ -101,6 +129,8 @@ import { sourceMarks } from "./state/source-marks.svelte";
       <More />
     {:else if route.name === "extensions"}
       <Extensions repo={pendingRepo} />
+    {:else if route.name === "software" && route.id !== null}
+      <Software pkg={route.id} repo={route.repo} />
     {:else if route.name === "settings"}
       <Settings />
     {:else if route.name === "downloads"}

@@ -390,6 +390,26 @@ async function serveStatic(request, response) {
   }
 }
 
+/**
+ * Apple's association file for this host's universal links.
+ *
+ * It has to sit at the host root, unauthenticated, as `application/json` — a browser navigation
+ * cannot send a header, and Apple's fetch does not follow a redirect. The file itself is
+ * `deploy/apple-app-site-association`, which is what gets copied to whichever host serves
+ * `hardlytracking.app`; serving it here too means the path is testable on this machine instead of
+ * only after a deploy.
+ */
+async function serveAasa(request, response) {
+  try {
+    const data = await readFile(fileURLToPath(new URL("../deploy/apple-app-site-association", import.meta.url)));
+    response.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "public, max-age=600" });
+    response.end(data);
+  } catch {
+    response.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
+    response.end("no apple-app-site-association in deploy/");
+  }
+}
+
 /** The addresses a phone could use to reach this server, when it is listening on the network. */
 function networkAddresses() {
   const out = [];
@@ -468,7 +488,9 @@ const server = createServer((request, response) => {
     return;
   }
 
-  const handler = path === "/api/repo"
+  const handler = path === "/.well-known/apple-app-site-association"
+    ? serveAasa
+    : path === "/api/repo"
     ? serveRepo
     : path === "/api/img"
     ? serveImage
