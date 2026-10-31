@@ -8,7 +8,7 @@
    * user installed an extension, not a virtual machine.
    */
   import { library } from "../state/library.svelte";
-  import { updateState, type ExtensionEntry } from "../lib/extensions/index";
+  import { planUpdates, updateState, type ExtensionEntry } from "../lib/extensions/index";
   import { RepositoryError, type Repository } from "../lib/extensions/repository";
   import { extensionLabel, extensionLanguages, sourcesOfExtension } from "../lib/extensions/installed";
   import { proxiedImage } from "../lib/pages";
@@ -282,6 +282,73 @@ import {
     }
   }
 
+  /**
+   * Updates, checked across every repository at once.
+   *
+   * `updateState` already knows how to compare version codes, but it only ran for the repository
+   * that happened to be open — so an extension installed months ago looked current until you opened
+   * the exact repo it came from. One button asks each repository for its index and answers with the
+   * entries that are actually newer. A repository that fails is named, not silently skipped.
+   */
+  let updates = $state<Map<string, { entry: ExtensionEntry; repoUrl: string }>>(new Map());
+  let checking = $state(false);
+  let checkNote = $state<string | null>(null);
+
+  async function checkUpdates(): Promise<void> {
+    if (library.repos.length === 0) {
+      checkNote = "Add a repository first — an update comes from the repository an extension was installed from.";
+      return;
+    }
+    checking = true;
+    checkNote = null;
+    const found = new Map<string, { entry: ExtensionEntry; repoUrl: string }>();
+    const failed: string[] = [];
+    for (const repo of library.repos) {
+      try {
+        const list = await library.repoEntries(repo.url);
+        // The comparison itself is pure and tested (`planUpdates`); this loop only fetches.
+        for (const update of planUpdates(library.extensions, list, repo.url)) found.set(update.pkg, { entry: update.entry, repoUrl: update.repoUrl });
+      } catch (error) {
+        failed.push(`${repo.name}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+    updates = found;
+    checking = false;
+    const bits: string[] = [];
+    bits.push(
+      found.size === 0
+        ? `Everything is up to date — ${library.repos.length} repositor${library.repos.length === 1 ? "y" : "ies"} checked`
+        : `${found.size} update${found.size === 1 ? "" : "s"} available`,
+    );
+    if (failed.length > 0) bits.push(`could not read ${failed.join(" · ")}`);
+    checkNote = bits.join(" · ");
+  }
+
+  async function updateNow(entry: ExtensionEntry, repoUrl: string): Promise<void> {
+    installing = entry.pkg;
+    error = null;
+    notice = null;
+    try {
+      const row = await library.installEntry(entry, repoUrl);
+      updates = new Map([...updates].filter(([pkg]) => pkg !== entry.pkg));
+      notice = `${entry.name} ${entry.version} installed — ${row.sources.length} sources`;
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e);
+    } finally {
+      installing = null;
+    }
+  }
+
+  /** An installed card's sources, listed on demand — a count does not tell you which sources. */
+  let expanded = $state<Set<string>>(new Set());
+
+  function toggleExpanded(extensionId: string): void {
+    const next = new Set(expanded);
+    if (next.has(extensionId)) next.delete(extensionId);
+    else next.add(extensionId);
+    expanded = next;
+  }
+
   function stateOf(entry: ExtensionEntry): string {
     const row = byPackage.get(entry.pkg);
     return updateState(row === undefined || row.versionCode === undefined ? undefined : { versionCode: row.versionCode }, entry);
@@ -316,6 +383,12 @@ import {
         <button class="btn primary" onclick={() => (section = "repositories")}>Add a repository</button>
       </div>
     {:else}
+      <div class="updbar">
+        <button class="chip" onclick={() => void checkUpdates()} disabled={checking}>
+          {checking ? "Checking…" : "Check for updates"}
+        </button>
+        {#if checkNote !== null}<span class="updnote">{checkNote}</span>{/if}
+      </div>
       <ul class="rows">
         {#each installed as row (row.extensionId)}
           {@const label = extensionLabel(row)}
@@ -343,6 +416,11 @@ import {
                 </span>
                 {#if row.builtin === true}<span class="badge">Built in</span>{/if}
                 {#if row.enabled === false}<span class="badge off">Disabled</span>{/if}
+                {#if owned.length > 0}
+                  <button class="caret" onclick={() => toggleExpanded(row.extensionId)} aria-expanded={expanded.has(row.extensionId)}>
+                    {expanded.has(row.extensionId) ? "▴ hide sources" : `▾ sources (${owned.length})`}
+                  </button>
+                {/if}
               </div>
               <label class="switch" title={row.enabled === false ? "Enable" : "Disable"}>
                 <input
@@ -355,6 +433,29 @@ import {
                 <span class="track" aria-hidden="true"><span class="knob"></span></span>
               </label>
             </div>
+
+            {#if updates.has(row.packageId)}
+              <div class="updrow">
+                <span>{updates.get(row.packageId)!.entry.version} is available{row.versionName === undefined ? "" : ` — you have ${row.versionName}`}</span>
+                <button
+                  class="chip small"
+                  disabled={installing === row.packageId}
+                  onclick={() => void updateNow(updates.get(row.packageId)!.entry, updates.get(row.packageId)!.repoUrl)}
+                >
+                  {installing === row.packageId ? "Installing…" : "Update"}
+                </button>
+              </div>
+            {/if}
+
+            {#if expanded.has(row.extensionId) && owned.length > 0}
+              <div class="srcrow">
+                {#each owned as source (source.id)}
+                  <button class="chip small link" title={`Browse ${source.name}`} onclick={() => go(pathTo("source", source.id))}>
+                    {source.name}{#if source.lang}<span class="lang">{source.lang}</span>{/if}
+                  </button>
+                {/each}
+              </div>
+            {/if}
 
             {#if row.extensionId === "builtin:komga"}
               <div class="hostform">
@@ -793,6 +894,58 @@ import {
     gap: var(--s2);
     overflow-x: auto;
     margin-bottom: var(--s3);
+  }
+
+  .updbar {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--s2);
+    margin-bottom: var(--s2);
+  }
+
+  .updnote {
+    font-size: var(--t-xs);
+    color: var(--text-2);
+  }
+
+  .updrow {
+    display: flex;
+    align-items: center;
+    gap: var(--s2);
+    margin: 0 0 var(--s2);
+    padding: var(--s2) var(--s3);
+    border-radius: var(--r2);
+    background: var(--surface-2);
+    font-size: var(--t-sm);
+    color: var(--text-2);
+  }
+
+  .updrow span {
+    margin-right: auto;
+  }
+
+  .caret {
+    all: unset;
+    cursor: pointer;
+    margin-top: var(--s1);
+    padding: 3px 8px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    font-size: var(--t-xs);
+    color: var(--text-2);
+  }
+
+  .caret:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  .srcrow {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--s2);
+    margin: 0 0 var(--s2);
   }
 
   .search {

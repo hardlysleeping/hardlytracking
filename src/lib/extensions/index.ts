@@ -134,6 +134,36 @@ export function parseIndex(raw: unknown): ExtensionIndex {
  */
 export type UpdateState = "new" | "up-to-date" | "update" | "downgrade";
 
+/**
+ * Which installed extensions one repository has a newer build of.
+ *
+ * Kept here, next to `updateState`, because the comparison is the part with a wrong answer that
+ * looks right: a built-in has no APK to update, an extension installed from a different repository
+ * must not be "updated" from this one (its version codes come from another publisher's counter), and
+ * a lower code is a downgrade the user did not ask for.
+ */
+export interface AvailableUpdate {
+  pkg: string;
+  entry: ExtensionEntry;
+  repoUrl: string;
+}
+
+export function planUpdates(
+  installed: ReadonlyArray<{ packageId: string; versionCode?: number; builtin?: boolean }>,
+  entries: ReadonlyArray<ExtensionEntry>,
+  repoUrl: string,
+): AvailableUpdate[] {
+  const rows = new Map(installed.map((row) => [row.packageId, row]));
+  const found: AvailableUpdate[] = [];
+  for (const entry of entries) {
+    const row = rows.get(entry.pkg);
+    if (row === undefined || row.builtin === true || row.versionCode === undefined) continue;
+    if (updateState({ versionCode: row.versionCode }, entry) !== "update") continue;
+    found.push({ pkg: entry.pkg, entry, repoUrl });
+  }
+  return found;
+}
+
 export function updateState(installed: { versionCode: number } | undefined, candidate: ExtensionEntry): UpdateState {
   if (installed === undefined) return "new";
   if (candidate.versionCode > installed.versionCode) return "update";

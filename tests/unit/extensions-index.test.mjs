@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseIndex, parseExtension, updateState } from "../../src/lib/extensions/index.ts";
+import { parseIndex, parseExtension, planUpdates, updateState } from "../../src/lib/extensions/index.ts";
 
 /** Shape taken from keiyoushi's live `index.json` (v2), trimmed to the fields we read. */
 const V2 = {
@@ -89,4 +89,40 @@ test("update state is decided by versionCode, and never downgrades", () => {
   assert.equal(updateState({ versionCode: 106000 }, entry), "up-to-date");
   assert.equal(updateState({ versionCode: 105999 }, entry), "update");
   assert.equal(updateState({ versionCode: 106001 }, entry), "downgrade");
+});
+
+
+/**
+ * `planUpdates` is what "Check for updates" asks once per repository. Its wrong answers all look
+ * plausible: updating a built-in that has no APK, "updating" an extension from a repository that did
+ * not publish it, or offering a downgrade because a counter went backwards.
+ */
+function entry(pkg, versionCode, version) {
+  return {
+    name: pkg,
+    pkg,
+    version,
+    versionCode,
+    lib: "1.6",
+    apkUrl: `https://example.test/${pkg}.apk`,
+    contentWarning: "SAFE",
+    sources: [],
+  };
+}
+
+test("planUpdates offers only a genuinely newer build", () => {
+  const installed = [{ packageId: "a", versionCode: 10 }, { packageId: "b", versionCode: 20 }, { packageId: "c", versionCode: 30 }];
+  const found = planUpdates(installed, [entry("a", 11, "1.1"), entry("b", 20, "2.0"), entry("c", 29, "2.9")], "https://repo.test/index.json");
+  assert.deepEqual(found.map((row) => row.pkg), ["a"]);
+  assert.equal(found[0].entry.version, "1.1");
+  assert.equal(found[0].repoUrl, "https://repo.test/index.json");
+});
+
+test("a built-in is never offered as an update, and an unknown package is not installed", () => {
+  const installed = [{ packageId: "builtin:komga", versionCode: 1, builtin: true }];
+  assert.deepEqual(planUpdates(installed, [entry("builtin:komga", 9, "9.0"), entry("stranger", 9, "9.0")], "r"), []);
+});
+
+test("a row with no version code cannot be compared, so it is left alone", () => {
+  assert.deepEqual(planUpdates([{ packageId: "a" }], [entry("a", 99, "9.9")], "r"), []);
 });
