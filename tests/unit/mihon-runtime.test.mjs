@@ -79,3 +79,31 @@ test("the base URL is loopback, never a LAN address", async () => {
   assert.equal(loopbackBase(8747), "http://127.0.0.1:8747");
   assert.equal(loopbackBase(0), "http://127.0.0.1:0");
 });
+
+test("the desktop adapter speaks the same four calls as the phone one", async () => {
+  const calls = [];
+  const invoke = async (command, args) => {
+    calls.push([command, args]);
+    if (command === "mihon_runtime_start") return { running: true, port: 8747 };
+    if (command === "mihon_runtime_status") return { running: true, port: 8747 };
+    return undefined;
+  };
+  const { tauriRuntimePlugin } = await import("../../src/lib/mihon-runtime.ts");
+  const plugin = tauriRuntimePlugin(invoke);
+  assert.deepEqual(await plugin.status(), { running: true, port: 8747 });
+  assert.deepEqual(await plugin.start({ port: 8747 }), { port: 8747 });
+  await plugin.stop();
+  assert.deepEqual(calls, [
+    ["mihon_runtime_status", undefined],
+    ["mihon_runtime_start", { port: 8747 }],
+    ["mihon_runtime_stop", undefined],
+  ]);
+});
+
+test("the desktop adapter reports a stopped host as stopped, not as port zero running", async () => {
+  const { tauriRuntimePlugin } = await import("../../src/lib/mihon-runtime.ts");
+  const plugin = tauriRuntimePlugin(async () => ({ running: false, port: 0 }));
+  assert.deepEqual(await plugin.status(), { running: false, port: 0 });
+  // Through the seam that is "no host": the app falls back instead of pointing at :0.
+  assert.equal(await startNativeRuntime(8747, async () => plugin), null);
+});

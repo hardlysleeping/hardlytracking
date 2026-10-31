@@ -44,6 +44,35 @@ export function loopbackBase(port: number): string {
   return `http://127.0.0.1:${port}`;
 }
 
+/** The Tauri command bridge, as `@tauri-apps/api/core`'s `invoke` looks. */
+export type Invoke = <T>(command: string, args?: Record<string, unknown>) => Promise<T>;
+
+/**
+ * The desktop adapter: the same four calls, answered by `src-tauri/src/runtime.rs`.
+ *
+ * The desktop does not embed a JVM in the webview process — it starts `MExtensionServer` as a child
+ * and waits for `/capabilities`. From here that is indistinguishable from the iPhone's in-process
+ * runtime, which is the point: one seam, two shells.
+ */
+export function tauriRuntimePlugin(invoke: Invoke): MihonRuntimePlugin {
+  return {
+    async start({ port }) {
+      const answer = await invoke<{ port: number; running: boolean }>("mihon_runtime_start", { port });
+      return { port: answer.port };
+    },
+    async status() {
+      const answer = await invoke<{ running: boolean; port: number }>("mihon_runtime_status");
+      return { running: answer.running === true, port: answer.port };
+    },
+    async pause() {
+      // A desktop has no background-suspension contract to honour; the child keeps serving.
+    },
+    async stop() {
+      await invoke("mihon_runtime_stop");
+    },
+  };
+}
+
 /**
  * The plugin, when this shell has one.
  *
@@ -52,7 +81,16 @@ export function loopbackBase(port: number): string {
  * trusting the name.
  */
 async function loadNativePlugin(): Promise<MihonRuntimePlugin | null> {
-  if (detectPlatform() !== "capacitor") return null;
+  const platform = detectPlatform();
+  if (platform === "tauri") {
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      return tauriRuntimePlugin(invoke as Invoke);
+    } catch {
+      return null;
+    }
+  }
+  if (platform !== "capacitor") return null;
   try {
     const { registerPlugin } = await import("@capacitor/core");
     return registerPlugin<MihonRuntimePlugin>("MihonRuntime");
@@ -85,5 +123,23 @@ export async function startNativeRuntime(
     // caller: this build has no on-device host, so the default one is used and the UI shows the
     // warning the registry already produces.
     return null;
+  }
+}
+
+/**
+ * A `fetch` that can reach a loopback host, for shells where the webview's own cannot.
+ *
+ * `tauri://localhost` is a different origin from `http://127.0.0.1:<port>`, and the extension host is
+ * not ours to add CORS headers to, so those calls go through Rust via `@tauri-apps/plugin-http`.
+ * Everywhere else this is `undefined` and the webview's own `fetch` is used — which is also the
+ * reason this returns a function rather than patching a global: a browser build keeps its real one.
+ */
+export async function shellFetch(): Promise<typeof fetch | undefined> {
+  if (detectPlatform() !== "tauri") return undefined;
+  try {
+    const { fetch: native } = await import("@tauri-apps/plugin-http");
+    return native as unknown as typeof fetch;
+  } catch {
+    return undefined;
   }
 }

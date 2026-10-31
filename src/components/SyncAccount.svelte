@@ -35,7 +35,7 @@
   const config = syncConfig(envOfBuild());
 
   let session = $state<SyncSession | null>(config === null ? null : readSession());
-  let state = $state<SyncState | null>(null);
+  let account = $state<SyncState | null>(null);
   let email = $state("");
   let code = $state("");
   let stage = $state<"email" | "code">("email");
@@ -45,7 +45,7 @@
   /** What the server says about this account, every time the section is shown. */
   async function check(): Promise<void> {
     if (config === null || session === null) return;
-    state = await entitlement({ config, session });
+    account = await entitlement({ config, session });
   }
 
   $effect(() => {
@@ -95,7 +95,7 @@
     if (config === null || session === null) return;
     await signOut({ config, session });
     session = null;
-    state = null;
+    account = null;
     note = "";
   }
 
@@ -153,19 +153,19 @@
     {:else}
       <div class="row">
         <span>
-          {#if state === null}
+          {#if account === null}
             Checking…
-          {:else if state.state === "active"}
-            Active{#if state.expiresAt !== null}<em class="sub">Paid to {until(state.expiresAt)}</em>{/if}
-          {:else if state.state === "none"}
-            Not subscribed<em class="sub">{state.reason}</em>
+          {:else if account.state === "active"}
+            Active{#if account.expiresAt !== null}<em class="sub">Paid to {until(account.expiresAt)}</em>{/if}
+          {:else if account.state === "none"}
+            Not subscribed<em class="sub">{account.reason}</em>
           {:else}
-            Could not check<em class="sub">{state.reason}</em>
+            Could not check<em class="sub">{account.reason}</em>
           {/if}
         </span>
         <button class="chip" disabled={busy} onclick={() => void check()}>Check</button>
       </div>
-      {#if state !== null && state.state !== "active"}
+      {#if account !== null && account.state !== "active"}
         <div class="chips">
           <button class="chip on" disabled={busy} onclick={() => void buy("monthly")}>$1 / month</button>
           <button class="chip on" disabled={busy} onclick={() => void buy("yearly")}>$10 / year</button>

@@ -14,7 +14,7 @@ import { BACKGROUND_GRACE_MS, viewStateKey } from "../lib/history";
 import { nextUnread } from "../lib/library/continue";
 import { settings } from "./settings.svelte";
 import { installTrackerSync } from "../lib/trackers/sync";
-import { startNativeRuntime } from "../lib/mihon-runtime";
+import { startNativeRuntime, shellFetch } from "../lib/mihon-runtime";
 import { imageCache } from "../lib/cache/images";
 import type { Chapter, Page, Series, Source } from "../api/source";
 
@@ -51,7 +51,13 @@ class LibraryState {
       // before the providers are built. Everywhere else this resolves to `null` without doing any
       // work, and the app's own `/api/dalvik` proxy stays the default host.
       const nativeBase = await startNativeRuntime();
-      this.profile = await openLibraryProfile(nativeBase === null ? {} : { dalvikBase: nativeBase });
+      // The desktop shell needs Rust's HTTP client for loopback (CORS), and that same client is what
+      // makes a repository index reachable with no `/api/repo` proxy in the app.
+      const fetchImpl = await shellFetch();
+      this.profile = await openLibraryProfile({
+        ...(nativeBase === null ? {} : { dalvikBase: nativeBase }),
+        ...(fetchImpl === undefined ? {} : { fetchImpl }),
+      });
       this.library = await this.profile.store.listSeries();
       this.extensions = await this.profile.store.listExtensions();
       this.repos = await this.profile.store.listRepos();

@@ -5,8 +5,8 @@
  * SQLite inside the packaged apps, IndexedDB in a browser tab. The rest of the app
  * only sees `Database`, so a store written for one engine runs on both.
  *
- * Only the browser engine is written today; the packaged one arrives with the
- * desktop card (T6) and must land here, not in a second store.
+ * Only two engines exist: IndexedDB in a browser tab, SQLite (`sqlite.ts`) in the packaged desktop
+ * app. Both are reached from here so that the store is written once.
  */
 
 export const STORES = [
@@ -16,6 +16,7 @@ export const STORES = [
   "prefs",
   "pages",
   "categories",
+  "sourceMarks",
   "extensions",
   "extensionPrefs",
   "history",
@@ -52,6 +53,7 @@ const KEY_PATH: Record<StoreName, string> = {
   prefs: "key",
   pages: "chapterId",
   categories: "id",
+  sourceMarks: "id",
   extensions: "extensionId",
   extensionPrefs: "key",
   history: "chapterId",
@@ -84,7 +86,7 @@ export interface Database {
 }
 
 const DB_NAME = "hardlytracking";
-const DB_VERSION = 13;
+const DB_VERSION = 14;
 
 function wrap<T>(request: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -93,9 +95,13 @@ function wrap<T>(request: IDBRequest<T>): Promise<T> {
   });
 }
 
-export async function openDatabase(): Promise<Database> {
+export async function openDatabase(options: { connect?: import("./sqlite").SqlConnector } = {}): Promise<Database> {
+  // A Tauri window can have IndexedDB and must still get SQLite: a library in the webview's origin
+  // storage is invisible to the user, awkward to back up, and cleared by accident. Imported
+  // dynamically so a browser build never pulls the plugin into the bundle.
   if ("__TAURI_INTERNALS__" in globalThis) {
-    throw new Error("the packaged database is not wired yet (card T6); run the web build");
+    const { SqliteDatabase, LOCAL_DATABASE_FILE } = await import("./sqlite");
+    return SqliteDatabase.open(LOCAL_DATABASE_FILE, options.connect);
   }
   return openIndexedDb();
 }

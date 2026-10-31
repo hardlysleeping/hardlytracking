@@ -33,3 +33,6 @@ dist-bench/
 
 # The desktop extension host jar: a 100 MB build output, downloaded or copied in, never committed.
 plugins/mihon-runtime/linux/*.jar
+
+# Rust build output: 6 GB of object files, never source.
+src-tauri/target/

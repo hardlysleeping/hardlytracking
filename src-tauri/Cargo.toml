@@ -1,0 +1,37 @@
+[package]
+name = "hardlytracking"
+version = "0.1.0"
+description = "HardlyTracking - a manga reader with Mihon extension support"
+authors = ["hardlysleeping"]
+edition = "2021"
+
+[lib]
+# The `_lib` suffix keeps the library name distinct from the binary on Windows.
+name = "hardlytracking_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Loopback calls from the webview are cross-origin (`tauri://localhost` → `http://127.0.0.1`), and the
+# extension host is not ours to add CORS headers to. This plugin sends them through Rust instead.
+tauri-plugin-http = "2.8.3"
+# The library is SQLite on the desktop, so it is a file the user can find and back up rather than
+# storage hidden in a webview origin. Only the sqlite driver is compiled in.
+tauri-plugin-sql = { version = "2", features = ["sqlite"] }
+
+# `prctl(PR_SET_PDEATHSIG)` — the child JVM must die with this process even when this process is
+# killed with a signal it cannot handle.
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true
