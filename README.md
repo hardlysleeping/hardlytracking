@@ -95,6 +95,37 @@ npm run serve          # http://127.0.0.1:8460 (PORT / RUNTIME_URL override)
 
 Or the whole stack: `docker compose up -d` (app on :8460, runtime behind it).
 
+### Docker
+
+The app alone, as one container — the built Svelte bundle plus the proxy that gives it a single
+origin:
+
+```sh
+docker run -d --name hardlytracking -p 8460:8460 \
+  -e RUNTIME_URL=http://127.0.0.1:4567 \
+  -v hardlytracking-data:/data \
+  ghcr.io/hardlysleeping/hardlytracking:latest
+```
+
+`RUNTIME_URL` points at a Mihon extension host (Suwayomi is the one this was built against);
+`DALVIK_URL` does the same for an M-Extension-Server, and both are optional — without either the app
+still runs, it just has no sources to browse. `/data` holds the extension registry this host
+installed for a paired phone, so keep the volume if you use that.
+
+What the image deliberately does **not** contain is an extension host. Suwayomi and
+M-Extension-Server are third-party images, and the app treats either as an execution engine rather
+than its source of truth — `docker-compose.yml` wires all three together:
+
+```sh
+docker compose up -d          # web + Suwayomi + M-Extension-Server
+```
+
+The library, read state, downloads and settings live in the browser's IndexedDB, so the container is
+otherwise stateless. Images are published on every `v*` tag as `latest`, the minor line and the exact
+version (`0.1.0`); `--build-arg PUBLIC_SUPABASE_URL=… --build-arg PUBLIC_SUPABASE_ANON_KEY=…` bakes
+HardlySyncing's sign-in into a local build (both values are public — the anon key ships in every
+bundle by design).
+
 The runtime must be a Mihon extension host on `:4567`. Suwayomi is the one this was built
 against: `ghcr.io/suwayomi/suwayomi-server:v2.4.2366`.
 

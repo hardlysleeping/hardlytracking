@@ -3,22 +3,23 @@
 #   docker compose up -d
 #   open http://<host>:8460
 #
-# `web` serves the built Svelte app and proxies /api/mihon/* to `runtime` and /api/dalvik to
-# `dalvik`. `runtime` is Suwayomi (a library server); `dalvik` is M-Extension-Server, which runs
-# Mihon/Komikku APKs themselves. The app's library and read state are its own — these hosts are
-# execution engines, never the source of truth.
+# `web` is our own image: the built Svelte app plus the proxy that gives it a single origin. It is
+# built from this directory with `docker compose build`, or pulled from ghcr.
+# `runtime` is Suwayomi (a library server); `dalvik` is M-Extension-Server, which runs Mihon/Komikku
+# APKs themselves. The app's library and read state are its own — these hosts are execution engines,
+# never the source of truth.
 services:
   web:
-    image: node:22-alpine
-    working_dir: /app
-    command: ["node", "server/proxy.mjs"]
+    image: ghcr.io/hardlysleeping/hardlytracking:latest
+    build: .
     environment:
       PORT: "8460"
+      HOST: "0.0.0.0"
       RUNTIME_URL: "http://runtime:4567"
       DALVIK_URL: "http://dalvik:8080"
     volumes:
-      - ./dist:/app/dist:ro
-      - ./server:/app/server:ro
+      # The extension registry: what this host installed, and the APKs themselves.
+      - tracking-data:/data
     ports:
       - "8460:8460"
     depends_on:
@@ -56,3 +57,4 @@ services:
 
 volumes:
   suwayomi-data:
+  tracking-data:

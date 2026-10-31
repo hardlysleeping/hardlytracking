@@ -1,0 +1,17 @@
+node_modules
+dist
+dist-ipa
+dist.orphan-*
+data
+.git
+.github
+.env
+.env.*
+*.log
+
+# The iOS shell and the embedded JVM runtime: the web build never touches either, and
+# `plugins/mihon-runtime/linux` is a ~100 MB jar on the build machine.
+ios
+plugins/mihon-runtime/linux
+plugins/mihon-runtime/ios/Frameworks
+plugins/mihon-runtime/ios/Runtime
