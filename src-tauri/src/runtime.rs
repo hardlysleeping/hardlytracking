@@ -138,8 +138,46 @@ fn resolve_jar(app: &AppHandle) -> Result<PathBuf, String> {
     ))
 }
 
-fn resolve_java() -> String {
-    std::env::var("HARDLYTRACKING_JAVA").unwrap_or_else(|_| "java".to_string())
+/// The JVM that runs the host: an override, the JRE the app carries, or whatever `java` is on PATH.
+///
+/// The bundled JRE comes second so a developer can point at their own build, and before PATH because
+/// the app must not depend on the machine having Java installed at all — that is the difference
+/// between an installer that works and one that opens a window with no extension host. The bundle is
+/// per platform (`scripts/prepare-runtime.mjs`), so the path is the same everywhere except the `.exe`.
+fn java_candidates(resources: Option<&Path>, executable: Option<&Path>) -> Vec<PathBuf> {
+    let binary = if cfg!(windows) { "java.exe" } else { "java" };
+    let mut candidates = Vec::new();
+    if let Ok(explicit) = std::env::var("HARDLYTRACKING_JAVA") {
+        if !explicit.trim().is_empty() {
+            candidates.push(PathBuf::from(explicit));
+        }
+    }
+    if let Some(directory) = resources {
+        candidates.push(directory.join("runtime").join("jre").join("bin").join(binary));
+    }
+    if let Some(directory) = executable.and_then(|path| path.parent()) {
+        candidates.push(directory.join("runtime").join("jre").join("bin").join(binary));
+    }
+    // Last: a system JVM. Named rather than resolved, so the spawn error can say which one was tried.
+    candidates.push(PathBuf::from(binary));
+    candidates
+}
+
+fn resolve_java(app: &AppHandle) -> PathBuf {
+    let resources = app.path().resource_dir().ok();
+    let executable = std::env::current_exe().ok();
+    let candidates = java_candidates(resources.as_deref(), executable.as_deref());
+    for candidate in &candidates {
+        // The bare name is the PATH fallback: it has no parent worth checking, and `is_file` on a
+        // relative name would test the working directory instead of PATH.
+        if candidate.components().count() == 1 || candidate.is_file() {
+            return candidate.clone();
+        }
+    }
+    candidates
+        .last()
+        .cloned()
+        .unwrap_or_else(|| PathBuf::from("java"))
 }
 
 /// Where the JVM keeps its own state: one folder per user, created on demand.
@@ -189,7 +227,7 @@ pub fn mihon_runtime_start(
         .try_clone()
         .map_err(|error| format!("could not open the host log twice: {error}"))?;
 
-    let java = resolve_java();
+    let java = resolve_java(&app);
     let mut command = Command::new(&java);
     command
         .arg("-jar")
@@ -222,8 +260,9 @@ pub fn mihon_runtime_start(
 
     let child = command.spawn().map_err(|error| {
         format!(
-            "could not start {java} with {}: {error}. Set HARDLYTRACKING_JAVA to a JDK 21 binary \
-             if java is not on PATH.",
+            "could not start {} with {}: {error}. The app carries its own JRE; if it is missing, run \
+             `node scripts/prepare-runtime.mjs`, or set HARDLYTRACKING_JAVA to a Java 21 binary.",
+            java.display(),
             jar.display()
         )
     })?;
@@ -297,5 +336,51 @@ pub fn stop(state: &RuntimeState) {
     }
     if let Ok(mut port) = state.port.lock() {
         *port = 0;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The bundled JRE has to win over PATH, or an installer on a machine without Java opens a window
+    /// with no extension host — and the app cannot tell the difference from "the source is broken".
+    #[test]
+    fn the_jre_the_app_carries_comes_before_path() {
+        let candidates = java_candidates(
+            Some(Path::new("/app/resources")),
+            Some(Path::new("/app/bin/hardlytracking")),
+        );
+        let names: Vec<String> = candidates.iter().map(|path| path.display().to_string()).collect();
+        let bundled = if cfg!(windows) {
+            "/app/resources/runtime/jre/bin/java.exe"
+        } else {
+            "/app/resources/runtime/jre/bin/java"
+        };
+        assert_eq!(names[0], bundled, "resources first: {names:?}");
+        // Beside the executable is the unpacked-archive layout, and it comes next.
+        let beside = if cfg!(windows) {
+            "/app/bin/runtime/jre/bin/java.exe"
+        } else {
+            "/app/bin/runtime/jre/bin/java"
+        };
+        assert_eq!(names[1], beside, "then beside the exe: {names:?}");
+        // PATH is the last resort and stays a bare name, so the spawn error can name it.
+        assert_eq!(names.last().map(String::as_str), Some(if cfg!(windows) { "java.exe" } else { "java" }));
+    }
+
+    #[test]
+    fn an_override_beats_the_bundle() {
+        // `set_var` is unsafe in edition 2024 and process-wide either way; this test is the only one
+        // that reads it, and it restores the value.
+        let previous = std::env::var("HARDLYTRACKING_JAVA").ok();
+        unsafe { std::env::set_var("HARDLYTRACKING_JAVA", "/opt/jdk-21/bin/java") };
+        let candidates = java_candidates(None, None);
+        let first = candidates.first().map(|path| path.display().to_string());
+        match previous {
+            Some(value) => unsafe { std::env::set_var("HARDLYTRACKING_JAVA", value) },
+            None => unsafe { std::env::remove_var("HARDLYTRACKING_JAVA") },
+        }
+        assert_eq!(first.as_deref(), Some("/opt/jdk-21/bin/java"));
     }
 }

@@ -1,0 +1,181 @@
+name: desktop
+
+# The PC build, on all three platforms, with the extension host inside it.
+#
+# A Windows `.exe` cannot be produced on the Linux workstation and a macOS `.dmg` cannot be produced
+# anywhere but a Mac, so the runners are the only place these exist. Each job downloads the pinned
+# M-Extension-Server bundle for its platform (`scripts/prepare-runtime.mjs`) — that is the jar and a
+# JRE — builds, and checks the packaged app actually carries them before anything is uploaded.
+#
+# On a `v*` tag the installers go onto the release. On a manual run they are artifacts only.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            name: linux-x86_64
+            target: x86_64-unknown-linux-gnu
+            bundles: deb,appimage
+          - os: windows-latest
+            name: windows-x86_64
+            target: x86_64-pc-windows-msvc
+            bundles: nsis,msi
+          - os: macos-latest
+            name: macos-arm64
+            target: aarch64-apple-darwin
+            bundles: app,dmg
+          - os: macos-13
+            name: macos-x86_64
+            target: x86_64-apple-darwin
+            bundles: app,dmg
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # The Linux webview is WebKitGTK, and Tauri's own prerequisites are not on the runner image.
+      - name: Linux build dependencies
+        if: matrix.os == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev \
+            librsvg2-dev patchelf libssl-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - run: npm ci
+
+      # The jar and the JRE, pinned by version and checked by SHA-256. Before the Rust build, because
+      # `tauri.conf.json` lists them as bundle resources and the build fails without them.
+      - name: Prepare the extension host
+        run: node scripts/prepare-runtime.mjs
+
+      - run: npm run build
+
+      - name: Build the bundles
+        run: npx tauri build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
+
+      # A bundle that compiles but carries no JVM opens a window with no extension host, and the user
+      # cannot tell that from a broken source. Check the packaged output, not the build tree.
+      - name: The bundle carries the host (Linux)
+        if: matrix.os == 'ubuntu-22.04'
+        run: |
+          set -euo pipefail
+          out="src-tauri/target/${{ matrix.target }}/release/bundle"
+          deb=$(find "$out/deb" -name '*.deb' -print -quit)
+          [ -n "$deb" ] || { echo "✗ no .deb"; exit 1; }
+          dpkg-deb --fsys-tarfile "$deb" | tar -tf - > /tmp/deb-list.txt
+          grep -q 'runtime/runner\.jar' /tmp/deb-list.txt || { echo "✗ no runner.jar in $deb"; exit 1; }
+          grep -q 'runtime/jre/bin/java$' /tmp/deb-list.txt || { echo "✗ no JRE in $deb"; exit 1; }
+          echo "✓ $deb carries runner.jar and a JRE"
+
+          appimage=$(find "$out/appimage" -name '*.AppImage' -print -quit)
+          [ -n "$appimage" ] || { echo "✗ no AppImage"; exit 1; }
+          "$appimage" --appimage-extract >/dev/null
+          find squashfs-root -path '*runtime/runner.jar' -print -quit | grep -q . || { echo "✗ no runner.jar in the AppImage"; exit 1; }
+          find squashfs-root -path '*runtime/jre/bin/java' -print -quit | grep -q . || { echo "✗ no JRE in the AppImage"; exit 1; }
+          echo "✓ $appimage carries runner.jar and a JRE"
+
+      - name: The bundle carries the host (macOS)
+        if: startsWith(matrix.os, 'macos')
+        run: |
+          set -euo pipefail
+          app=$(find "src-tauri/target/${{ matrix.target }}/release/bundle" -name '*.app' -maxdepth 3 -print -quit)
+          [ -n "$app" ] || { echo "✗ no .app"; exit 1; }
+          [ -f "$app/Contents/Resources/runtime/runner.jar" ] || { echo "✗ no runner.jar in $app"; exit 1; }
+          [ -x "$app/Contents/Resources/runtime/jre/bin/java" ] || { echo "✗ no executable JRE in $app"; exit 1; }
+          "$app/Contents/Resources/runtime/jre/bin/java" -version
+          echo "✓ $app carries runner.jar and a working JRE"
+
+      - name: The bundle carries the host (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: bash
+        run: |
+          set -euo pipefail
+          release="src-tauri/target/${{ matrix.target }}/release"
+          # Tauri copies bundle resources beside the executable before the installer is built, so this
+          # tree is what ends up inside the .exe.
+          [ -f "$release/runtime/runner.jar" ] || { echo "::error::no runtime/runner.jar beside the exe"; exit 1; }
+          [ -f "$release/runtime/jre/bin/java.exe" ] || { echo "::error::no runtime/jre/bin/java.exe beside the exe"; exit 1; }
+          "$release/runtime/jre/bin/java.exe" -version
+          ls -la "$release"/bundle/nsis/*.exe "$release"/bundle/msi/*.msi
+          echo "✓ the installer is built from a tree that carries the host"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hardlytracking-${{ matrix.name }}
+          if-no-files-found: error
+          path: |
+            src-tauri/target/${{ matrix.target }}/release/bundle/deb/*.deb
+            src-tauri/target/${{ matrix.target }}/release/bundle/appimage/*.AppImage
+            src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*.exe
+            src-tauri/target/${{ matrix.target }}/release/bundle/msi/*.msi
+            src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      # Named by hand rather than by the bundler, so the release page reads the same for every
+      # platform: HardlyTracking_<version>_<platform>.<ext>.
+      - name: Rename for the release page
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          cd dist
+          for file in *.exe *.msi *.deb *.AppImage *.dmg; do
+            [ -e "$file" ] || continue
+            case "$file" in
+              *arm64*|*aarch64*) platform=macos-arm64 ;;
+              *.dmg)             platform=macos-x86_64 ;;
+              *.exe|*.msi)       platform=windows-x86_64 ;;
+              *)                 platform=linux-x86_64 ;;
+            esac
+            ext="${file##*.}"
+            cp "$file" "HardlyTracking_${version}_${platform}.${ext}"
+          done
+          ls -la
+
+      # A tag is pushed before the artifacts exist, so the release is created here rather than being
+      # assumed. Never a draft: a release nobody published is a release nobody downloaded.
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          cd dist
+          if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" \
+              --title "HardlyTracking ${TAG#v}" --generate-notes
+          fi
+          gh release upload "$TAG" HardlyTracking_* --clobber --repo "$GITHUB_REPOSITORY"

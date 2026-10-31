@@ -33,6 +33,10 @@ dist-bench/
 
 # The desktop extension host jar: a 100 MB build output, downloaded or copied in, never committed.
 plugins/mihon-runtime/linux/*.jar
+# `scripts/prepare-runtime.mjs` unpacks the pinned M-Extension-Server release (jar + JRE) here; both
+# are downloaded artefacts and both are ~100 MB.
+src-tauri/runtime/
+plugins/mihon-runtime/cache/
 
 # The HT-Server's extension registry (data/host-extensions.json + the APKs beside it). Machine state:
 # a list of what this PC installed, never source.
