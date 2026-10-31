@@ -235,30 +235,34 @@ jobs:
           merge-multiple: true
 
       # Named by hand rather than by the bundler, so the release page reads the same for every
-      # platform: HardlyTracking_<version>_<platform>.<ext>.
-      - name: Rename for the release page
+      # platform: HardlyTracking_<version>_<platform>.<ext>. Artifacts keep their bundler's folder
+      # (`nsis/`, `msi/`, `dmg/`), so this walks the tree instead of assuming a flat one — the first
+      # attempt uploaded the Linux tarball and nothing else, because `*.exe` was one directory down.
+      - name: Collect and rename
         env:
           TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
           version="${TAG#v}"
-          cd dist
-          for file in *.exe *.msi *.deb *.AppImage *.dmg *.tar.gz; do
-            [ -e "$file" ] || continue
-            case "$file" in
+          mkdir -p out
+          while IFS= read -r file; do
+            base=$(basename "$file")
+            case "$base" in
               *arm64*|*aarch64*) platform=macos-arm64 ;;
               *.dmg)             platform=macos-x86_64 ;;
               *.exe|*.msi)       platform=windows-x86_64 ;;
+              *.AppImage|*.deb)  platform=linux-x86_64 ;;
               *.tar.gz)          platform=linux-x86_64-portable ;;
-              *)                 platform=linux-x86_64 ;;
+              *) continue ;;
             esac
-            case "$file" in
+            case "$base" in
               *.tar.gz) ext=tar.gz ;;
-              *)        ext="${file##*.}" ;;
+              *)        ext="${base##*.}" ;;
             esac
-            cp "$file" "HardlyTracking_${version}_${platform}.${ext}"
-          done
-          ls -la
+            cp "$file" "out/HardlyTracking_${version}_${platform}.${ext}"
+          done < <(find dist -type f \( -name '*.exe' -o -name '*.msi' -o -name '*.deb' -o -name '*.AppImage' -o -name '*.dmg' -o -name '*.tar.gz' \))
+          ls -la out
+          test -n "$(ls -A out)" || { echo "✗ nothing to publish"; exit 1; }
 
       # A tag is pushed before the artifacts exist, so the release is created here rather than being
       # assumed. Never a draft: a release nobody published is a release nobody downloaded.
@@ -268,7 +272,7 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          cd dist
+          cd out
           if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release create "$TAG" --repo "$GITHUB_REPOSITORY" \
               --title "HardlyTracking ${TAG#v}" --generate-notes
