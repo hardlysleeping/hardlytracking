@@ -234,6 +234,11 @@ jobs:
     name: macos-x86_64
     runs-on: macos-latest
     continue-on-error: true
+    # It creates the release page itself when it gets there first, which needs write access — without
+    # this the job built a good dmg and then died with `HTTP 403: Resource not accessible by
+    # integration` followed by `release not found`.
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -328,11 +333,13 @@ jobs:
           mkdir -p out
           while IFS= read -r file; do
             base=$(basename "$file")
-            # Already named for the release page by the job that built it (the portable archives are
-            # named by hand because no bundler produces them): copy as-is, or the guess below renames
-            # `..._windows-x86_64-portable.zip` into something wrong.
+            # Only the two names this workflow writes itself skip the rename: the portable archives and
+            # the Linux tarball. Everything else that starts with `HardlyTracking_` came from a
+            # bundler — NSIS names its output `HardlyTracking_<v>_x64-setup.exe` — and matching that
+            # prefix too published `x64-setup.exe` and `aarch64.dmg` instead of `windows-x86_64.exe`
+            # and `macos-arm64.dmg`.
             case "$base" in
-              HardlyTracking_*)
+              *-portable.zip|*_linux-x86_64.tar.gz)
                 cp "$file" "out/$base"
                 continue
                 ;;
