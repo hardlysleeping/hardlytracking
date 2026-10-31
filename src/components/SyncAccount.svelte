@@ -10,6 +10,11 @@
    *
    * - **no Supabase in this build** — the whole section is absent. A build that
    *   cannot check is not a build that should draw a paid switch.
+   * - **no shop in this build** — an app-store build (iOS, Android) draws no
+   *   price and calls no Checkout: Apple's 3.1.1 forbids sending someone to an
+   *   outside checkout for a subscription, and there is no StoreKit product to
+   *   sell instead. The section appears only for someone already signed in, so
+   *   a subscription bought on the web is visible and nothing invites a sale.
    * - **signed out** — an email and a link, which is exactly the reader's sign-in:
    *   the same SDK, the same `signInWithOtp`, the same email template. Nothing to
    *   type back in, and nothing to configure on the project.
@@ -21,11 +26,19 @@
   import {
     CHECKOUT_OPENED,
     LINK_SENT,
+    NOT_SOLD_HERE,
     createSyncAccount,
     syncConfig,
   } from "../api/sync-account";
 
   const account = createSyncAccount(syncConfig());
+
+  /**
+   * Whether this build sells at all. An app-store build does not: no price, no
+   * Checkout, and nothing on this screen pointing anywhere to buy one. The row
+   * is still read, so a subscription bought on the web is visible here.
+   */
+  const canBuy = account !== null && account.shop === "stripe";
 
   let session = $state<{ userId: string; email: string } | null>(null);
   let entitlementState = $state<Awaited<ReturnType<NonNullable<typeof account>["entitlement"]>> | null>(null);
@@ -33,6 +46,8 @@
   let busy = $state(false);
   let sent = $state(false);
   let note = $state("");
+  /** False until the first look at this device's session has finished. */
+  let ready = $state(false);
 
   /** Who this device is, and what the server says about them. No cache. */
   async function refresh(): Promise<void> {
@@ -40,6 +55,7 @@
     const found = await account.session();
     session = found === null ? null : { userId: found.userId, email: found.email };
     entitlementState = found === null ? null : await account.entitlement();
+    ready = true;
   }
 
   $effect(() => {
@@ -62,7 +78,7 @@
   }
 
   async function buy(plan: "monthly" | "yearly"): Promise<void> {
-    if (account === null) return;
+    if (account === null || !canBuy) return;
     busy = true;
     note = "";
     try {
@@ -86,7 +102,7 @@
   const until = (at: number | null): string => (at === null ? "" : new Date(at).toLocaleDateString());
 </script>
 
-{#if account !== null}
+{#if account !== null && (canBuy || (ready && session !== null))}
   <section class="group">
     <h2>HardlySyncing</h2>
     <p class="hint">
@@ -132,10 +148,14 @@
         <button class="chip" disabled={busy} onclick={() => void refresh()}>Check</button>
       </div>
       {#if entitlementState !== null && entitlementState.state !== "active"}
-        <div class="chips">
-          <button class="chip on" disabled={busy} onclick={() => void buy("monthly")}>$1 / month</button>
-          <button class="chip on" disabled={busy} onclick={() => void buy("yearly")}>$10 / year</button>
-        </div>
+        {#if canBuy}
+          <div class="chips">
+            <button class="chip on" disabled={busy} onclick={() => void buy("monthly")}>$1 / month</button>
+            <button class="chip on" disabled={busy} onclick={() => void buy("yearly")}>$10 / year</button>
+          </div>
+        {:else}
+          <p class="hint">{NOT_SOLD_HERE}</p>
+        {/if}
       {/if}
       <div class="chips">
         <button class="chip" disabled={busy} onclick={() => void leave()}>Sign out</button>

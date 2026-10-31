@@ -25,6 +25,9 @@
  * - **Its own price ids.** The service sells what it was configured to sell; a
  *   client that named a price could be talked into selling something else.
  * - **A cache of the grant.** The row is the receipt.
+ * - **A shop in the app-store build.** `shopOf` answers `none` for iOS and
+ *   Android, so no store build draws a Checkout button or can reach one. The
+ *   row is still read: a subscription bought on the web is the same row here.
  */
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
@@ -61,13 +64,64 @@ export type SyncState =
   | { readonly state: "none"; readonly reason: string }
   | { readonly state: "unreachable"; readonly reason: string };
 
-/** What the service said when it would not sell. */
+/** What the service said when it would not sell — or what this build said first. */
 export type CheckoutFailure =
   | "not_signed_in"
   | "unknown_plan"
   | "plan_not_offered"
   | "billing_unreachable"
-  | "no_url";
+  | "no_url"
+  | "purchase_unavailable";
+
+/** Which shell this build is running in. Read from the globals the shells set. */
+export type Shell = "ios" | "android" | "desktop" | "web";
+
+/**
+ * The shell, from the globals the shells set themselves.
+ *
+ * `isNativePlatform()` says an app is wrapping this build but not which store is
+ * watching it; `Capacitor.getPlatform()` is the only thing that separates iOS
+ * from Android. A native shell that will not name its platform is answered
+ * `ios` — the no-shop side — because guessing "web" there would draw a Checkout
+ * button inside an app, which is the one mistake this file exists to prevent.
+ */
+export function shellOf(scope: unknown = globalThis): Shell {
+  const globals = (scope ?? {}) as Record<string, unknown>;
+  if ("__TAURI_INTERNALS__" in globals) return "desktop";
+  const capacitor = globals["Capacitor"] as
+    | { isNativePlatform?: () => boolean; getPlatform?: () => string }
+    | undefined;
+  if (
+    capacitor !== undefined &&
+    typeof capacitor.isNativePlatform === "function" &&
+    capacitor.isNativePlatform()
+  ) {
+    const named = typeof capacitor.getPlatform === "function" ? text(capacitor.getPlatform()) : "";
+    return named === "android" ? "android" : "ios";
+  }
+  return "web";
+}
+
+/** Where a subscription may be bought in this build. */
+export type Shop = "stripe" | "none";
+
+/** What a build with no shop says. A statement of absence, never a direction to go and buy. */
+export const NOT_SOLD_HERE = "Subscriptions are not sold in this build.";
+
+/**
+ * The shop this shell may use.
+ *
+ * Web and desktop sell through Stripe, which is what the reader already does.
+ * An app-store build does not: Apple's 3.1.1 and Play's payments policy both
+ * forbid sending someone to an outside checkout for a digital subscription, and
+ * there is no StoreKit product to offer in its place — paid sync is post-launch
+ * (`README.md`, `docs/app-store-release-checklist.md` §9). So a store build has
+ * no shop at all, and the entitlement row is still read: a subscription bought
+ * on the web shows up on the phone, with nothing to restore.
+ */
+export function shopOf(shell: Shell): Shop {
+  return shell === "ios" || shell === "android" ? "none" : "stripe";
+}
 
 export class CheckoutError extends Error {
   readonly code: CheckoutFailure;
@@ -170,6 +224,8 @@ export interface SyncAccountOptions {
   /** Where the emailed link returns to. Null lets the project's Site URL decide. */
   readonly redirectTo?: string | null;
   readonly billingBase?: string;
+  /** Which shell this build is in. Read from the globals when not given. */
+  readonly shell?: Shell;
 }
 
 /**
@@ -185,9 +241,14 @@ export class SyncAccount {
   private readonly call: typeof fetch;
   private readonly redirectTo: string | null;
   private readonly base: string;
+  /** Which shell this is, and therefore whether there is a shop at all. */
+  readonly shell: Shell;
+  readonly shop: Shop;
 
   constructor(options: SyncAccountOptions) {
     this.settings = options.config;
+    this.shell = options.shell ?? shellOf();
+    this.shop = shopOf(this.shell);
     this.client =
       options.client ??
       createClient(options.config.url, options.config.anonKey, {
@@ -286,9 +347,15 @@ export class SyncAccount {
    *
    * The only things sent are the plan, this app's origin and the reader's token.
    * The origin is named so a purchase started here comes back here; the service
-   * accepts it only when it is one it serves.
+   * accepts it only when it is one it serves. A build with no shop throws before
+   * either of those — see `shopOf`.
    */
   async checkout(plan: PlanKey, open?: (url: string) => Promise<void> | void): Promise<string> {
+    // Before the session, before the network: a store build has no shop. This is
+    // not a disabled button — there is no request to make, and nothing is opened.
+    if (this.shop === "none") {
+      throw new CheckoutError("purchase_unavailable", NOT_SOLD_HERE);
+    }
     const session = await this.session();
     if (session === null) throw new CheckoutError("not_signed_in");
     if (this.base === "") {

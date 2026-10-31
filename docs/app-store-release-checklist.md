@@ -22,7 +22,7 @@ reading-history consent prompt.
 | 6 | Runtime boundary | **Done** — recorded in `docs/runtime-boundary.md`; the test `tests/unit/runtime-boundary.test.mjs` ("a downloaded extension reaches no native API") passes |
 | 7 | iOS networking | **Done in the tree** — `NSAllowsArbitraryLoads` is gone; `NSAllowsLocalNetworking` plus loopback and private-range `NSExceptionDomains`, pinned by `tests/unit/ios-ats.test.mjs`. The device half needs the iPhone |
 | 8 | iOS project hygiene | **Done in the tree** — `UIBackgroundModes` and `armv7` gone, `IPHONEOS_DEPLOYMENT_TARGET = 15.0` everywhere, `PrivacyInfo.xcprivacy` in the app target, all pinned by `tests/unit/ios-hygiene.test.mjs`; the archive and the device half need his hand (§8) |
-| 9 | Billing on iOS | **Decide** — sync unlocks through Stripe (`billing.hardlysleep.ing`); that cannot ship in-app |
+| 9 | Billing on iOS | **Done** — decided not sold in v1: a store build has no shop at all (`shopOf` → `none`, `checkout()` refuses), so nothing on iOS reaches the Stripe Checkout that web and desktop keep |
 
 ---
 
@@ -206,13 +206,32 @@ the Podfile and podspec, the absence of `UIBackgroundModes` and `armv7`, the man
 in the Resources phase, and the exact category → reason-code set against the codes Apple publishes
 per category. The plist reader it shares with the ATS test lives in `tests/unit/plist.mjs`.
 
-## 9. Billing — blocker only if paid sync ships
+## 9. Billing — decided: the app-store build sells nothing
 
-- [ ] If sync is sold in-app: StoreKit for the iOS purchase, Stripe left for web/desktop, `Restore Purchases`, and both paths writing the same `cloudSync` entitlement
-- [ ] If sync is not shipping in v1: hide every purchase entry point on iOS
+**Decision (A9).** Paid sync is post-launch — `README.md` says so, and KANBAN lists S4/S5/S7 (account,
+billing service, entitlement gate) as unstarted. There is therefore no StoreKit product to offer in v1,
+and no reason to build one to hide it. So the second branch is taken: **an app-store build has no shop.**
+
+- [x] Web and desktop keep the Stripe Checkout in `SyncAccount.svelte`, unchanged
+- [x] `shopOf("ios" | "android") === "none"`: no price is drawn and `SyncAccount.checkout()` throws
+      `purchase_unavailable` **before** it reads a session or makes a request — the request cannot be made,
+      which is stronger than a hidden button
+- [x] On a store build the panel is absent until this device is signed in, so nothing invites a sale;
+      a signed-in account still sees its row, because a web purchase is the same `cloudSync` row
+- [x] The one host name the shop knows (`billing.hardlysleep.ing`) lives in `src/api/sync-account.ts`
+      alone — no view names it
+- [ ] **When paid sync ships in-app:** StoreKit for the iOS purchase, `Restore Purchases`, and both paths
+      writing the same `cloudSync` entitlement. This unchecked box is the reminder, not a v1 blocker
 
 *Done when:* no iOS surface links to Stripe checkout, and an Apple purchase and a web purchase unlock
-the same row.
+the same row. The first half is done and pinned by `tests/unit/ios-billing.test.mjs` (9 assertions: the
+policy, the refusal with zero `fetch` calls, the web path still selling, and the template guard). The
+second half cannot be done before there is an Apple purchase, and by this decision there is none in v1.
+
+One consequence to keep in mind for that later card: a signed-out iOS reader has no door to the panel,
+because the panel exists to sell. When sync itself ships, its sign-in belongs to the sync feature, not to
+this shop screen — the reader will already have that seam (`createSyncAccount`, same SDK, same
+`signInWithOtp`).
 
 ## Compliance tests to add
 
@@ -226,11 +245,13 @@ a downloaded extension reaches no native API
 a software detail link opens and installs nothing
 Report Source opens with only repo, id, version, reason
 ATS is not globally disabled                    # tests/unit/ios-ats.test.mjs
+a store build cannot reach Checkout             # tests/unit/ios-billing.test.mjs
 PrivacyInfo.xcprivacy exists in the built app
 UIBackgroundModes does not declare an unused mode
 ```
 
 `ATS is not globally disabled` is six assertions in `tests/unit/ios-ats.test.mjs`, run by `npm test`.
+`a store build cannot reach Checkout` is nine in `tests/unit/ios-billing.test.mjs` — the same run.
 
 ## Physical iPhone smoke test
 
@@ -242,7 +263,8 @@ add repo (panel) → install source → login/WebView (consent asked once) → b
 
 ## Gate
 
-Do not submit until **1–8** are done. 9 is required only if paid sync ships. Backup/restore polish can
+Do not submit until **1–8** are done. 9 is decided and closed for v1: paid sync is post-launch, so the
+app-store build ships with no shop at all (§9). Backup/restore polish can
 continue after submission, but the current backup system must keep working.
 
 Order: **repo confirmation → content levels → cookie consent → detail route and links → Report Source
