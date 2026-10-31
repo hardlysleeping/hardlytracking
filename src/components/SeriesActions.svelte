@@ -110,18 +110,24 @@
 
   async function read(): Promise<void> {
     if (series === null) return;
+    // `series` is a prop: closing the sheet sets the parent's state to null, and the getter here is
+    // live. Reading `series.id` after `onclose()` threw "Cannot read properties of null (reading
+    // 'id')" — a Read button that worked only while its own sheet was still open. The ids are taken
+    // first, then the sheet closes.
+    const chapterOwner = series.id;
     busy = "read";
     try {
       const target = readTarget(await ensureChapters());
       if (target !== null) {
+        const chapterId = target.id;
         onclose();
-        go(pathTo("read", series.id, target.id));
+        go(pathTo("read", chapterOwner, chapterId));
         return;
       }
       // Nothing to read yet: the series page is where the chapters will be, not an empty reader.
       onclose();
-      if (ondetails !== undefined) ondetails(series);
-      else go(pathTo("series", series.id));
+      if (ondetails !== undefined) ondetails({ ...series });
+      else go(pathTo("series", chapterOwner));
     } finally {
       busy = null;
     }
@@ -209,7 +215,7 @@
   {#if series !== null}
     {#if view === "actions"}
       <div class="who">
-        <button class="thumb" onclick={() => { onclose(); if (ondetails !== undefined) ondetails(series); else go(pathTo("series", series.id)); }} aria-label="Open {series.title}">
+        <button class="thumb" onclick={() => { const opened = { ...series }; onclose(); if (ondetails !== undefined) ondetails(opened); else go(pathTo("series", opened.id)); }} aria-label="Open {series.title}">
           <Cover {series} size="row" />
         </button>
         <div class="meta">
