@@ -107,6 +107,14 @@ docker run -d --name hardlytracking -p 8460:8460 \
   ghcr.io/hardlysleeping/hardlytracking:latest
 ```
 
+**The package is private, like this repository** — an anonymous `docker pull` is refused, and so is a
+token without the scope. Either build it from a clone (`docker compose build`, no registry involved)
+or log in first with a GitHub token that carries `read:packages`:
+
+```sh
+gh auth token | docker login ghcr.io -u <you> --password-stdin
+```
+
 `RUNTIME_URL` points at a Mihon extension host (Suwayomi is the one this was built against);
 `DALVIK_URL` does the same for an M-Extension-Server, and both are optional — without either the app
 still runs, it just has no sources to browse. `/data` holds the extension registry this host
@@ -122,7 +130,7 @@ docker compose up -d          # web + Suwayomi + M-Extension-Server
 
 The library, read state, downloads and settings live in the browser's IndexedDB, so the container is
 otherwise stateless. Images are published on every `v*` tag as `latest`, the minor line and the exact
-version (`0.1.0`); `--build-arg PUBLIC_SUPABASE_URL=… --build-arg PUBLIC_SUPABASE_ANON_KEY=…` bakes
+version (`0.2.0`); `--build-arg PUBLIC_SUPABASE_URL=… --build-arg PUBLIC_SUPABASE_ANON_KEY=…` bakes
 HardlySyncing's sign-in into a local build (both values are public — the anon key ships in every
 bundle by design).
 
