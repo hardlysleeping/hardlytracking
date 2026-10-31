@@ -14,7 +14,7 @@ reading-history consent prompt.
 
 | # | Item | State today |
 |---|---|---|
-| 1 | Repo add needs a confirmation step | **Not done** — a `?repo=` deep link calls `addRepository()` itself (`src/views/Extensions.svelte` `$effect` on `repo`) |
+| 1 | Repo add needs a confirmation step | **Done** — `?repo=…` and the URL field both open a confirmation panel (name, host, ecosystem, package count, the third-party line) and the repo store is written only by Add Repository (`src/lib/extensions/proposal.ts`, `tests/unit/repo-confirm.test.mjs`) |
 | 2 | Restricted / Mature / Adult content levels | **Partly** — ratings are parsed (`contentWarningOf`: SAFE/MIXED/NSFW/UNKNOWN) and shown, but no setting, no filtering, no age step |
 | 3 | Per-source cookie consent | **Not done** — login is user-initiated and the jar is per-domain, but nothing is asked or remembered |
 | 4 | Software detail route + universal link | **Not done** — routes are `#/<name>/<id>`; the Extensions list is the only entry point |
@@ -26,17 +26,21 @@ reading-history consent prompt.
 
 ---
 
-## 1. Repository add is a decision, never a side effect — blocker
+## 1. Repository add is a decision, never a side effect — done
 
-- [ ] `Extensions.svelte`: remove the automatic `addRepository()` on a passed-in `pendingRepo`; keep the prefill
-- [ ] Load the index into a **confirmation panel**: repo name, host, ecosystem (Mihon/Aidoku/Paperback), package count, and the line "Third-party sources from this repository are not maintained by HardlyTracking."
-- [ ] Two actions only: **Cancel** / **Add Repository**
-- [ ] Manual URL entry ends at the same panel — typing a URL and pressing the button inspects, it does not add
-- [ ] Nothing installs from a repo without a separate tap on that package
-- [ ] Fresh install ships with **zero third-party repositories**
+- [x] `Extensions.svelte`: remove the automatic `addRepository()` on a passed-in `pendingRepo`; keep the prefill
+- [x] Load the index into a **confirmation panel**: repo name, host, ecosystem (Mihon/Aidoku/Paperback), package count, and the line "Third-party sources from this repository are not maintained by HardlyTracking."
+- [x] Two actions only: **Cancel** / **Add Repository**
+- [x] Manual URL entry ends at the same panel — typing a URL and pressing the button inspects, it does not add
+- [x] Nothing installs from a repo without a separate tap on that package
+- [x] Fresh install ships with **zero third-party repositories**
 
 *Done when:* `?repo=…` opens the panel and the repo store is unchanged until "Add Repository"; a test
-pins it (`repo deep link cannot silently add`).
+pins it (`repo deep link cannot silently add`, `tests/unit/repo-confirm.test.mjs`). The link reads the
+index into a `RepoProposal` and stores nothing; the panel's own button is the only call to
+`addRepository()`, and it hands over the index it already read. Verified at 440×956 against the live
+Keiyoushi index: panel open with 0 repos stored, Cancel keeps 0, Add Repository writes 1 and opens
+Available with 1 443 extensions.
 
 ## 2. Content levels — blocker
 
