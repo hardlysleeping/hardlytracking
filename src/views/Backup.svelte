@@ -16,10 +16,11 @@
   import { categories } from "../state/categories.svelte";
   import { documentFromStore } from "../lib/sync/from-store";
   import { deviceId } from "../lib/sync/device";
-  import { serializeSync, type SyncDocument } from "../lib/sync/document";
+  import type { SyncDocument } from "../lib/sync/document";
   import { applyDocument } from "../lib/sync/apply";
   import { outcomeSentence, summarizeImport, type ImportSummary } from "../lib/backup/report";
   import { readBackupFile } from "../lib/backup/read";
+  import { EXPORT_FORMATS, exportDocument, type ExportKind } from "../lib/backup/export";
   import { RepositoryError } from "../lib/extensions/repository";
   import { go } from "../lib/nav";
 
@@ -46,7 +47,15 @@
   let applied = $state<{ doc: SyncDocument; summary: ImportSummary; message: string } | null>(null);
   let addingRepos = $state(false);
 
-  async function exportBackup(): Promise<void> {
+  /**
+   * Write the library out in one of the formats the app can produce.
+   *
+   * Every format goes through `exportDocument`, which maps rows and returns bytes — the button only
+   * saves the file. A format this build does not write is not offered as a button at all; it says
+   * why, in the same card, because "Export" that produces a file another app refuses is worse than
+   * a sentence explaining what is missing.
+   */
+  async function exportBackup(kind: ExportKind): Promise<void> {
     const store = library.profile?.store;
     if (store === undefined) return;
     busy = "Building the file…";
@@ -54,16 +63,15 @@
     notice = null;
     try {
       const device = await deviceId(store);
-      const doc = await documentFromStore(store, { device });
-      const text = serializeSync(doc);
-      const name = `hardlytracking-${new Date().toISOString().slice(0, 10)}.json`;
-      const url = URL.createObjectURL(new Blob([text], { type: "application/json" }));
+      const doc = $state.snapshot(await documentFromStore(store, { device })) as SyncDocument;
+      const file = await exportDocument(doc, kind, { device });
+      const url = URL.createObjectURL(new Blob([file.bytes as BlobPart], { type: file.mime }));
       const anchor = document.createElement("a");
       anchor.href = url;
-      anchor.download = name;
+      anchor.download = file.filename;
       anchor.click();
       URL.revokeObjectURL(url);
-      notice = `${name} — ${doc.series.length} series, ${doc.chapters.length} chapters, ${doc.categories.length} categories, ${doc.sessions.length} sessions`;
+      notice = `${file.filename} — ${doc.series.length} series, ${doc.chapters.length} chapters, ${doc.categories.length} categories, ${doc.sessions.length} sessions`;
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
     } finally {
@@ -179,8 +187,28 @@
   <div class="cards">
     <section class="card">
       <h2>Export</h2>
-      <p class="sub">Your library, chapters, categories, read marks, positions, history, sessions, source mappings and settings, in one JSON file. No pages, no APKs.</p>
-      <button class="btn primary" disabled={busy !== null} onclick={() => void exportBackup()}>Export backup</button>
+      <p class="sub">Write this device's library out as a file. No pages, no APKs, no credentials — only what the app knows.</p>
+      <ul class="formats">
+        {#each EXPORT_FORMATS as format (format.kind)}
+          <li>
+            <div class="fmt">
+              <strong>{format.label}</strong>
+              {#if format.ready}
+                <span class="sub">{format.detail}</span>
+              {:else}
+                <span class="sub">{format.why}</span>
+              {/if}
+            </div>
+            {#if format.ready}
+              <button class="btn" disabled={busy !== null} onclick={() => void exportBackup(format.kind)}>
+                {format.buttonLabel}
+              </button>
+            {:else}
+              <span class="chip static">Not yet</span>
+            {/if}
+          </li>
+        {/each}
+      </ul>
     </section>
 
     <section class="card">
@@ -339,6 +367,45 @@
     font-size: var(--t-sm);
     color: var(--text-2);
     line-height: 1.6;
+  }
+
+  /* One row per export format: name and what it is for on the left, its button on the right. */
+  .formats {
+    display: grid;
+    gap: var(--s3);
+    width: 100%;
+    margin: var(--s1) 0 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .formats li {
+    display: flex;
+    align-items: center;
+    gap: var(--s3);
+    justify-content: space-between;
+    padding-top: var(--s3);
+    border-top: 1px solid var(--line);
+  }
+
+  .formats li:first-child {
+    padding-top: 0;
+    border-top: 0;
+  }
+
+  .fmt {
+    display: grid;
+    gap: 2px;
+    min-width: 0;
+  }
+
+  .fmt strong {
+    font-size: var(--t-sm);
+    font-weight: 600;
+  }
+
+  .fmt .sub {
+    overflow-wrap: anywhere;
   }
 
   .btn.disabled {
