@@ -29,6 +29,8 @@ import {
 } from "./dalvik";
 import { listHtServerExtensions } from "./htserver";
 import { createKomgaProvider } from "./komga";
+import { createWebdavProvider } from "./webdav";
+import { webdavEnabled, webdavSettings } from "../lib/webdav";
 import { splitId, type SourceProvider } from "./source";
 import type { LibraryStore } from "../lib/db/store";
 import type { CookieJar } from "../lib/webview/store";
@@ -57,6 +59,10 @@ export interface RegistryConfig {
   cookies?: CookieJar;
   /** The user's own Komga, when one is configured; absent means "read the saved setting". */
   komga?: { baseUrl: string; username: string; password: string } | null;
+  /** The user's own WebDAV folder; absent means "read the saved setting". */
+  webdav?: { url: string; username: string; password: string } | null;
+  /** Its switch, read live like Komga's. */
+  webdavEnabled?: () => boolean;
   /** Its switch, read live so turning it off takes effect without a restart. */
   komgaEnabled?: () => boolean;
   /** The UA the webview logged in with, read per call (matrix row WEB-10). */
@@ -206,6 +212,23 @@ export async function createProviders(config: RegistryConfig): Promise<ProviderS
     } catch (error) {
       warnings.push(`Komga ${komga.baseUrl}: ${error instanceof Error ? error.message : String(error)}`);
     }
+  }
+
+  /**
+   * A WebDAV folder, when one is configured.
+   *
+   * The probe is a real `PROPFIND`, because "configured" and "reachable" are different answers and
+   * the user needs to know which one they have. Nothing is downloaded at boot: listing a folder is
+   * one request, and a book is fetched the first time it is opened.
+   */
+  const webdav = config.webdav === undefined ? webdavSettings() : config.webdav;
+  if (webdav !== null && (config.webdavEnabled === undefined ? webdavEnabled() : config.webdavEnabled())) {
+    const provider = createWebdavProvider({
+      ...webdav,
+      store: config.store,
+      ...(config.fetchImpl === undefined ? {} : { fetchImpl: config.fetchImpl }),
+    });
+    providers.push(provider);
   }
 
   let dalvik: DalvikHost | null = null;

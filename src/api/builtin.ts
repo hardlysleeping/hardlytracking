@@ -35,6 +35,8 @@ export const BUILTIN_HT_SERVER_ID = "builtin:ht-server";
  */
 export const BUILTIN_KOMGA_ID = "builtin:komga";
 
+export const BUILTIN_WEBDAV_ID = "builtin:webdav";
+
 /** The id this row had before it was named after what it is. Removed on the next boot. */
 export const LEGACY_HT_SERVER_ID = "builtin:read-server";
 
@@ -64,6 +66,16 @@ export const BUILTIN_EXTENSIONS: InstalledExtension[] = [
     sources: [],
     versionName: "1.0.0",
     // Off until an address and a login are entered; `komgaEnabled()` is the switch's real answer.
+    enabled: true,
+    builtin: true,
+  },
+  {
+    extensionId: BUILTIN_WEBDAV_ID,
+    packageId: "ing.hardlysleep.hardlytracking.builtin.webdav",
+    name: "WebDAV",
+    // One server per card, so the list comes from it: a folder this row cannot see is not damage.
+    sources: [],
+    versionName: "1.0.0",
     enabled: true,
     builtin: true,
   },

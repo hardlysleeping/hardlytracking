@@ -21,7 +21,7 @@
  * so they get two kinds: sharing `mihon` would make `providerFor` hand a dalvik id to
  * Suwayomi (first match wins) and every lookup would land on the wrong host.
  */
-export type ProviderKind = "mihon" | "dalvik" | "htserver" | "komga" | "local" | "archive";
+export type ProviderKind = "mihon" | "dalvik" | "htserver" | "komga" | "local" | "archive" | "webdav";
 
 export interface Source {
   /** Namespaced: `mihon:src:0`. */
@@ -147,7 +147,7 @@ export interface SourceProvider {
   readState?(seriesId: string): Promise<RemoteRead[]>;
 }
 
-const KINDS: ProviderKind[] = ["mihon", "dalvik", "htserver", "komga", "local", "archive"];
+const KINDS: ProviderKind[] = ["mihon", "dalvik", "htserver", "komga", "local", "archive", "webdav"];
 
 /**
  * What to call a provider on screen.
@@ -163,6 +163,7 @@ const LABELS: Record<ProviderKind, string> = {
   komga: "Komga",
   local: "On this device",
   archive: "Internet Archive",
+  webdav: "WebDAV",
 };
 
 export function providerLabel(kind: ProviderKind): string {

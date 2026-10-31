@@ -44,3 +44,6 @@ data/
 
 # Rust build output: 6 GB of object files, never source.
 src-tauri/target/
+
+# Kanban worker worktrees (never tracked)
+.worktrees/

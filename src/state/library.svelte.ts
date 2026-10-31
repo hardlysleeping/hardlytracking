@@ -215,6 +215,13 @@ class LibraryState {
     await this.loadSources();
   }
 
+  /** Re-ask the WebDAV card's folder after its address or login changes. */
+  async refreshWebdav(): Promise<void> {
+    if (this.profile === null) return;
+    this.error = await this.profile.refreshWebdav();
+    await this.loadSources();
+  }
+
   async refreshHost(): Promise<void> {
     if (this.profile === null) return;
     this.error = await this.profile.refreshHtServer();

@@ -15,11 +15,11 @@ function store() {
   return new LibraryStore(memoryDatabase());
 }
 
-test("the built-ins are archive.org, Komga and the HT-Server, and nothing else", () => {
-  assert.equal(BUILTIN_EXTENSIONS.length, 3);
+test("the built-ins are archive.org, Komga, WebDAV and the HT-Server, and nothing else", () => {
+  assert.equal(BUILTIN_EXTENSIONS.length, 4);
   assert.deepEqual(
     BUILTIN_EXTENSIONS.map((entry) => entry.extensionId),
-    ["builtin:internet-archive", "builtin:komga", "builtin:ht-server"],
+    ["builtin:internet-archive", "builtin:komga", "builtin:webdav", "builtin:ht-server"],
   );
   // Both servers are built in for the same reason: the code is ours, and the card holds where it
   // lives. Their sources come from the live provider, never from the row.
@@ -41,11 +41,11 @@ test("the built-ins are archive.org, Komga and the HT-Server, and nothing else",
 test("a fresh install gets the row, and seeding twice does not duplicate it", async () => {
   const library = store();
   const first = await ensureBuiltinExtensions(library);
-  assert.equal(first.length, 3, "archive.org, Komga and the HT-Server");
+  assert.equal(first.length, 4, "archive.org, Komga, WebDAV and the HT-Server");
   assert.equal(first[0].extensionId, BUILTIN_ARCHIVE_ID);
 
   const second = await ensureBuiltinExtensions(library);
-  assert.equal(second.length, 3, "one row each, not six");
+  assert.equal(second.length, 4, "one row each, not eight");
   assert.equal(second[0].enabled, true);
 });
 

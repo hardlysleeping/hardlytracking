@@ -24,6 +24,8 @@ const CONSENT_PREF = "settings.consentGrants";
 import { openHostRegistry } from "../lib/extensions/host-registry";
 import { komgaEnabled, komgaSettings } from "../lib/komga";
 import { createKomgaProvider } from "./komga";
+import { createWebdavProvider } from "./webdav";
+import { webdavEnabled, webdavSettings } from "../lib/webdav";
 
 export interface LibraryProfile {
   readonly kind: "device";
@@ -61,6 +63,8 @@ export interface LibraryProfile {
    * Browse disagreeing, which reads as "the setting did nothing".
    */
   refreshKomga(): Promise<string | null>;
+  /** Rebuild the WebDAV provider after its card changes — the address and login are read then. */
+  refreshWebdav(): Promise<string | null>;
   /** Configured hosts that did not answer — a banner, not silence. */
   readonly warnings: string[];
   /**
@@ -209,6 +213,26 @@ export async function openLibraryProfile(options: OpenProfileOptions = {}): Prom
         return sources.length === 0 ? `Komga ${saved.baseUrl}: signed in, but no libraries are visible to that user` : null;
       } catch (error) {
         return `Komga ${saved.baseUrl}: ${error instanceof Error ? error.message : String(error)}`;
+      }
+    },
+    async refreshWebdav(): Promise<string | null> {
+      const at = providers.findIndex((provider) => provider.kind === "webdav");
+      if (at >= 0) providers.splice(at, 1);
+      const saved = webdavSettings();
+      if (saved === null || !webdavEnabled()) return null;
+      const provider = createWebdavProvider({
+        ...saved,
+        store,
+        ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
+      });
+      try {
+        // The probe is the listing itself: a saved address that answers with files is working, and
+        // one that answers 401 says so where the user typed it.
+        const first = await provider.search("webdav:src:folder", "", 1);
+        providers.push(provider);
+        return first.items.length === 0 ? `${saved.url}: signed in, but that folder has no comics in it` : null;
+      } catch (error) {
+        return `${saved.url}: ${error instanceof Error ? error.message : String(error)}`;
       }
     },
     async refreshHtServer(): Promise<string | null> {

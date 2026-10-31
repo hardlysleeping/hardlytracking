@@ -28,6 +28,16 @@ import {
   setKomgaEnabled,
   setKomgaSettings,
 } from "../lib/komga";
+import {
+  setWebdavEnabled,
+  setWebdavPassword,
+  setWebdavUrl,
+  setWebdavUsername,
+  webdavPassword,
+  webdavUrl,
+  webdavUsername,
+} from "../lib/webdav";
+import { probeWebdav } from "../api/webdav";
 
   interface Props {
     /** A repository from an install link (`mihon://…`, `?repo=…`), added on arrival. */
@@ -68,6 +78,37 @@ import {
   let busy = $state<string | null>(null);
   // The HT-Server's settings belong on its own card: it is a source you point at a machine, and a
   // second copy in Settings would be two places to keep right.
+  // ---- WebDAV --------------------------------------------------------------
+  // The folder, not the server: a WebDAV root lists nothing a reader wants, and asking for a path on
+  // every read is worse than asking once. Nothing is downloaded until a book is opened.
+  let davUrl = $state(webdavUrl());
+  let davUser = $state(webdavUsername());
+  let davSecret = $state(webdavPassword());
+  let davProbe = $state<string | null>(null);
+  let davBusy = $state(false);
+
+  function davSaved(): void {
+    setWebdavUrl(davUrl);
+    setWebdavUsername(davUser);
+    setWebdavPassword(davSecret);
+    davUrl = webdavUrl();
+    davUser = webdavUsername();
+    void library.refreshWebdav().catch(() => undefined);
+  }
+
+  async function testDav(): Promise<void> {
+    davBusy = true;
+    davProbe = null;
+    try {
+      const probe = await probeWebdav({ url: davUrl, username: davUser, password: davSecret });
+      davProbe = probe.message;
+    } catch (error) {
+      davProbe = error instanceof Error ? error.message : String(error);
+    } finally {
+      davBusy = false;
+    }
+  }
+
   // ---- Komga ---------------------------------------------------------------
   //
   // Its own card, like the HT-Server: a source you point at a machine. The login is a username and
@@ -123,8 +164,10 @@ import {
       // its sources off. Both are written: the row is what the card draws, the preference is what
       // the provider asks.
       if (row.extensionId === "builtin:komga") setKomgaEnabled(row.enabled === false);
+      if (row.extensionId === "builtin:webdav") setWebdavEnabled(row.enabled === false);
       await library.setExtensionEnabled(row.extensionId, row.enabled === false);
       if (row.extensionId === "builtin:komga") await library.refreshKomga();
+      if (row.extensionId === "builtin:webdav") await library.refreshWebdav();
     } finally {
       busy = null;
     }
@@ -630,6 +673,75 @@ import {
                     Login saved, but it did not work — read the answer above.
                   {:else}
                     Login saved as {komgaUser} · read state syncs both ways
+                  {/if}
+                </p>
+              </div>
+            {/if}
+
+            {#if row.extensionId === "builtin:webdav"}
+              <div class="hostform">
+                <label>
+                  <span>Folder</span>
+                  <input
+                    class="field"
+                    type="text"
+                    value={davUrl}
+                    placeholder="https://cloud.example.com/remote.php/dav/files/me/Comics"
+                    spellcheck="false"
+                    onchange={(event) => {
+                      davUrl = event.currentTarget.value;
+                      davSaved();
+                    }}
+                  />
+                </label>
+                <label>
+                  <span>Username</span>
+                  <input
+                    class="field"
+                    type="text"
+                    value={davUser}
+                    autocomplete="username"
+                    spellcheck="false"
+                    onchange={(event) => {
+                      davUser = event.currentTarget.value;
+                      davSaved();
+                    }}
+                  />
+                </label>
+                <label>
+                  <span>Password</span>
+                  <input
+                    class="field"
+                    type="password"
+                    value={davSecret}
+                    autocomplete="current-password"
+                    onchange={(event) => {
+                      davSecret = event.currentTarget.value;
+                      davSaved();
+                    }}
+                  />
+                </label>
+                <div class="hosthead">
+                  <button
+                    class="chip small"
+                    disabled={davBusy || davUrl === "" || davUser === ""}
+                    onclick={() => void testDav()}
+                  >
+                    {davBusy ? "Asking…" : "Test folder"}
+                  </button>
+                  {#if davProbe !== null}<span class="hoststate">{davProbe}</span>{/if}
+                </div>
+                <p class="hint">
+                  {#if davUrl === ""}
+                    No folder set — its comics are not offered. Works with Nextcloud, ownCloud, a NAS or
+                    any WebDAV share.
+                  {:else if davUser === "" || davSecret === ""}
+                    Add the username and password you sign in to that server with.
+                  {:else if davProbe !== null && !davProbe.includes("comic")}
+                    Saved, but that folder did not answer — read the line above.
+                  {:else}
+                    Listing a folder costs one request; a book is downloaded the first time you open it
+                    and read from this device after that.
                   {/if}
                 </p>
               </div>
