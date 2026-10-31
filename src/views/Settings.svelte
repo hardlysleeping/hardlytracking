@@ -53,6 +53,42 @@
     cacheEntries = await imageCache.entries();
   }
 
+  /**
+   * What the app is using, and how much it may use.
+   *
+   * A webview cannot see the disk, so this is `navigator.storage.estimate()`: the quota the browser
+   * grants this origin and what is already in it. It is the honest number for "am I about to run out
+   * of room", and it is labelled as such rather than presented as free disk space.
+   */
+  let space = $state<{ used: number; quota: number } | null>(null);
+  let searchCache = $state<{ rows: number; bytes: number } | null>(null);
+  let spaceNote = $state<string | null>(null);
+
+  async function refreshSpace(): Promise<void> {
+    try {
+      const estimate = await navigator.storage?.estimate?.();
+      if (estimate !== undefined && typeof estimate.quota === "number" && estimate.quota > 0) {
+        space = { used: estimate.usage ?? 0, quota: estimate.quota };
+      }
+    } catch {
+      space = null;
+    }
+    if (library.profile !== null) searchCache = await library.profile.store.searchCacheSize();
+  }
+
+  async function clearSearches(): Promise<void> {
+    if (library.profile === null) return;
+    const before = searchCache;
+    await library.profile.store.clearSearchCache();
+    await refreshSpace();
+    spaceNote = `Cleared ${before?.rows ?? 0} cached search${(before?.rows ?? 0) === 1 ? "" : "es"} — ${formatBytes(before?.bytes ?? 0)} freed`;
+    setTimeout(() => (spaceNote = null), 4000);
+  }
+
+  /** The bar's fill, with a floor so a nearly empty disk is a sliver rather than a blank strip. */
+  const spacePercent = $derived(space === null || space.quota === 0 ? 0 : Math.max(1.5, Math.min(100, (space.used / space.quota) * 100)));
+  const spaceTone = $derived(spacePercent > 92 ? "critical" : spacePercent > 80 ? "warn" : "ok");
+
   async function clearImages(): Promise<void> {
     const removed = await imageCache.clear();
     cacheNote = `Cleared ${removed.removed} cached image${removed.removed === 1 ? "" : "s"} — ${formatBytes(removed.freed)} freed`;
@@ -66,6 +102,7 @@
   onMount(() => {
     void hostInfo().then((value) => (info = value));
     void refreshCache();
+    void refreshSpace();
     imageCache.setPolicy({ limitBytes: settings.imageCacheLimitMb * 1024 * 1024, cacheImages: settings.cacheImages });
   });
 
@@ -402,6 +439,23 @@
 
   <section class="group">
     <h2>Storage</h2>
+    <div class="space">
+      <div class="spaceline">
+        <span>{space === null ? "Reading this device's storage…" : `${formatBytes(space.used)} used of ${formatBytes(space.quota)} this app may use`}</span>
+        <span class="muted">{space === null ? "" : `${Math.round(spacePercent)}%`}</span>
+      </div>
+      <div class="spacebar" aria-hidden="true"><i class={spaceTone} style={`width:${spacePercent}%`}></i></div>
+      <p class="sub">Your browser reports what this app may store, not the free space on the disk — a full disk still stops a download before this bar is full.</p>
+      {#if spaceNote !== null}<p class="sub note">{spaceNote}</p>{/if}
+    </div>
+    <div class="row">
+      <span>Search results<em class="sub">Answers kept for ten minutes, so a repeated search is instant and works offline.</em></span>
+      <span class="muted">{searchCache === null ? "…" : `${searchCache.rows} · ${formatBytes(searchCache.bytes)}`}</span>
+    </div>
+    <button class="row link" onclick={() => void clearSearches()} disabled={searchCache === null || searchCache.rows === 0}>
+      <span>Clear cached searches</span>
+      <span class="chev">›</span>
+    </button>
     <div class="row">
       <span>Downloads</span>
       <span class="muted">{bytes} · {downloads.rows.length} chapters</span>
@@ -591,5 +645,47 @@
 
   .field.num {
     width: 96px;
+  }
+
+  .space {
+    display: grid;
+    gap: var(--s2);
+    padding: var(--s2) 0 var(--s3);
+  }
+
+  .spaceline {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--s2);
+    font-size: var(--t-sm);
+    color: var(--text-2);
+  }
+
+  .spacebar {
+    height: 8px;
+    border-radius: 999px;
+    background: var(--surface-2);
+    overflow: hidden;
+  }
+
+  .spacebar i {
+    display: block;
+    height: 100%;
+    border-radius: 999px;
+    background: var(--accent);
+  }
+
+  .spacebar i.warn {
+    background: #d99a2b;
+  }
+
+  .spacebar i.critical {
+    background: var(--danger, #d9534f);
+  }
+
+  .sub.note {
+    color: var(--accent);
+    font-style: normal;
   }
 </style>

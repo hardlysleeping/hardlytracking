@@ -608,6 +608,26 @@ export class LibraryStore {
     await this.db.put("searchCache", { key, value });
   }
 
+  /**
+   * What the source-answer cache is holding.
+   *
+   * Measured rather than counted: a search answer is a list of titles, and "12 cached searches"
+   * says nothing about whether clearing it is worth anything. The bytes are the JSON the row
+   * already holds, which is what the disk will get back.
+   */
+  async searchCacheSize(): Promise<{ rows: number; bytes: number }> {
+    const rows = await this.db.all<{ key: string; value: unknown }>("searchCache");
+    let bytes = 0;
+    for (const row of rows) {
+      try {
+        bytes += new TextEncoder().encode(JSON.stringify(row.value)).length;
+      } catch {
+        // A row that cannot be measured is still a row; it counts, its size does not.
+      }
+    }
+    return { rows: rows.length, bytes };
+  }
+
   async clearSearchCache(): Promise<void> {
     for (const row of await this.db.all<{ key: string }>("searchCache")) await this.db.remove("searchCache", row.key);
   }
