@@ -7,11 +7,14 @@
  * badges, categories, hiding, search. No second kind of library, no "imported files" ghetto.
  *
  * Nothing is copied twice. The bytes are stored once, as the file the user already had, and the pages
- * are produced from them on demand.
+ * are produced from them on demand. The one exception is deliberate: page 1 is drawn once at import,
+ * as a small cover, because a shelf needs a picture before anyone opens the book.
  */
 import type { Series } from "../../api/source";
 import type { LibraryStore } from "../db/store";
 import { kindOf, openComic, titleFromFile } from "./index";
+import { coverFromBook, keepCover } from "./cover";
+import type { ComicBook } from "./comic";
 
 export interface ImportResult {
   added: number;
@@ -19,6 +22,18 @@ export interface ImportResult {
   skipped: string[];
   /** Files that were readable but failed — a corrupt archive, a password, a full disk. */
   errors: string[];
+}
+
+export interface ImportOptions {
+  /**
+   * How page 1 becomes a shelf cover.
+   *
+   * Injected so a test can watch this happen without a canvas — the drawing itself is `cover.ts`,
+   * and no test can assert on a JPEG it never sees.
+   */
+  cover?: (book: ComicBook) => Promise<Blob | null>;
+  /** Where the RAR decoder's wasm comes from; the app's default is Vite's emitted file. */
+  wasm?: () => Promise<ArrayBuffer>;
 }
 
 /** A stable id from the file name, so re-importing the same book is a skip rather than a duplicate. */
@@ -46,12 +61,18 @@ export function fileChapterId(seriesId: string): string {
  * it here would file "Saga v01" and "Saga v02" under one title for some users and split "Batman 001" /
  * "Batman 002" for others.
  */
-export async function importComicFiles(store: LibraryStore, files: ReadonlyArray<File>): Promise<ImportResult> {
+export async function importComicFiles(
+  store: LibraryStore,
+  files: ReadonlyArray<File>,
+  options: ImportOptions = {},
+): Promise<ImportResult> {
   const result: ImportResult = { added: 0, skipped: [], errors: [] };
+  const coverFor = options.cover ?? coverFromBook;
 
   for (const file of files) {
     const name = file.name;
-    if (kindOf(name) === null) {
+    const kind = kindOf(name);
+    if (kind === null) {
       result.skipped.push(name);
       continue;
     }
@@ -61,14 +82,23 @@ export async function importComicFiles(store: LibraryStore, files: ReadonlyArray
       continue;
     }
     try {
-      const book = await openComic(file, name);
+      const book = await openComic(file, name, options.wasm === undefined ? {} : { wasm: options.wasm });
       const pageCount = book.pageCount;
+      // One page, once. A cover that cannot be drawn is not a failed import: the book still opens,
+      // and the shelf falls back to the title exactly as it did before covers existed.
+      let cover = "";
+      try {
+        cover = await keepCover(seriesId, await coverFor(book));
+      } catch {
+        cover = "";
+      }
       book.close();
 
       const series: Series = {
         id: seriesId,
         provider: "local",
         title: titleFromFile(name),
+        ...(cover === "" ? {} : { cover }),
       };
       const chapterId = fileChapterId(seriesId);
       await store.addSeries(series);
@@ -79,7 +109,7 @@ export async function importComicFiles(store: LibraryStore, files: ReadonlyArray
         seriesId,
         chapterId,
         name,
-        kind: kindOf(name) === "pdf" ? "pdf" : "cbz",
+        kind,
         pageCount,
         bytes: file.size,
         blob: file,

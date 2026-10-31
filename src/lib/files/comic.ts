@@ -1,5 +1,5 @@
 /**
- * A comic file on this device: a CBZ/ZIP of images, or a PDF.
+ * A comic file on this device: a CBZ/ZIP or CBR of images, or a PDF.
  *
  * The rule that shapes this module: **a book is opened, never unpacked.** A 400-page CBZ is a few
  * hundred megabytes of scans, and turning that into four hundred blobs up front is how a reader
@@ -15,8 +15,9 @@
 const IMAGE_EXTENSIONS = [".jpg", ".jpeg", ".png", ".webp", ".gif", ".avif", ".bmp"];
 
 export interface ComicBook {
-  /** `cbz` for a zip of images, `pdf` for a PDF. */
-  kind: "cbz" | "pdf";
+  /** `cbz` for a zip of images, `cbr` for a RAR of them, `pdf` for a PDF. */
+  kind: "cbz" | "cbr" | "pdf";
+
   pageCount: number;
   /** One page as an image blob, in reading order. */
   open(index: number): Promise<Blob>;
@@ -38,9 +39,12 @@ export function extensionOf(name: string): string {
 }
 
 /** What a file is, by its name — `null` when it is not a comic this app can read. */
-export function kindOf(name: string): "cbz" | "pdf" | null {
+export function kindOf(name: string): "cbz" | "cbr" | "pdf" | null {
   const extension = extensionOf(name);
   if (extension === ".cbz" || extension === ".zip") return "cbz";
+  // `.cbr` is a RAR with a comic's name on it. The extension is the only signal a file picker gives,
+  // and a `.cbr` is never anything but a RAR, so the name is enough to choose the decoder.
+  if (extension === ".cbr") return "cbr";
   if (extension === ".pdf") return "pdf";
   return null;
 }

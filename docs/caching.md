@@ -15,6 +15,12 @@ answers are copies, and only copies can be dropped.
 - **Same-origin URLs count.** Covers and page images go through the app's own `/api/img` proxy, so
   the cache accepts `/api/...` paths as well as absolute `http(s)` URLs. A `blob:` or `data:` URL is
   already local and is skipped.
+- **One kind of row is not a copy of anything remote:** a picture this app drew itself, kept under a
+  `book:` key — an owned book's cover, drawn from its own page 1 at import (`src/lib/files/cover.ts`,
+  `imageCache.remember`). It is served by `resolve()` before the cache switch is consulted, because
+  turning off "remember covers downloaded from the network" must not blank the shelf of a book that
+  has no network at all. It counts against the ceiling like any other row, so a cleared cache leaves
+  the title fallback behind, never a broken image.
 - **Where it is used:** `Cover.svelte` (every cover, including History and Updates) and the reader's
   page images via `use:cacheImage` (`src/lib/cache/action.ts`).
 - **Ceiling:** `settings.imageCacheLimitMb`, default 256 MB, choices 64 MB – 1 GB. `prune()` runs at

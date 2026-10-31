@@ -1,5 +1,6 @@
 <script lang="ts">
   import { imageCache } from "../lib/cache/images";
+  import { isCoverKey } from "../lib/files/cover";
   /**
    * A cover, with an honest fallback: the title, not a broken-image icon.
    *
@@ -17,8 +18,17 @@
    * The cover through the image cache: a cached copy renders instantly and works offline, an
    * uncached one renders from the network and is stored for next time. `series.cover` stays the
    * source of truth — the cache never invents a URL.
+   *
+   * A book the user owns has no URL at all: its cover is keyed `book:<id>#cover` and served out of
+   * the cache, so the key must not reach an `<img>` — a browser would ask the network for it and
+   * draw its own broken-image icon. Until the blob URL arrives the tile shows the title, which is
+   * what it showed before covers existed.
    */
-  let src = $state<string | undefined>(series.cover);
+  /** A cover a browser can load as it stands: a URL. Never a cache key. */
+  function loadable(cover: string | undefined): string | undefined {
+    return cover === undefined || isCoverKey(cover) ? undefined : cover;
+  }
+  let src = $state<string | undefined>(loadable(series.cover));
   let tile = $state<HTMLElement | null>(null);
 
   $effect(() => {
@@ -28,7 +38,7 @@
       return;
     }
     let live = true;
-    src = url;
+    src = isCoverKey(url) ? undefined : url;
     const headers = series.coverHeaders;
     // Only a tile that is (nearly) on screen is worth fetching: a 5 000-title library was resolving
     // every cover the moment the shelf opened, which is thousands of images for the forty visible.
@@ -53,7 +63,7 @@
 </script>
 
 <div class="cover {size}" bind:this={tile}>
-  {#if series.cover && !broken}
+  {#if series.cover && !broken && src !== undefined}
     <img src={src} alt="" loading="lazy" decoding="async" onerror={() => (broken = true)} />
   {:else}
     <span class="fallback">{series.title}</span>

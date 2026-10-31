@@ -39,6 +39,14 @@ const MAX_IMAGE_BYTES = 12 * 1024 * 1024;
 const MAX_LIVE_URLS = 160;
 /** Covers are small; a page image is not. Refuse absurd things rather than fill the disk. */
 const ALLOWED = /^image\//i;
+/**
+ * A key that is not a URL: a picture this app produced itself, such as a book's first page.
+ *
+ * It lives in the same store as the downloaded covers — one place for pictures, one ceiling, one
+ * Settings sentence — but it is never fetched and never treated as a copy of anything remote.
+ */
+export const STORED_IMAGE_SCHEME = "book:";
+
 
 export class ImageCache {
   private db: Database | null = null;
@@ -74,7 +82,12 @@ export class ImageCache {
    * so the second visit is instant. `null` means "do not cache this" (a blob:, a data:).
    */
   async resolve(url: string, options: { fetch?: boolean; headers?: Record<string, string> } = {}): Promise<string> {
+    // A picture this app drew itself is served first and unconditionally: switching the cover cache
+    // off is about not keeping copies downloaded from the network, and an owned book has no network
+    // to fall back on — its cover would blank to the title.
+    if (url.startsWith(STORED_IMAGE_SCHEME)) return await this.stored(url);
     if (this.db === null || !this.policy.cacheImages) return url;
+
     // Covers and page images go through the app's own `/api/img` proxy, so the interesting URLs are
     // same-origin paths, not absolute ones. A blob: or data: URL is already local — never cached.
     if (!/^(https?:|\/)/i.test(url)) return url;
@@ -126,6 +139,39 @@ export class ImageCache {
 
     this.inflight.set(url, task);
     return task;
+  }
+
+  /**
+   * Keep a picture this app produced — a book's first page, drawn once at import.
+   *
+   * Storage, not a downloaded copy: it is served even with the image cache switched off, because a
+   * book the user owns must still have a cover. Returns whether it was actually kept; without a
+   * database there is nowhere to keep it, and the caller should then write no cover at all.
+   */
+  async remember(key: string, blob: Blob): Promise<boolean> {
+    if (this.db === null) return false;
+    const objectUrl = URL.createObjectURL(blob);
+    this.urls.delete(key);
+    this.urls.set(key, objectUrl);
+    this.trimLive();
+    const now = Date.now();
+    await this.db.put("imageCache", { key, blob, bytes: blob.size, at: now, usedAt: now } as unknown as Record<string, unknown>);
+    void this.prune();
+    return true;
+  }
+
+  /** The object URL for a stored picture, or the key back when nothing is stored under it. */
+  private async stored(key: string): Promise<string> {
+    const live = this.urls.get(key);
+    if (live !== undefined) return live;
+    if (this.db === null) return key;
+    const row = await this.db.get<ImageRow>("imageCache", key);
+    if (row === undefined) return key;
+    const objectUrl = URL.createObjectURL(row.blob);
+    this.urls.set(key, objectUrl);
+    this.trimLive();
+    void this.touch(key);
+    return objectUrl;
   }
 
   /**

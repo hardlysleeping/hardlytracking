@@ -27,6 +27,7 @@
 import { nativeId, paged, type Chapter, type Page, type Paged, type Series, type Source, type SourceProvider } from "./source";
 import type { LibraryStore } from "../lib/db/store";
 import { openComic, titleFromFile, kindOf } from "../lib/files/index";
+import { keepCover, shrinkToCover } from "../lib/files/cover";
 
 /** Anything that can do what `fetch` does; a parameter so tests need no network. */
 export type Fetcher = (url: string, init?: RequestInit) => Promise<Response>;
@@ -204,7 +205,7 @@ export async function probeWebdav(
     }
     const comics = comicEntries(parseMultistatus(await response.text()), folderUrl);
     return comics.length === 0
-      ? { ok: false, message: "signed in, but no CBZ, ZIP or PDF in that folder" }
+      ? { ok: false, message: "signed in, but no CBZ, CBR, ZIP or PDF in that folder" }
       : { ok: true, message: `${comics.length} comic${comics.length === 1 ? "" : "s"} in that folder` };
   } catch (error) {
     return { ok: false, message: `could not reach ${folderUrl}: ${(error as Error).message}` };
@@ -286,6 +287,7 @@ export function createWebdavProvider(options: WebdavOptions): SourceProvider {
     const stored = await options.store.getBook(seriesId);
     if (stored !== undefined) {
       const comic = await openComic(stored.blob, stored.name);
+      void coverOf(seriesId, (index) => comic.open(index));
       return { seriesId, chapterId, name: stored.name, pages: comic.pageCount, open: (index) => comic.open(index) };
     }
 
@@ -305,6 +307,7 @@ export function createWebdavProvider(options: WebdavOptions): SourceProvider {
         blob,
         addedAt: Date.now(),
       });
+      void coverOf(seriesId, (index) => comic.open(index));
       return { seriesId, chapterId, name, pages: comic.pageCount, open: (index) => comic.open(index) };
     })();
     pending.set(seriesId, work);
@@ -312,6 +315,23 @@ export function createWebdavProvider(options: WebdavOptions): SourceProvider {
       return await work;
     } finally {
       pending.delete(seriesId);
+    }
+  }
+
+  /**
+   * A shelf cover for a book that had none, drawn from its own page 1.
+   *
+   * A WebDAV book is in the library before anyone knows what it looks like — the listing is names, not
+   * pictures — so it drew the title fallback until it was read. The first read now leaves a cover
+   * behind. Failure is silent on purpose: a cover is a nicety, and the book just opened fine.
+   */
+  async function coverOf(seriesId: string, open: (index: number) => Promise<Blob>): Promise<void> {
+    try {
+      const picture = await shrinkToCover(await open(0));
+      const key = await keepCover(seriesId, picture);
+      if (key !== "") await options.store.setSeriesCover(seriesId, key);
+    } catch {
+      // No canvas, no cover: the title fallback is still there.
     }
   }
 

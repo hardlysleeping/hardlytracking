@@ -3,7 +3,7 @@
    * "Add files" — the comics the user already owns.
    *
    * This is the one button in the app that needs no server, no extension and no network: a bought
-   * CBZ or PDF becomes a normal library row, and everything the library does works on it. It is
+   * CBZ, CBR or PDF becomes a normal library row, and everything the library does works on it. It is
    * deliberately a plain file picker — a folder on a phone is a picker result, not a path to type.
    */
   import { library } from "../state/library.svelte";
@@ -52,7 +52,7 @@
   class="hidden-input"
   type="file"
   multiple
-  accept=".cbz,.zip,.pdf"
+  accept=".cbz,.cbr,.zip,.pdf"
   onchange={(event) => void picked(event)}
   aria-label="Choose comic files"
 />

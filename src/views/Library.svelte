@@ -798,7 +798,7 @@
           <div class="blank">
             <p class="blankline">Your library is empty.</p>
             <p class="blanksub">
-              Add the comics you already own — a CBZ or PDF from this device — or a repository, and the first
+              Add the comics you already own — a CBZ, CBR or PDF from this device — or a repository, and the first
               series you keep lands here.
             </p>
             <div class="blankacts">

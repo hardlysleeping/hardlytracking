@@ -25,7 +25,8 @@ test("kind is decided by extension, and anything else is refused", () => {
   assert.equal(kindOf("a.CBZ"), "cbz");
   assert.equal(kindOf("a.zip"), "cbz");
   assert.equal(kindOf("a.pdf"), "pdf");
-  assert.equal(kindOf("a.cbr"), null);
+  assert.equal(kindOf("a.cbr"), "cbr");
+  assert.equal(kindOf("a.CBR"), "cbr");
   assert.equal(kindOf("a.jpg"), null);
   assert.equal(extensionOf("a.CBR"), ".cbr");
   assert.equal(mimeOf("a.png"), "image/png");

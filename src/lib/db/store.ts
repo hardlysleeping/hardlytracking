@@ -175,7 +175,7 @@ export interface BookRow {
   chapterId: string;
   /** The file's own name, shown when a title is ambiguous. */
   name: string;
-  kind: "cbz" | "pdf";
+  kind: "cbz" | "cbr" | "pdf";
   pageCount: number;
   bytes: number;
   blob: Blob;
@@ -208,6 +208,20 @@ export class LibraryStore {
 
   async getSeries(seriesId: string): Promise<Series | undefined> {
     return this.db.get<Series>("series", seriesId);
+  }
+
+  /**
+   * Give a row a cover without disturbing it.
+   *
+   * `addSeries` is an upsert, but it also stamps `addedAt`, which is the shelf's order — a book that
+   * gained its cover on its first read must not jump to the front of the library for it. A row that
+   * is not in the library is left alone: a cover is not a reason to save a title the user skipped.
+   */
+  async setSeriesCover(seriesId: string, cover: string): Promise<boolean> {
+    const row = await this.db.get<Series & { addedAt?: number }>("series", seriesId);
+    if (row === undefined) return false;
+    await this.db.put("series", { ...row, cover });
+    return true;
   }
 
   async putChapters(seriesId: string, chapters: Chapter[]): Promise<void> {
