@@ -13,6 +13,7 @@
   import { packagesLabel, proposalOf, type RepoProposal } from "../lib/extensions/proposal";
   import { filterByLevel, hiddenNotice, levelOfWarning } from "../lib/content/levels";
   import { settings } from "../state/settings.svelte";
+  import { REPORT_REASONS, sourceReport, type ReportReason } from "../lib/report/source";
   import { extensionLabel, extensionLanguages, sourcesOfExtension } from "../lib/extensions/installed";
   import { softwareHref } from "../lib/software";
   import { proxiedImage } from "../lib/pages";
@@ -44,6 +45,13 @@ import {
    * only a tap can add one.
    */
   let proposal = $state<RepoProposal | null>(null);
+  /** The row a report is being written about, if any. Nothing is sent: the report is copied. */
+  let reporting = $state<string | null>(null);
+  let reportReason = $state<ReportReason>("broken");
+  let reportNote = $state("");
+  let reportCopied = $state(false);
+  /** The report text when the clipboard refused, so it is still readable and selectable. */
+  let reportFallback = $state<string | null>(null);
   /** The index that produced the proposal, so Add Repository does not download it twice. */
   let loaded = $state<Repository | null>(null);
   let error = $state<string | null>(null);
@@ -165,6 +173,40 @@ import {
     } finally {
       hostBusy = null;
     }
+  }
+
+  /** Build the report from the row, and put it on the clipboard. */
+  async function copyReport(row: (typeof library.extensions)[number]): Promise<void> {
+    const report = sourceReport(
+      {
+        name: row.name ?? row.packageId,
+        pkg: row.packageId,
+        version: row.versionName ?? String(row.versionCode ?? "unknown"),
+        repo: row.repoUrl ?? null,
+        sources: row.sources.length,
+      },
+      reportReason,
+      reportNote,
+    );
+    const text = `${report.subject}\n\n${report.body}`;
+    try {
+      await navigator.clipboard.writeText(text);
+      reportCopied = true;
+      reportFallback = null;
+    } catch {
+      // No clipboard in this shell (an unfocused window, a locked-down webview): the report is shown
+      // in full instead, so the action still produces something the person can send.
+      reportCopied = false;
+      reportFallback = text;
+    }
+  }
+
+  function closeReport(): void {
+    reporting = null;
+    reportNote = "";
+    reportReason = "broken";
+    reportCopied = false;
+    reportFallback = null;
   }
 
   async function uninstallHost(row: { extensionId: string }): Promise<void> {
@@ -716,8 +758,33 @@ import {
                 </span>
               {:else}
                 <button class="btn ghost quiet" onclick={() => (removing = row.extensionId)}>Uninstall</button>
+                <button class="btn ghost quiet" onclick={() => (reporting === row.extensionId ? closeReport() : (reporting = row.extensionId))}>Report</button>
               {/if}
             </div>
+
+            {#if reporting === row.extensionId}
+              <!-- 4.7.3 asks for a way to flag software that turns out to be objectionable. The
+                   report is built from the row and copied; nothing is sent, and the screen says so. -->
+              <div class="report" role="group" aria-label="Report this source">
+                <p class="rq">Report {label}</p>
+                <div class="chips">
+                  {#each REPORT_REASONS as reason (reason.id)}
+                    <button class="chip" class:on={reportReason === reason.id} onclick={() => (reportReason = reason.id)}>
+                      {reason.label}
+                    </button>
+                  {/each}
+                </div>
+                <textarea class="field" rows="3" placeholder="What happened? (optional)" bind:value={reportNote} aria-label="What happened"></textarea>
+                <div class="racts">
+                  <button class="btn ghost" onclick={closeReport}>Cancel</button>
+                  <button class="btn primary" onclick={() => void copyReport(row)}>{reportCopied ? "Copied" : "Copy report"}</button>
+                </div>
+                {#if reportFallback !== null}
+                  <pre class="rtext selectable">{reportFallback}</pre>
+                {/if}
+                <p class="rhint">Nothing is sent anywhere. The report names the package, its version and its repository, and is copied so you can send it where you like.</p>
+              </div>
+            {/if}
           </li>
         {/each}
       </ul>
@@ -754,7 +821,13 @@ import {
             {@const state = stateOf(entry)}
             <li class="card">
               <div class="info">
-                <span class="name">{entry.name}</span>
+                <!-- The list is the index; the package page is the record — what it is, before the
+                     Install button next to it is pressed. -->
+                <button
+                  class="name link"
+                  title={`Open ${entry.name}`}
+                  onclick={() => go(softwareHref({ pkg: entry.pkg, repo: activeRepo }))}
+                >{entry.name}</button>
                 <span class="sub">
                   {languages(entry)} · v{entry.version}
                   {#if entry.contentWarning !== "SAFE" && entry.contentWarning !== "UNKNOWN"}<span class="warn"> · {entry.contentWarning}</span>{/if}
@@ -848,6 +921,44 @@ import {
 </section>
 
 <style>
+  .report {
+    display: grid;
+    gap: var(--s2);
+    margin-top: var(--s2);
+    padding: var(--s3);
+    border: 1px solid var(--line);
+    border-radius: var(--r3);
+    background: var(--surface-2);
+  }
+
+  .rq {
+    margin: 0;
+    font-weight: 600;
+  }
+
+  .racts {
+    display: flex;
+    gap: var(--s2);
+    flex-wrap: wrap;
+  }
+
+  .rtext {
+    margin: 0;
+    padding: var(--s2);
+    border-radius: var(--r2);
+    background: var(--surface);
+    font-size: var(--t-xs);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  .rhint {
+    margin: 0;
+    font-size: var(--t-xs);
+    color: var(--text-3);
+    max-width: 60ch;
+  }
+
   .levelnote {
     margin: 0 0 var(--s2);
     font-size: var(--t-xs);
@@ -1260,6 +1371,20 @@ import {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  /* A package name is the way into its page; it has to look like the text it replaced. */
+  .name.link {
+    all: unset;
+    cursor: pointer;
+    font-size: var(--t-md);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .name.link:hover {
+    color: var(--accent);
   }
 
   .sub,
