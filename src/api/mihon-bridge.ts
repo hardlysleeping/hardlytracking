@@ -25,6 +25,7 @@ import { DalvikError } from "./dalvik";
 import { hostOf } from "../lib/webview/cookies";
 import { loginInWebview, webviewDriver, type WebviewDriver } from "../lib/webview/index";
 import type { CookieJar } from "../lib/webview/store";
+import { consentQuestion } from "../lib/webview/consent";
 
 /** The source that wants a login, and where its site is. */
 export interface LoginTarget {
@@ -38,6 +39,19 @@ export interface LoginTarget {
   loginUrl?: string | null;
 }
 
+/**
+ * Where the answer to "may this source use cookies for its domain?" comes from.
+ *
+ * Supplied by the profile, which owns the store. A build that passes nothing is a build with no
+ * consent gate — only a test should be in that position, and the parameter being optional is what
+ * lets those tests stay one line shorter.
+ */
+export interface LoginConsent {
+  /** Async because a grant is a stored preference, not a field on this object. */
+  isGranted(sourceId: string, domain: string): boolean | Promise<boolean>;
+  grant(sourceId: string, domain: string): void | Promise<void>;
+}
+
 export interface LoginDeps {
   client: DalvikClient;
   /** The installed extensions, so the source's extension id can be found. */
@@ -45,6 +59,8 @@ export interface LoginDeps {
   jar: CookieJar;
   /** The webview to use. A test supplies a fake; a build uses its platform's. */
   driver?: WebviewDriver;
+  /** Ask before a source is handed a cookie jar. Omitted by tests that are not about consent. */
+  consent?: LoginConsent;
   /**
    * The call that proves the login took. Defaults to the source's popular page, which is what the
    * UI was showing when it hit the 401.
@@ -62,7 +78,12 @@ export type LoginResult =
   /** The webview itself failed to open. Nothing was written. */
   | { status: "failed"; sourceId: string; reason: string }
   /** Cookies were stored but the source still refuses: the login did not take. */
-  | { status: "rejected"; sourceId: string; cookies: number; reason: string };
+  | { status: "rejected"; sourceId: string; cookies: number; reason: string }
+  /**
+   * Nothing was opened and nothing was stored: this source has not been allowed to use cookies for
+   * this domain yet. The caller asks, then calls again.
+   */
+  | { status: "consent"; sourceId: string; host: string; question: string };
 
 /** Whether a thrown error is the source asking to be logged into. */
 export function needsLogin(error: unknown): error is DalvikError {
@@ -109,6 +130,12 @@ export async function loginSource(target: LoginTarget, deps: LoginDeps): Promise
   }
   const host = hostOf(target.baseUrl);
   if (host === null) throw new Error(`source ${sourceId} has no site address to log in at`);
+
+  // The question comes before the page, not after it: opening the site in a webview that is about to
+  // receive its cookies is the moment the permission is being used, so it is the moment to ask.
+  if (deps.consent !== undefined && !(await deps.consent.isGranted(sourceId, host))) {
+    return { status: "consent", sourceId, host, question: consentQuestion(host) };
+  }
 
   const driver = deps.driver ?? webviewDriver();
   const outcome = await loginInWebview({ url: loginUrlFor(target), hosts: [host], ...(target.title === undefined ? {} : { title: target.title }) }, driver);

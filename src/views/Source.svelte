@@ -33,6 +33,13 @@
   /** The login page a 401 named, so the button opens the page the source asked for. */
   let loginUrl = $state<string | null>(null);
   let loginState = $state<"idle" | "busy" | "done">("idle");
+  /**
+   * The consent question, when the source has not been allowed cookies for its domain yet.
+   *
+   * The login button opens a webview, which is where the cookie jar starts being shared, so the
+   * question is asked before that page loads rather than after it has already been used.
+   */
+  let askConsent = $state<{ host: string; question: string } | null>(null);
 
   const source = $derived(library.sources.find((row) => row.id === sourceId) ?? null);
   /**
@@ -91,6 +98,11 @@
     loginState = "busy";
     try {
       const result = await library.profile.login(sourceId, { loginUrl });
+      if (result.status === "consent") {
+        askConsent = { host: result.host, question: result.question };
+        loginState = "idle";
+        return;
+      }
       if (result.status === "ok") {
         loginState = "done";
         error = null;
@@ -110,6 +122,14 @@
       error = e instanceof Error ? e.message : String(e);
       loginState = "idle";
     }
+  }
+
+  /** Remember the yes, then run the login that was waiting on it. */
+  async function allowCookies(): Promise<void> {
+    if (library.profile === null || askConsent === null) return;
+    await library.profile.consent.grant(sourceId, askConsent.host);
+    askConsent = null;
+    await login();
   }
 
   function setMode(next: "popular" | "latest"): void {
@@ -157,6 +177,16 @@
   </div>
 
   {#if error}<p class="banner">{error}</p>{/if}
+  {#if askConsent !== null}
+    <div class="consent" role="group" aria-label="Cookie permission">
+      <p class="cq">{askConsent.question}</p>
+      <p class="cd">The sign-in page runs on the site itself. Whatever it sets is kept on this device and sent to the source with each request, so you stay signed in. Refusing keeps the source working, just signed out.</p>
+      <div class="cacts">
+        <button class="btn ghost" onclick={() => (askConsent = null)}>Not now</button>
+        <button class="btn primary" onclick={() => void allowCookies()}>Allow</button>
+      </div>
+    </div>
+  {/if}
   {#if loginUrl !== null}
     <button class="btn login" disabled={loginState === "busy"} onclick={() => void login()}>
       {loginState === "busy" ? "Waiting for the login page…" : "Log in to this source"}
@@ -184,6 +214,35 @@
 {/if}
 
 <style>
+  .consent {
+    display: grid;
+    gap: var(--s1);
+    margin: 0 var(--s3) var(--s3);
+    padding: var(--s3);
+    border: 1px solid var(--line);
+    border-radius: var(--r3);
+    background: var(--surface-2);
+  }
+
+  .cq {
+    margin: 0;
+    font-weight: 600;
+  }
+
+  .cd {
+    margin: 0;
+    font-size: var(--t-sm);
+    color: var(--text-2);
+    max-width: 60ch;
+  }
+
+  .cacts {
+    display: flex;
+    gap: var(--s2);
+    margin-top: var(--s1);
+    flex-wrap: wrap;
+  }
+
   .view {
     padding: var(--s4) var(--s4) var(--s7);
     max-width: 1100px;

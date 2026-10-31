@@ -16,7 +16,11 @@ import { openDatabase, type Database } from "../lib/db/open";
 import { LibraryStore } from "../lib/db/store";
 import { dbCookieJar, type CookieJar } from "../lib/webview/store";
 import { hostOf } from "../lib/webview/cookies";
-import { loginSource, type LoginResult } from "./mihon-bridge";
+import { loginSource, type LoginConsent, type LoginResult } from "./mihon-bridge";
+import { grantConsent, isGranted, revokeConsent, type ConsentGrant } from "../lib/webview/consent";
+
+/** Where the cookie grants live in this device's preferences. */
+const CONSENT_PREF = "settings.consentGrants";
 import { openHostRegistry } from "../lib/extensions/host-registry";
 import { komgaEnabled, komgaSettings } from "../lib/komga";
 import { createKomgaProvider } from "./komga";
@@ -37,6 +41,13 @@ export interface LibraryProfile {
    * setting, and a card that saves an address while the provider keeps the old one reads as broken.
    */
   htServer: DalvikHost | null;
+  /**
+   * The cookie consent gate: which sources have been allowed to use which domains.
+   *
+   * On the profile rather than in a screen because the webview hand-off goes through `login()`,
+   * and a permission that only some callers check is not a permission.
+   */
+  readonly consent: LoginConsent & { revoke(sourceId: string): Promise<void> };
   /** Where this build's APK extensions live: this device's database, or the host registry serving it. */
   readonly extensionWhere: "device" | "host";
   /** Every extension row the UI draws: the built-ins (this device's) plus the APK rows. */
@@ -149,6 +160,28 @@ export async function openLibraryProfile(options: OpenProfileOptions = {}): Prom
     if (hostRegistry === null) return store.listExtensions();
     const own = (await store.listExtensions()).filter((row) => row.builtin === true);
     return [...own, ...(await hostRegistry.list())];
+  }
+
+  /**
+   * The consent gate, read from this device's own store.
+   *
+   * A grant is stored as a preference because it is a decision the user made and would expect to
+   * survive a relaunch — and because a backup that carries it is a backup of the same person's
+   * answers. `revoke` is what uninstalling a source calls.
+   */
+  const consent = {
+    async isGranted(sourceId: string, domain: string): Promise<boolean> {
+      return isGranted((await store.getPref<ConsentGrant[]>(CONSENT_PREF)) ?? [], sourceId, domain);
+    },
+    async grant(sourceId: string, domain: string): Promise<void> {
+      const grants = (await store.getPref<ConsentGrant[]>(CONSENT_PREF)) ?? [];
+      await store.setPref(CONSENT_PREF, grantConsent(grants, sourceId, domain, Date.now()));
+    },
+    async revoke(sourceId: string): Promise<void> {
+      const grants = (await store.getPref<ConsentGrant[]>(CONSENT_PREF)) ?? [];
+      const kept = revokeConsent(grants, sourceId);
+      if (kept.length !== grants.length) await store.setPref(CONSENT_PREF, kept);
+    },
   }
 
   const profile: LibraryProfile = {
@@ -272,6 +305,10 @@ export async function openLibraryProfile(options: OpenProfileOptions = {}): Prom
       // There is nothing to uninstall: the code is in the app. Refusing keeps a stray call from
       // deleting a row that would be re-seeded on the next launch and look like a bug.
       if (isBuiltin(extensionId)) throw new Error(`${extensionId} is built in; disable it instead`);
+      // Its sources' permissions go with it: a reinstall is a new question, and a grant for a source
+      // that no longer exists is a permission nobody can see or take back.
+      const leaving = (dalvik?.extensions.find((row) => row.extensionId === extensionId)?.sources ?? (await store.getExtension(extensionId))?.sources ?? []).map((source) => source.id);
+      for (const id of leaving) await consent.revoke(id);
       if (hostRegistry !== null) {
         await hostRegistry.remove(extensionId);
         // The old row may still sit in this device's database from before the registry existed. It is
@@ -290,6 +327,7 @@ export async function openLibraryProfile(options: OpenProfileOptions = {}): Prom
       if (at >= 0) dalvik.extensions.splice(at, 1);
     },
     cookies: jar,
+    consent,
     async login(sourceId: string, loginOptions: { loginUrl?: string | null } = {}): Promise<LoginResult> {
       if (dalvik === null) {
         throw new Error("no extension host answered /capabilities, so there is no runtime to sign in to");
@@ -311,7 +349,12 @@ export async function openLibraryProfile(options: OpenProfileOptions = {}): Prom
           ...(found?.name === undefined ? {} : { title: found.name }),
           ...(loginOptions.loginUrl === undefined ? {} : { loginUrl: loginOptions.loginUrl }),
         },
-        { client: dalvik.client, extensions: dalvik.extensions, jar },
+        {
+          client: dalvik.client,
+          extensions: dalvik.extensions,
+          jar,
+          consent,
+        },
       );
       // The UA only comes back from a successful login, and it is a device fact, so it is kept even
       // though the cookies are the source's: the next login page will present the same client.
