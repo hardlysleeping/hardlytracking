@@ -148,6 +148,24 @@ interface PagesRow {
   headers?: Array<Record<string, string> | null>;
 }
 
+/**
+ * A comic file the user picked — the bytes they already own, kept whole.
+ *
+ * `pageCount` is read once at import so a chapter row can say how long a book is without opening
+ * the archive again. Nothing here is decoded: pages are produced on demand by `lib/files`.
+ */
+export interface BookRow {
+  seriesId: string;
+  chapterId: string;
+  /** The file's own name, shown when a title is ambiguous. */
+  name: string;
+  kind: "cbz" | "pdf";
+  pageCount: number;
+  bytes: number;
+  blob: Blob;
+  addedAt: number;
+}
+
 export class LibraryStore {
   private readonly db: Database;
 
@@ -596,6 +614,29 @@ export class LibraryStore {
 
   async setSourcePrefs(sourceId: string, fields: PrefField[]): Promise<void> {
     await this.setExtensionPref("prefs", sourceId, fields);
+  }
+
+  /**
+   * A comic file the user picked, kept whole.
+   *
+   * The bytes are stored, not the pages: a 300 MB CBZ must not become 300 MB of decoded images in
+   * this database, and the reader only ever needs one page at a time. `pageCount` is read once at
+   * import so the chapter row can say how long the book is without opening it again.
+   */
+  async putBook(book: BookRow): Promise<void> {
+    await this.db.put("books", book as unknown as Record<string, unknown>);
+  }
+
+  async getBook(seriesId: string): Promise<BookRow | undefined> {
+    return this.db.get<BookRow>("books", seriesId);
+  }
+
+  async listBooks(): Promise<BookRow[]> {
+    return this.db.all<BookRow>("books");
+  }
+
+  async removeBook(seriesId: string): Promise<void> {
+    await this.db.remove("books", seriesId);
   }
 
   /** A cached source search answer, so a repeated query paints before the network does. */

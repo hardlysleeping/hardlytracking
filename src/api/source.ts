@@ -90,6 +90,13 @@ export interface Page {
    * `/api/img` route instead of being pointed at directly. Absent means "plain URL, load it".
    */
   headers?: Record<string, string>;
+  /**
+   * A page this device can produce itself — an image inside a CBZ or a PDF page.
+   *
+   * A local book is never unpacked up front, so its pages have no URL until they are asked for.
+   * `pageSrc` calls this once per visible page and hands the reader a blob URL.
+   */
+  open?: () => Promise<Blob>;
 }
 
 export interface Paged<T> {

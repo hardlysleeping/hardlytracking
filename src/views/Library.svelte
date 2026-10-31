@@ -21,6 +21,7 @@
   import { BADGE_KINDS, DEFAULT_BADGES, PRESET_BADGES, badgeList, type Badge } from "../lib/library/badges";
   import Sheet from "../components/Sheet.svelte";
   import LibraryHeader from "../components/LibraryHeader.svelte";
+  import AddFiles from "../components/AddFiles.svelte";
   import OverflowSheet, { type LibraryStats } from "../components/OverflowSheet.svelte";
   import FilterSheet from "../components/FilterSheet.svelte";
   import ChipRow from "../components/ChipRow.svelte";
@@ -762,6 +763,8 @@
           </button>
           <button class="btn ghost" onclick={() => (sortOpen = true)}>Sort · {sortLabel}</button>
           <button class="btn ghost" onclick={() => (displayOpen = true)}>Display</button>
+          <!-- The comics they already own: no server, no extension, no network. -->
+          <AddFiles />
           <div class="views" role="group" aria-label="Layout">
             {#each VIEWS as view (view.id)}
               <button
@@ -789,9 +792,13 @@
         {:else if rows.length === 0 && library.library.length === 0}
           <div class="blank">
             <p class="blankline">Your library is empty.</p>
-            <p class="blanksub">Add a repository, install an extension, and the first series you keep lands here.</p>
+            <p class="blanksub">
+              Add the comics you already own — a CBZ or PDF from this device — or a repository, and the first
+              series you keep lands here.
+            </p>
             <div class="blankacts">
-              <button class="btn primary" onclick={() => go("/extensions")}>Add a repository</button>
+              <AddFiles look="primary" label="Add comic files" />
+              <button class="btn" onclick={() => go("/extensions")}>Add a repository</button>
               <button class="btn" onclick={() => go("/browse")}>Browse sources</button>
             </div>
           </div>

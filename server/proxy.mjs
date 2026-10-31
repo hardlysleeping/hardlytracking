@@ -51,6 +51,11 @@ const STATE = process.env.HT_STATE_DIR ?? fileURLToPath(new URL("../data/", impo
 const MIME = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
+  // pdf.js ships its worker as `.mjs`, and a browser refuses to `import()` a module served as
+  // application/octet-stream — the symptom is "Setting up fake worker failed" and a PDF that will not
+  // open. Any `.mjs` in the bundle needs this line.
+  ".mjs": "text/javascript; charset=utf-8",
+  ".wasm": "application/wasm",
   ".css": "text/css; charset=utf-8",
   ".json": "application/json; charset=utf-8",
   ".svg": "image/svg+xml",

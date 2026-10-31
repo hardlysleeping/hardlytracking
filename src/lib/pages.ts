@@ -31,6 +31,9 @@ import { imageCache } from "./cache/images";
  * fetched here instead and handed back as a blob. Both paths end in one string the reader uses.
  */
 export async function pageSrc(page: Page): Promise<string> {
+  // A page this device can produce itself (an image inside a CBZ, a PDF page): the reader asks for it
+  // when it is near the viewport, and the blob URL is reused while the page stays in the window.
+  if (page.open !== undefined) return localPageSrc(page);
   if (page.headers === undefined || Object.keys(page.headers).length === 0) return page.url;
   // Two reasons to fetch the bytes here instead of pointing at the proxy: there is no proxy (a
   // packaged app), or the source is on the private network and `/api/img` refuses those by design.
@@ -57,6 +60,42 @@ export function isPrivate(url: string): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * A locally produced page, as a blob URL.
+ *
+ * The reader keeps nine pages mounted and asks again when the window moves, so a page is fetched once
+ * and reused — but only a handful are held: a 200-page book would otherwise pin every decoded scan in
+ * the process, which is the fault the reader's window exists to avoid.
+ */
+const LOCAL_PAGE_LIMIT = 12;
+const localPages = new Map<string, string>();
+
+async function localPageSrc(page: Page): Promise<string> {
+  const cached = localPages.get(page.url);
+  if (cached !== undefined) {
+    localPages.delete(page.url);
+    localPages.set(page.url, cached);
+    return cached;
+  }
+  const blob = await page.open!();
+  const url = URL.createObjectURL(blob);
+  localPages.set(page.url, url);
+  while (localPages.size > LOCAL_PAGE_LIMIT) {
+    const oldest = localPages.keys().next();
+    if (oldest.done === true) break;
+    const stale = localPages.get(oldest.value);
+    localPages.delete(oldest.value);
+    if (stale !== undefined) URL.revokeObjectURL(stale);
+  }
+  return url;
+}
+
+/** Forget every locally produced page — used when a book is closed. */
+export function forgetLocalPages(): void {
+  for (const url of localPages.values()) URL.revokeObjectURL(url);
+  localPages.clear();
 }
 
 export function imageSrc(page: Page): string {

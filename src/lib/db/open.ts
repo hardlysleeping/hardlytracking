@@ -35,6 +35,8 @@ export const STORES = [
   "cookies",
   "trackers",
   "trackerAccounts",
+  /** A comic file this device holds: the bytes, the page count, nothing decoded. */
+  "books",
 ] as const;
 export type StoreName = (typeof STORES)[number];
 
@@ -61,6 +63,7 @@ const KEY_PATH: Record<StoreName, string> = {
   position: "seriesId",
   mappings: "seriesId",
   repos: "url",
+  books: "seriesId",
   downloads: "chapterId",
   downloadPages: "id",
   viewState: "key",
@@ -86,7 +89,7 @@ export interface Database {
 }
 
 const DB_NAME = "hardlytracking";
-const DB_VERSION = 14;
+const DB_VERSION = 15;
 
 function wrap<T>(request: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => {

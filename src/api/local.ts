@@ -8,6 +8,7 @@
  */
 import { joinId, nativeId, paged, type Chapter, type Paged, type Series, type Source, type SourceProvider } from "./source";
 import type { LibraryStore } from "../lib/db/store";
+import { openComic } from "../lib/files/index";
 
 export const LOCAL_SOURCE_ID = "local:src:library";
 
@@ -56,7 +57,19 @@ export function createLocalProvider(store: LibraryStore): SourceProvider {
 
     async pages(chapterId) {
       nativeId(chapterId, "local");
-      return store.getPages(chapterId);
+      // A book the user picked off their own disk: its pages are produced from the file on demand,
+      // never unpacked up front. Anything else local is a chapter we already hold as page blobs.
+      const books = await store.listBooks();
+      const book = books.find((row) => row.chapterId === chapterId);
+      if (book === undefined) return store.getPages(chapterId);
+      const comic = await openComic(book.blob, book.name);
+      return Array.from({ length: comic.pageCount }, (_, index) => ({
+        index,
+        // A stable pseudo-URL: `pageSrc` keys its blob cache on it, so a page keeps one URL while the
+        // reader's window holds it.
+        url: `book:${book.seriesId}#${index}`,
+        open: () => comic.open(index),
+      }));
     },
 
     async setRead(chapterId, read) {

@@ -265,7 +265,9 @@
         // A plain page is just its URL. A page that needs a header is resolved when it comes near
         // the viewport (`use:lazyPage`), because resolving all of them up front fetched every page
         // of a 214-page chapter the moment it opened — gigabytes of scans for one visible page.
-        urls = pages.map((page) => (page.headers === undefined ? page.url : ""));
+        // A page with no URL of its own — one that needs a header, or one this device produces from a
+        // CBZ/PDF — is resolved by `use:lazyPage` when it comes near the viewport.
+        urls = pages.map((page) => (page.headers === undefined && page.open === undefined ? page.url : ""));
       }
       const progress = await library.profile.store.getProgress(id);
       index = Math.min(progress?.page ?? 0, Math.max(pages.length - 1, 0));
@@ -445,9 +447,7 @@
             <!-- Outside the window: the box holds the scroll position, the bytes are not loaded. A
                  214-page chapter used to fetch every page at once because a zero-height page is
                  "on screen" for every lazy image in it. -->
-          {:else if (urls[page.index] ?? page.url) === ""}
-            <div class="missing" role="note">Page {page.index + 1} is not on this device</div>
-          {:else if page.headers !== undefined}
+          {:else if page.headers !== undefined || page.open !== undefined}
             <!-- The source needs a header, which an `<img>` cannot send: the action fetches the
                  bytes when this page is close to the viewport and nothing before then. -->
             <img
@@ -456,6 +456,8 @@
               loading={page.index < 3 ? "eager" : "lazy"}
               decoding="async"
             />
+          {:else if (urls[page.index] ?? page.url) === ""}
+            <div class="missing" role="note">Page {page.index + 1} is not on this device</div>
           {:else}
             <img
               src={urls[page.index] ?? page.url}
