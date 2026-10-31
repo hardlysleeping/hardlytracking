@@ -13,7 +13,7 @@
   import { extensionLabel, extensionLanguages, sourcesOfExtension } from "../lib/extensions/installed";
   import { proxiedImage } from "../lib/pages";
   import { go, pathTo } from "../lib/nav";
-  import { htServerEnabled, remoteHost } from "../lib/host";
+  import { htServerEnabled, hostToken, remoteHost, setHostToken, setRemoteHost } from "../lib/host";
 
   interface Props {
     /** A repository from an install link (`mihon://…`, `?repo=…`), added on arrival. */
@@ -36,6 +36,20 @@
   /** Two-step uninstall: removing an extension is destructive and one stray tap should not do it. */
   let removing = $state<string | null>(null);
   let busy = $state<string | null>(null);
+  // The HT-Server's settings belong on its own card: it is a source you point at a machine, and a
+  // second copy in Settings would be two places to keep right.
+  let hostValue = $state(remoteHost());
+  let hostTokenValue = $state(hostToken());
+
+  function saveHost(value: string): void {
+    setRemoteHost(value);
+    hostValue = remoteHost();
+  }
+
+  function saveHostToken(value: string): void {
+    setHostToken(value);
+    hostTokenValue = hostToken();
+  }
 
   async function toggle(row: (typeof library.extensions)[number]): Promise<void> {
     busy = row.extensionId;
@@ -201,7 +215,7 @@
                 <span class="sub">
                   {#if row.extensionId === "builtin:ht-server"}
                     <!-- A host is not a source itself: what matters is which machine it is. -->
-                    {row.versionName ?? "1.0.0"} · {remoteHost() === "" ? "no host set" : remoteHost()}{#if !htServerEnabled()} · paired but off{/if}
+                    {row.versionName ?? "1.0.0"} · {hostValue === "" ? "no host set" : hostValue}{#if !htServerEnabled()} · paired but off{/if}
                   {:else}
                     {row.versionName ?? "unknown version"} · {row.sources.length} source{row.sources.length === 1 ? "" : "s"}{#if langs.length > 0} · {langs.join(", ")}{/if}
                   {/if}
@@ -220,6 +234,38 @@
                 <span class="track" aria-hidden="true"><span class="knob"></span></span>
               </label>
             </div>
+
+            {#if row.extensionId === "builtin:ht-server"}
+              <div class="hostform">
+                <label>
+                  <span>Address</span>
+                  <input
+                    class="field"
+                    type="text"
+                    value={hostValue}
+                    placeholder="http://192.168.1.20:8460"
+                    spellcheck="false"
+                    onchange={(event) => saveHost(event.currentTarget.value)}
+                  />
+                </label>
+                <label>
+                  <span>Token</span>
+                  <input
+                    class="field"
+                    type="text"
+                    value={hostTokenValue}
+                    placeholder="optional"
+                    spellcheck="false"
+                    onchange={(event) => saveHostToken(event.currentTarget.value)}
+                  />
+                </label>
+                <p class="hint">
+                  {hostValue === ""
+                    ? "No host set — this device runs everything itself."
+                    : `${hostValue} · ${htServerEnabled() ? "used as a source" : "switched off"}`}
+                </p>
+              </div>
+            {/if}
 
             <div class="srcs">
               {#each row.sources.slice(0, 8) as source (source.id)}
@@ -345,6 +391,30 @@
 </section>
 
 <style>
+  .hostform {
+    display: grid;
+    gap: var(--s1);
+    padding: var(--s2) 0 var(--s1);
+  }
+
+  .hostform label {
+    display: grid;
+    grid-template-columns: 80px 1fr;
+    align-items: center;
+    gap: var(--s2);
+    font-size: var(--t-sm);
+  }
+
+  .hostform .field {
+    min-height: 32px;
+  }
+
+  .hostform .hint {
+    margin: 0;
+    color: var(--text-3);
+    font-size: var(--t-xs);
+  }
+
   .view {
     padding: var(--s4) var(--s4) var(--s7);
     max-width: 900px;

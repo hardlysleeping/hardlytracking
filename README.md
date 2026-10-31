@@ -61,7 +61,8 @@ No content source ships with this app. The user adds extension repositories or i
 themselves, exactly as in Mihon — an app that bundles them becomes a distributor of third-party
 code. The built-ins that *are* allowed are the ones with no third-party catalogue behind them:
 locally hosted services (Komga, Suwayomi), Internet Archive (open data, public API), and this
-project's own read server. The rule and its reasons: `docs/builtins.md`.
+project's own HT-Server (a PC you point it at, as a source — never as the app's origin). The rule
+and its reasons: `docs/builtins.md`.
 
 ## Free, and what is paid
 

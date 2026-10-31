@@ -21,7 +21,7 @@ Three kinds, and each is allowed for a stated reason:
 | --- | --- |
 | **Locally hosted services** — Komga, Suwayomi | The user runs the server on their own machine. There is no third-party catalogue to distribute: the content is already theirs. |
 | **Internet Archive** | Open, publicly documented API and public-domain / openly licensed material. Nothing is redistributed — the app reads archive.org's own endpoints. |
-| **Our read server** | Our own code, hosted locally by the user. It is a transport between their devices, not a source of content. |
+| **HT-Server** | Our own code, hosted by the user on their own machine. It is an optional *source* — one more host to browse from, like Komga or Suwayomi — never the app's origin: pairing it must not re-point this device's own runtime, repositories or images. |
 
 ## How that shows up in the app
 

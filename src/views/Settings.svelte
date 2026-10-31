@@ -15,7 +15,7 @@
   import { go } from "../lib/nav";
   import { onMount } from "svelte";
   import SyncAccount from "../components/SyncAccount.svelte";
-  import { hostInfo, hostToken, pairingLink, remoteHost, setHostToken, setRemoteHost, type HostInfo } from "../lib/host";
+  import { hostInfo, hostToken, htServerEnabled, pairingLink, remoteHost, type HostInfo } from "../lib/host";
   import { imageCache } from "../lib/cache/images";
   import { CACHE_LIMIT_CHOICES, describeCache, formatBytes, type CacheEntry } from "../lib/cache/policy";
   import { MARGIN_CHOICES, PANE_CHOICES } from "../lib/view-options";
@@ -70,18 +70,6 @@
   });
 
   const link = $derived(info === null ? null : pairingLink(info, token));
-
-  function saveToken(value: string): void {
-    setHostToken(value);
-    token = hostToken();
-    void hostInfo().then((next) => (info = next));
-  }
-
-  function saveHost(value: string): void {
-    setRemoteHost(value);
-    hostValue = remoteHost();
-    void hostInfo().then((next) => (info = next));
-  }
 
   async function copyLink(): Promise<void> {
     if (link === null) return;
@@ -395,19 +383,21 @@
         <button class="chip" onclick={() => void copyLink()}>{copied ? "Copied" : "Copy"}</button>
       </div>
       {#if info.tokenRequired && token === ""}
-        <p class="hint">That link has no token yet — paste the server's <code>HARDLYTRACKING_TOKEN</code> below so the phone can call the runtime.</p>
+        <p class="hint">That link has no token yet — put the server's <code>HARDLYTRACKING_TOKEN</code> on the HT-Server card in Extensions so the phone can call the runtime.</p>
       {/if}
     {:else}
       <p class="hint">Serving on the network, but no network address was found.</p>
     {/if}
-    <label class="row">
-      <span>Server token<em class="sub">Stored on this device only, and never in a backup.</em></span>
-      <input class="field" type="text" value={token} placeholder="optional" spellcheck="false" onchange={(event) => saveToken(event.currentTarget.value)} />
-    </label>
-    <label class="row">
-      <span>Use a remote runtime<em class="sub">Point this device at a desktop instead of itself, e.g. http://192.168.1.20:8460</em></span>
-      <input class="field" type="text" value={hostValue} placeholder="this device" spellcheck="false" onchange={(event) => saveHost(event.currentTarget.value)} />
-    </label>
+    <div class="row">
+      <span>
+        HT-Server
+        <em class="sub">
+          {hostValue === "" ? "No host set — this device runs everything itself." : `${hostValue} · ${htServerEnabled() ? "used as a source" : "switched off"}`}
+          The address and token live on the HT-Server's own card in Extensions.
+        </em>
+      </span>
+      <button class="chip" onclick={() => go("/extensions")}>Open in Extensions</button>
+    </div>
   </section>
 
   <section class="group">
