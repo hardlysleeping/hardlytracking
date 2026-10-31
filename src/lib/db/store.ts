@@ -11,6 +11,7 @@ import type { PrefField } from "../extensions/prefs";
 import type { InstalledExtension } from "../../api/dalvik";
 import type { TrackerAccountRow, TrackerRow } from "../trackers/types";
 import { normaliseCategories, type Category } from "../categories";
+import { normaliseSourceMarks, type SourceMark } from "../marks";
 import type { LibraryFilter } from "../library/filter";
 import type { Database } from "./open";
 
@@ -697,6 +698,24 @@ export class LibraryStore {
     const series = await this.getSeries(seriesId);
     if (series === undefined) throw new Error(`not in the library: ${seriesId}`);
     await this.db.put("series", { ...series, categoryIds, addedAt: Date.now() } as unknown as Record<string, unknown>);
+  }
+
+  /**
+   * Source marks: the same eye and pin, on the source a title came from.
+   *
+   * A row is written only when a mark is actually set — an unmarked source has no row, which is what
+   * keeps the store honest about "never touched" versus "unhidden on purpose".
+   */
+  async listSourceMarks(): Promise<SourceMark[]> {
+    return normaliseSourceMarks(await this.db.all<SourceMark>("sourceMarks"));
+  }
+
+  async putSourceMark(mark: SourceMark): Promise<void> {
+    if (!mark.hidden && !mark.pinned) {
+      await this.db.remove("sourceMarks", mark.id);
+      return;
+    }
+    await this.db.put("sourceMarks", { ...mark } as unknown as Record<string, unknown>);
   }
 
   /** Series that belong to one category, for the rail's selection. */

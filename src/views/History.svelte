@@ -12,10 +12,15 @@
   import { settings } from "../state/settings.svelte";
   import { viewport } from "../lib/layout.svelte";
   import { paneMode, paneRatio, squeezed } from "../lib/view-options";
+  import { categories } from "../state/categories.svelte";
+  import { sourceMarks } from "../state/source-marks.svelte";
+  import { contextOf, isHidden, sourceKeyOf } from "../lib/marks";
 
   interface Row {
     seriesId: string;
     chapterId: string;
+    /** The title's categories, so a hidden category can take its history with it. */
+    categoryIds: string[];
     at: number;
     title: string;
     cover?: string;
@@ -70,18 +75,22 @@
     if (store === undefined) return;
     loading = true;
     try {
-      const [history, series, positions, allChapters] = await Promise.all([
+      const [history, series, positions, allChapters, mappings] = await Promise.all([
         store.listHistory(200),
         store.listSeries(),
         store.listPositions(),
         store.listAllChapters(),
+        // A `mihon:` title's source is only knowable from its mapping.
+        store.listMappings(),
       ]);
+      mappedSource = new Map(mappings.map((row) => [row.seriesId, row.sourceId]));
       const byId = new Map(series.map((row) => [row.id, row]));
       const positionOf = new Map(positions.map((row) => [row.chapterId, row.page]));
       const chapterNames = new Map(allChapters.map((chapter) => [chapter.id, chapter.name]));
       rows = history.map((row) => ({
         seriesId: row.seriesId,
         chapterId: row.chapterId,
+        categoryIds: byId.get(row.seriesId)?.categoryIds ?? [],
         at: row.at,
         title: seriesLabel(byId.get(row.seriesId)?.title),
         cover: byId.get(row.seriesId)?.cover,
@@ -122,6 +131,28 @@
     );
   }
 
+  /** seriesId -> source id, from the stored mapping. */
+  let mappedSource = $state<Map<string, string>>(new Map());
+
+  /**
+   * The same rule the library uses, so hiding a category or a source takes its history with it.
+   *
+   * The row is dropped, not greyed: a hidden shelf that still fills History has not been hidden, it
+   * has been labelled.
+   */
+  const shown = $derived(
+    rows.filter((row) =>
+      !isHidden(
+        { id: row.seriesId, categoryIds: row.categoryIds },
+        contextOf({
+          categories: categories.items,
+          sources: sourceMarks.marks,
+          sourceOf: (seriesId: string) => sourceKeyOf(seriesId, mappedSource.get(seriesId)),
+        }),
+      ),
+    ),
+  );
+
   const groups = $derived.by(() => {
     const startOfToday = new Date();
     startOfToday.setHours(0, 0, 0, 0);
@@ -132,7 +163,7 @@
       { label: "Earlier this week", rows: [] },
       { label: "Older", rows: [] },
     ];
-    for (const row of rows) {
+    for (const row of shown) {
       if (row.at >= today) buckets[0].rows.push(row);
       else if (row.at >= today - 86_400_000) buckets[1].rows.push(row);
       else if (row.at >= today - 7 * 86_400_000) buckets[2].rows.push(row);
@@ -154,12 +185,12 @@
 <section class="view">
   <header class="top">
     <h1>History</h1>
-    <span class="count">{rows.length}</span>
+    <span class="count">{shown.length}</span>
   </header>
 
   {#if loading}
     <p class="empty">Reading history…</p>
-  {:else if rows.length === 0}
+  {:else if shown.length === 0}
     <div class="blank">
       <p class="blankline">Nothing read yet.</p>
       <p class="blanksub">Chapters you open land here, newest first, with the page you stopped on.</p>

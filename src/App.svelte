@@ -24,6 +24,7 @@
 
   import { library } from "./state/library.svelte";
   import { categories } from "./state/categories.svelte";
+import { sourceMarks } from "./state/source-marks.svelte";
   import { settings } from "./state/settings.svelte";
   import { downloads } from "./state/downloads.svelte";
   import { appearance } from "./lib/theme.svelte";
@@ -70,7 +71,7 @@
       await library.open();
       const store = library.profile?.store;
       if (store === undefined) return;
-      await Promise.all([categories.load(store), settings.load(store), downloads.load()]);
+      await Promise.all([categories.load(store), sourceMarks.load(store), settings.load(store), downloads.load()]);
     })();
     return () => {
       removeEventListener("hashchange", onHash);

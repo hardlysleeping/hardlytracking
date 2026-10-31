@@ -85,3 +85,20 @@ one is failing.**
 During the first UI pass, opening a chapter wrote `isRead: true` to the runtime's own database (chapter 1 of
 manga 12 on the local Suwayomi). That is a write to data the app does not own. It was reverted
 (`updateChapter … isRead:false`, verified), and the reader now has an explicit `Mark read` button.
+
+## 2026-10-30 — the owner's new priority: marks that hide, on sources too
+
+"the same buttons and system for UI from hardlyreader, but here it works not just on categories, but also
+hides sources, and reading history of comics in those categories and/or sources that are hidden."
+
+Measured before planning: the **grid exists** (Library has `grid`/`compact`/`list` in the header toggle), and
+the **eye/pin system exists for categories** (`lib/categories.ts` rules, `CategoryRail.svelte` look,
+`applyView` already filters the grid). What does not exist: any mark on a source, and any effect of the marks
+outside the grid — `History.svelte` never consults them.
+
+- **T31** (`t_6bc49db5`) — `SourceMark` + `sourceMarks` store + `SourceRail` + Browse, same band and words.
+- **T32** (`t_142bf5e9`) — one predicate, every caller: library, history, continue, updates.
+
+Rule: a series is hidden when every category it is filed under is hidden, **or** its source is hidden. The
+source half is deliberately absolute — a source is where a title comes from, so hiding it hides everything
+from it even when a category would have shown it.

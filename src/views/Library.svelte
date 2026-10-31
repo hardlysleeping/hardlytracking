@@ -29,6 +29,8 @@
   import SortSheet from "../components/SortSheet.svelte";
   import { go, pathTo } from "../lib/nav";
   import { visibleCategories } from "../lib/categories";
+  import { sourceKeyOf } from "../lib/marks";
+  import { sourceMarks } from "../state/source-marks.svelte";
   import { coverWidth, libraryLayout } from "../lib/layout-modes";
   import { viewport } from "../lib/layout.svelte";
   import { emptyFacts, runQuery, type QueryFacts } from "../lib/library/query";
@@ -268,6 +270,9 @@
    * Unread, totals, last-read order and downloads are all questions about the same rows, so they
    * are gathered together: a filter or a sort must never ask the database anything mid-render.
    */
+  /** seriesId -> the source id its mapping names, when one exists. */
+  let mappedSource = $state<Map<string, string>>(new Map());
+
   let counts = $state<{
     unread: Map<string, number>;
     total: Map<string, number>;
@@ -285,11 +290,16 @@
   async function recount(): Promise<void> {
     const store = library.profile?.store;
     if (store === undefined) return;
-    const [chapters, prefs, positions] = await Promise.all([
+    const [chapters, prefs, positions, mappings] = await Promise.all([
       store.listAllChapters(),
       store.listPrefs(),
       store.listPositions(),
+      // A `mihon:12` id does not name its source; the stored mapping is the only thing that does.
+      // Read here, in the same pass as the counts, so hiding a Suwayomi source works like hiding a
+      // dalvik one instead of silently doing nothing.
+      store.listMappings(),
     ]);
+    mappedSource = new Map(mappings.map((row) => [row.seriesId, row.sourceId]));
     const read = new Set(
       prefs.filter((row) => String(row.key).startsWith("read:")).filter((row) => row.value === true).map((row) => String(row.key).slice(5)),
     );
@@ -458,7 +468,13 @@
   /** Every row this screen shows, through the one query model. */
   const rows = $derived(
     runQuery(
-      { series: visible, categories: categories.items, marks: { hiddenView: categories.hiddenView, pinView: categories.pinView } },
+      {
+        series: visible,
+        categories: categories.items,
+        marks: { hiddenView: categories.hiddenView, pinView: categories.pinView },
+        sources: sourceMarks.withSearchPins(settings.pinnedSources),
+        sourceOf: (seriesId: string) => sourceKeyOf(seriesId, mappedSource.get(seriesId)),
+      },
       {
         collection: selected,
         filter,

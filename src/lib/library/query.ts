@@ -17,7 +17,8 @@
  * already gives, kept as a tiebreak inside the chosen sort.
  */
 import type { Series } from "../../api/source";
-import { applyView, type Category, type ViewOptions } from "../categories";
+import { type Category, type ViewOptions } from "../categories";
+import { applyMarks, contextOf, type SourceMark } from "../marks";
 import { matchesFilter, mergeFilter, type LibraryFilter, type QueryFacts } from "./filter";
 import { EMPTY_SEARCH, matchesSearch, parseSearch, searchScore, type SearchState } from "./search";
 import { DEFAULT_SORT, sortSeries, type SortSpec } from "./sort";
@@ -28,6 +29,10 @@ export interface QueryInput {
   series: Series[];
   categories: Category[];
   marks: ViewOptions;
+  /** Marks on the sources titles come from. Absent means "no source is marked". */
+  sources?: SourceMark[];
+  /** Which source a title came from; absent means titles are not attributable. */
+  sourceOf?: (seriesId: string) => string | undefined;
 }
 
 export interface QueryState {
@@ -58,10 +63,10 @@ export function emptyFacts(): QueryFacts {
 }
 
 export function runQuery(input: QueryInput, state: QueryState, facts: QueryFacts): Series[] {
-  // 1. the eye and the pin
-  const visible = applyView(
+  // 1. the eye and the pin — categories and the sources titles come from, one rule (`lib/marks`)
+  const visible = applyMarks(
     input.series.map((series) => ({ ...series, categoryIds: series.categoryIds ?? [] })),
-    input.categories,
+    contextOf({ categories: input.categories, sources: input.sources ?? [], sourceOf: input.sourceOf ?? (() => undefined) }),
     input.marks,
   );
 

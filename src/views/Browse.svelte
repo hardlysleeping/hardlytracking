@@ -10,16 +10,25 @@
   import { go, pathTo } from "../lib/nav";
   import { settings } from "../state/settings.svelte";
   import { togglePin } from "../lib/pinned";
+  import { sourceMarks } from "../state/source-marks.svelte";
+  import { EYE_PATHS, MARKER_PATH, PIN_WORDS } from "../lib/categories";
+  import { visibleSources } from "../lib/marks";
 
   let { current = null }: { current?: string | null } = $props();
 
   let query = $state("");
 
+  /** The pin mark with the search-scoped pins folded in: one glyph, both consequences. */
+  const marks = $derived(sourceMarks.withSearchPins(settings.pinnedSources));
+
   const sources = $derived.by(() => {
     const needle = query.trim().toLowerCase();
-    const list = library.sources.filter(
+    const found = library.sources.filter(
       (source) => needle === "" || `${source.name} ${source.lang ?? ""}`.toLowerCase().includes(needle),
     );
+    // The eye and the pin, exactly as the category rail does them: hidden sources leave the list
+    // (and, through the same rule, take their comics out of the library and history).
+    const list = visibleSources(found, marks, { hiddenView: sourceMarks.hiddenView, pinView: sourceMarks.pinView });
     // Grouped by provider, then by name, so a 60-source extension is a block and not a wall.
     return [...list].sort((a, b) => a.provider.localeCompare(b.provider) || a.name.localeCompare(b.name) || (a.lang ?? "").localeCompare(b.lang ?? ""));
   });
@@ -57,6 +66,29 @@
       </div>
     </div>
   {:else}
+    <div class="band">
+      <button
+        class="seat"
+        aria-label={`Hidden sources: ${sourceMarks.hiddenLabel}`}
+        title={`Hidden sources: ${sourceMarks.hiddenLabel}`}
+        onclick={() => void sourceMarks.cycleHiddenView()}
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d={EYE_PATHS[sourceMarks.hiddenView]} /></svg>
+        <span class="word">{sourceMarks.hiddenLabel}</span>
+      </button>
+
+      <button
+        class="seat"
+        class:pinned={sourceMarks.pinView !== "all"}
+        aria-label={`Pinned: ${sourceMarks.pinLabel}`}
+        title={`Pinned: ${sourceMarks.pinLabel}`}
+        onclick={() => void sourceMarks.cyclePinView()}
+      >
+        <svg class="pin" viewBox="0 0 24 24" aria-hidden="true"><path d={MARKER_PATH} /></svg>
+        <span class="word">{sourceMarks.pinLabel}</span>
+      </button>
+    </div>
+
     <input class="field search" type="search" placeholder="Find a source" bind:value={query} aria-label="Find a source" />
 
     {#each byProvider as group (group.provider)}
@@ -71,14 +103,29 @@
                 {#if source.nsfw}<span class="nsfw">18+</span>{/if}
               </button>
               <button
-                class="pinbtn"
-                class:pinned={settings.pinnedSources.includes(source.id)}
-                aria-label={settings.pinnedSources.includes(source.id) ? `Unpin ${source.name}` : `Pin ${source.name}`}
-                aria-pressed={settings.pinnedSources.includes(source.id)}
-                title={settings.pinnedSources.includes(source.id) ? "Unpin — search will start here" : "Pin — search pinned sources only"}
-                onclick={() => settings.set("pinnedSources", togglePin(settings.pinnedSources, source.id))}
+                class="eyebtn"
+                class:hidden={sourceMarks.markOf(source.id).hidden}
+                aria-label={`${sourceMarks.markOf(source.id).hidden ? "Show" : "Hide"} ${source.name}`}
+                aria-pressed={sourceMarks.markOf(source.id).hidden}
+                title={`${sourceMarks.markOf(source.id).hidden ? "Show" : "Hide"} ${source.name} — its comics leave the library and history`}
+                onclick={() => void sourceMarks.toggleHidden(source.id)}
               >
-                <svg viewBox="0 0 24 24"><path d="M9 4h6l-1 5 3 3H7l3-3zM12 12v8" /></svg>
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d={sourceMarks.markOf(source.id).hidden ? EYE_PATHS.only : EYE_PATHS.hidden} />
+                </svg>
+              </button>
+              <button
+                class="pinbtn"
+                class:pinned={marks.some((mark) => mark.id === source.id && mark.pinned)}
+                aria-label={`${marks.some((mark) => mark.id === source.id && mark.pinned) ? PIN_WORDS.remove : PIN_WORDS.add} ${source.name}`}
+                aria-pressed={marks.some((mark) => mark.id === source.id && mark.pinned)}
+                title={`${marks.some((mark) => mark.id === source.id && mark.pinned) ? "Unpin — search stops starting here" : "Pin — floats to the top, and search starts here"}`}
+                onclick={() => {
+                  void sourceMarks.togglePin(source.id);
+                  settings.set("pinnedSources", togglePin(settings.pinnedSources, source.id));
+                }}
+              >
+                <svg viewBox="0 0 24 24"><path d={MARKER_PATH} /></svg>
               </button>
               <span class="chev" aria-hidden="true">›</span>
             </div>
@@ -152,6 +199,75 @@
   .rowwrap .row {
     flex: 1;
     min-width: 0;
+  }
+
+  /* The band: the eye on the left, the pin on the right — the category rail's header, on sources. */
+  .band {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    padding: 4px 2px 8px;
+    margin-bottom: var(--s2);
+    border-bottom: 1px solid var(--line);
+  }
+
+  .seat {
+    all: unset;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 7px;
+    border-radius: 6px;
+    color: var(--text-3);
+    font-size: 11.5px;
+  }
+
+  .seat:hover {
+    background: #1c1c22;
+    color: #d6d6de;
+  }
+
+  .seat svg {
+    width: 14px;
+    height: 14px;
+    flex: 0 0 auto;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.6;
+  }
+
+  .seat .pin {
+    stroke-linejoin: round;
+  }
+
+  .seat.pinned {
+    color: var(--accent);
+  }
+
+  .eyebtn {
+    all: unset;
+    cursor: pointer;
+    display: grid;
+    place-items: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 999px;
+    color: var(--text-3);
+    flex: none;
+  }
+
+  .eyebtn svg {
+    width: 15px;
+    height: 15px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.6;
+  }
+
+  .eyebtn.hidden {
+    color: var(--accent);
   }
 
   .pinbtn {
