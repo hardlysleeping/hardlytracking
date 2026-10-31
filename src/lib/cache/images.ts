@@ -28,6 +28,15 @@ interface ImageRow {
 }
 
 const MAX_IMAGE_BYTES = 12 * 1024 * 1024;
+/**
+ * How many object URLs are held at once.
+ *
+ * Every resolved image is a `blob:` URL, and a blob URL pins its bytes in this process until it is
+ * revoked — a cache that only counted the rows on disk kept thousands of covers alive in memory.
+ * The bytes are still in the database, so dropping one from this map costs a re-read, never a
+ * re-download.
+ */
+const MAX_LIVE_URLS = 160;
 /** Covers are small; a page image is not. Refuse absurd things rather than fill the disk. */
 const ALLOWED = /^image\//i;
 
@@ -72,6 +81,9 @@ export class ImageCache {
 
     const cached = this.urls.get(url);
     if (cached !== undefined) {
+      // Re-insert so the map's order is least-recently-used first: `trimLive` drops from the front.
+      this.urls.delete(url);
+      this.urls.set(url, cached);
       void this.touch(url);
       return cached;
     }
@@ -86,6 +98,7 @@ export class ImageCache {
         if (row !== undefined) {
           const objectUrl = URL.createObjectURL(row.blob);
           this.urls.set(url, objectUrl);
+          this.trimLive();
           void this.touch(url);
           return objectUrl;
         }
@@ -101,6 +114,7 @@ export class ImageCache {
         await this.db!.put("imageCache", { key: url, blob, bytes: blob.size, at: now, usedAt: now } as unknown as Record<string, unknown>);
         const objectUrl = URL.createObjectURL(blob);
         this.urls.set(url, objectUrl);
+        this.trimLive();
         void this.prune();
         return objectUrl;
       } catch {
@@ -132,6 +146,17 @@ export class ImageCache {
   }
 
   /** Enforce the ceiling. Never touches anything pinned; reports what it removed. */
+  /** Drop the oldest object URLs beyond the ceiling, revoking them so the bytes go with them. */
+  private trimLive(): void {
+    while (this.urls.size > MAX_LIVE_URLS) {
+      const oldest = this.urls.keys().next();
+      if (oldest.done === true) return;
+      const objectUrl = this.urls.get(oldest.value);
+      this.urls.delete(oldest.value);
+      if (objectUrl !== undefined) URL.revokeObjectURL(objectUrl);
+    }
+  }
+
   async prune(): Promise<{ removed: number; freed: number }> {
     if (this.db === null) return { removed: 0, freed: 0 };
     const entries = await this.entries();

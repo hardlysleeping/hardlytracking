@@ -14,7 +14,6 @@
    * A downloaded chapter is read from this device: the pages come from the library database as
    * blobs, so the extension host can be offline and the chapter still opens.
    */
-  import { cacheImage } from "../lib/cache/action";
   import type { LocalChapter } from "../lib/downloads/engine";
   import { library } from "../state/library.svelte";
   import { downloads } from "../state/downloads.svelte";
@@ -34,6 +33,48 @@
 
   let pages = $state<Page[]>([]);
   let urls = $state<string[]>([]);
+
+  /**
+   * How many pages either side of the current one are actually loaded.
+   *
+   * Four each way is a screen and a half of scrolling in either direction: enough that a flick never
+   * lands on a blank page, and small enough that a 214-page chapter holds nine images, not 214.
+   */
+  const WINDOW = 4;
+
+  /**
+   * A page that needs a header: fetch its bytes only when it is near the viewport.
+   *
+   * The source requires a header an `<img>` cannot send, so the app must fetch it — but doing that
+   * for every page of a chapter at once is what filled a renderer with gigabytes of scans. The
+   * observer keeps the fetch local to where the reader actually is, and the blob is released when
+   * the page element goes away.
+   */
+  function lazyPage(node: HTMLImageElement, page: Page): { destroy: () => void } {
+    let objectUrl: string | null = null;
+    let live = true;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (!entries.some((entry) => entry.isIntersecting)) return;
+        observer.disconnect();
+        void pageSrc(page).then((src) => {
+          if (!live) return;
+          objectUrl = src;
+          node.src = src;
+        });
+      },
+      // A screen and a half ahead: enough that a scroll never shows a blank, and no more.
+      { rootMargin: "150% 0px" },
+    );
+    observer.observe(node);
+    return {
+      destroy() {
+        live = false;
+        observer.disconnect();
+        if (objectUrl !== null && objectUrl.startsWith("blob:")) URL.revokeObjectURL(objectUrl);
+      },
+    };
+  }
   let index = $state(0);
   let busy = $state(true);
   let error = $state<string | null>(null);
@@ -221,10 +262,10 @@
       } else {
         fromDownload = false;
         pages = await library.pages(id);
-        // A page that needs headers is resolved by `pageSrc` — through our own server for a remote
-        // source, or as a blob when the source is on the private network or there is no server at
-        // all. One place decides, so the reader and the downloader cannot disagree.
-        urls = await Promise.all(pages.map((page) => pageSrc(page)));
+        // A plain page is just its URL. A page that needs a header is resolved when it comes near
+        // the viewport (`use:lazyPage`), because resolving all of them up front fetched every page
+        // of a 214-page chapter the moment it opened — gigabytes of scans for one visible page.
+        urls = pages.map((page) => (page.headers === undefined ? page.url : ""));
       }
       const progress = await library.profile.store.getProgress(id);
       index = Math.min(progress?.page ?? 0, Math.max(pages.length - 1, 0));
@@ -400,11 +441,23 @@
     >
       {#each pages as page (page.index)}
         <div class="page" data-page={page.index}>
-          {#if (urls[page.index] ?? page.url) === ""}
+          {#if Math.abs(page.index - index) > WINDOW}
+            <!-- Outside the window: the box holds the scroll position, the bytes are not loaded. A
+                 214-page chapter used to fetch every page at once because a zero-height page is
+                 "on screen" for every lazy image in it. -->
+          {:else if (urls[page.index] ?? page.url) === ""}
             <div class="missing" role="note">Page {page.index + 1} is not on this device</div>
+          {:else if page.headers !== undefined}
+            <!-- The source needs a header, which an `<img>` cannot send: the action fetches the
+                 bytes when this page is close to the viewport and nothing before then. -->
+            <img
+              use:lazyPage={page}
+              alt={`Page ${page.index + 1} of ${pages.length}`}
+              loading={page.index < 3 ? "eager" : "lazy"}
+              decoding="async"
+            />
           {:else}
             <img
-              use:cacheImage={urls[page.index] ?? page.url}
               src={urls[page.index] ?? page.url}
               alt={`Page ${page.index + 1} of ${pages.length}`}
               loading={page.index < 3 ? "eager" : "lazy"}
@@ -591,6 +644,12 @@
     display: grid;
     place-items: center;
     width: 100%;
+  }
+
+  /* Vertical mode: a page's box is reserved before its bytes arrive, so the pages either side of
+     the window still take their space and the scroll position does not jump when one mounts. */
+  .scroller:not(.horizontal) .page {
+    min-height: 100vh;
   }
 
   .scroller.horizontal .page {

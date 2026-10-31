@@ -19,6 +19,8 @@
    * source of truth — the cache never invents a URL.
    */
   let src = $state<string | undefined>(series.cover);
+  let tile = $state<HTMLElement | null>(null);
+
   $effect(() => {
     const url = series.cover;
     if (url === undefined || url === "") {
@@ -28,16 +30,29 @@
     let live = true;
     src = url;
     const headers = series.coverHeaders;
-    void imageCache.resolve(url, headers === undefined ? {} : { headers }).then((resolved) => {
-      if (live && resolved !== url) src = resolved;
-    });
+    // Only a tile that is (nearly) on screen is worth fetching: a 5 000-title library was resolving
+    // every cover the moment the shelf opened, which is thousands of images for the forty visible.
+    const target = tile;
+    if (target === null) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (!entries.some((entry) => entry.isIntersecting)) return;
+        observer.disconnect();
+        void imageCache.resolve(url, headers === undefined ? {} : { headers }).then((resolved) => {
+          if (live && resolved !== url) src = resolved;
+        });
+      },
+      { rootMargin: "200% 0px" },
+    );
+    observer.observe(target);
     return () => {
       live = false;
+      observer.disconnect();
     };
   });
 </script>
 
-<div class="cover {size}">
+<div class="cover {size}" bind:this={tile}>
   {#if series.cover && !broken}
     <img src={src} alt="" loading="lazy" decoding="async" onerror={() => (broken = true)} />
   {:else}
