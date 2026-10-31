@@ -11,6 +11,7 @@
   import { planUpdates, updateState, type ExtensionEntry } from "../lib/extensions/index";
   import { RepositoryError, loadRepository, type Repository } from "../lib/extensions/repository";
   import { packagesLabel, proposalOf, type RepoProposal } from "../lib/extensions/proposal";
+  import { THIRD_PARTY_DECISION, THIRD_PARTY_DISCLOSURE } from "../lib/extensions/disclosure";
   import { filterByLevel, hiddenNotice, levelOfWarning } from "../lib/content/levels";
   import { settings } from "../state/settings.svelte";
   import { REPORT_REASONS, sourceReport, type ReportReason } from "../lib/report/source";
@@ -469,6 +470,13 @@ import {
     <button class="chip" class:on={section === "repositories"} role="tab" aria-selected={section === "repositories"} onclick={() => (section = "repositories")}>Repositories</button>
   </div>
 
+  <!-- The line this app has to be clear about: the app is ours, the extensions are not. Same words
+       as README.md, "Third-party sources". -->
+  <p class="disclosure">
+    {THIRD_PARTY_DISCLOSURE}
+    <span class="dsub">{THIRD_PARTY_DECISION}</span>
+  </p>
+
   {#if error}<p class="banner">{error}</p>{/if}
   {#if notice}<p class="note">{notice}</p>{/if}
 
@@ -921,6 +929,22 @@ import {
 </section>
 
 <style>
+  .disclosure {
+    margin: 0 var(--s3) var(--s3);
+    padding: var(--s2) var(--s3);
+    border-left: 2px solid var(--line);
+    font-size: var(--t-xs);
+    line-height: 1.5;
+    color: var(--text-2);
+    max-width: 68ch;
+  }
+
+  .dsub {
+    display: block;
+    margin-top: var(--s1);
+    color: var(--text-3);
+  }
+
   .report {
     display: grid;
     gap: var(--s2);

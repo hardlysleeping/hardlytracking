@@ -17,7 +17,7 @@ reading-history consent prompt.
 | 1 | Repo add needs a confirmation step | **Done** — `?repo=…` and the URL field both open a confirmation panel (name, host, ecosystem, package count, the third-party line) and the repo store is written only by Add Repository (`src/lib/extensions/proposal.ts`, `tests/unit/repo-confirm.test.mjs`) |
 | 2 | Restricted / Mature / Adult content levels | **Partly** — ratings are parsed (`contentWarningOf`: SAFE/MIXED/NSFW/UNKNOWN) and shown, but no setting, no filtering, no age step |
 | 3 | Per-source cookie consent | **Not done** — login is user-initiated and the jar is per-domain, but nothing is asked or remembered |
-| 4 | Software detail route + universal link | **Not done** — routes are `#/<name>/<id>`; the Extensions list is the only entry point |
+| 4 | Software detail route + universal link | **Done in the tree** — `#/software/<pkg>` and `#/software/<repo>/<pkg>`, canonical `https://hardlytracking.app/source?repo=…&id=…`, the entitlement and the association file. See §4. The device half (a tap on the link opening the app) needs the iPhone and the host that serves `hardlytracking.app` |
 | 5 | Report Source | **Not done** |
 | 6 | Runtime boundary | **Done** — recorded in `docs/runtime-boundary.md`; the test `tests/unit/runtime-boundary.test.mjs` ("a downloaded extension reaches no native API") passes |
 | 7 | iOS networking | **Done in the tree** — `NSAllowsArbitraryLoads` is gone; `NSAllowsLocalNetworking` plus loopback and private-range `NSExceptionDomains`, pinned by `tests/unit/ios-ats.test.mjs`. The device half needs the iPhone |
@@ -276,3 +276,18 @@ Apple allows plug-ins under 4.7 and is currently distributing Paperback, whose p
 advertises downloadable scripting. The part with no direct precedent is **embedded OpenJDK executing
 Mihon APK bytecode**. No code change removes that uncertainty; the architecture above is the closest
 fit to the rules, and the honest answer at review time is the `/dalvik` boundary documented in item 6.
+
+## The disclosure this app publishes
+
+4.7.2 asks that an app making third-party software available be clear that the software is not
+the app. Paperback's wording is the model, and HardlyTracking now carries the same statement in two
+places that cannot drift apart:
+
+- `README.md` → **Third-party sources**: not developed or maintained by the HardlyTracking
+  developers, no information provided about them, support goes to the publisher, and extension
+  issues are closed here and pointed at the publisher.
+- In the app → the Extensions screen, from `src/lib/extensions/disclosure.ts`
+  (`THIRD_PARTY_DISCLOSURE`, `THIRD_PARTY_DECISION`), on every tab. The repository panel keeps the
+  one-line `THIRD_PARTY_NOTICE` before **Add Repository**.
+- `tests/unit/extensions-disclosure.test.mjs` pins both copies, so the README and the screen say
+  the same three things.

@@ -64,6 +64,22 @@ locally hosted services (Komga, Suwayomi), Internet Archive (open data, public A
 project's own HT-Server (a PC you point it at, as a source — never as the app's origin). The rule
 and its reasons: `docs/builtins.md`.
 
+## Third-party sources
+
+HardlyTracking can install extensions — from a repository URL you add, or from an APK file you
+choose — and those extensions add sources. They are **not developed or maintained by the
+HardlyTracking developers**, and we provide no information about them: not whether they work, not
+what they show, and not what they do with your data.
+
+Support for an extension goes to the person who publishes it. Extension support is not offered in
+this repository's issues or in any other official channel of this project, and an issue about a
+third-party extension will be closed and pointed at its publisher.
+
+Installing is always a decision the person makes: an index is inspected and shown before it is
+offered, nothing is added until **Add Repository** is tapped, and every extension can be disabled or
+uninstalled from Extensions. The same words appear in the app, on the Extensions screen
+(`src/lib/extensions/disclosure.ts`).
+
 ## Free, and what is paid
 
 The reader is free and stays free: standalone iPhone reading, Mihon/Komikku extensions, the local
@@ -238,8 +254,9 @@ URL is rewritten to raw, and an `index.pb` link falls back to the JSON index pub
 (Keiyoushi, Cursed Yūzōnō and FelipeGFA all ship `index.json` next to the protobuf). Every repository
 listed on [wotaku.wiki/ext/mihon](https://wotaku.wiki/ext/mihon) loads through this path.
 
-`?repo=…` on the app's own URL opens Extensions and adds that repository, which is what the
-`web+mihon` protocol handler points at. A bare `mihon://` link belongs to the packaged app (OS
+`?repo=…` on the app's own URL opens Extensions, reads that index and shows what it is — name,
+host, ecosystem, package count — with an **Add Repository** button. Nothing is stored until that
+button is tapped, so a link somebody else wrote cannot add a code source on its own. A bare `mihon://` link belongs to the packaged app (OS
 scheme registration); in a browser tab, paste the link into the field.
 
 ## Serving the desktop to a phone

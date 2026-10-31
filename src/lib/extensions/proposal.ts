@@ -11,13 +11,12 @@
  * user taps Add Repository. The decision lives here, as data, so a test can pin it.
  */
 import type { Repository } from "./repository";
+import { THIRD_PARTY_NOTICE } from "./disclosure";
+
+export { THIRD_PARTY_NOTICE };
 
 /** Which ecosystem's packages an index carries, as far as its filename can honestly say. */
 export type Ecosystem = "mihon" | "paperback" | "unknown";
-
-/** The sentence a repository panel must show. One copy, so no screen can soften it. */
-export const THIRD_PARTY_NOTICE =
-  "Third-party sources from this repository are not maintained by HardlyTracking.";
 
 /**
  * The ecosystem an index belongs to, from its own URL.
