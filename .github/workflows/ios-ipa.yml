@@ -65,6 +65,27 @@ jobs:
         working-directory: ios/App
         run: pod install --repo-update
 
+      - name: The toolchain is the current one
+        run: |
+          set -euo pipefail
+          # "Archive on the current SDK" is a moving target, so use the newest Xcode the image
+          # carries rather than whatever is selected by default — a pinned old Xcode is how an app
+          # ends up rejected for being built against a retired SDK. Betas are skipped: they can be
+          # on the image and they cannot be used for a submission.
+          NEWEST=$(ls -d /Applications/Xcode*.app 2>/dev/null | grep -v -i -e beta -e 'rc[0-9]' | sort -V | tail -1)
+          if [ -n "${NEWEST:-}" ]; then
+            echo "selecting $NEWEST"
+            sudo xcode-select -s "$NEWEST/Contents/Developer"
+          fi
+          xcodebuild -version
+          SDK=$(xcodebuild -showsdks | sed -n 's/.*-sdk iphoneos\([0-9.]*\).*/\1/p' | sort -V | tail -1)
+          echo "iphoneos SDK: ${SDK:-none}"
+          FLOOR=18.0
+          if [ -z "$SDK" ] || [ "$(printf '%s\n%s\n' "$FLOOR" "$SDK" | sort -V | head -1)" != "$FLOOR" ]; then
+            echo "::error::the iphoneos SDK is ${SDK:-missing}, older than the $FLOOR floor App Store submissions require"
+            exit 1
+          fi
+
       - name: Archive without signing
         run: |
           set -euo pipefail
@@ -95,6 +116,33 @@ jobs:
           file "$APP/Frameworks/OpenJDKRuntime.framework/OpenJDKRuntime"
           du -sh "$APP/Frameworks/OpenJDKRuntime.framework" "$(dirname "$JAR")"
           echo "runtime jar: $JAR"
+
+      - name: The archive carries the release manifest and the new minimum
+        run: |
+          set -euo pipefail
+          APP="$RUNNER_TEMP/App.xcarchive/Products/Applications/App.app"
+          # docs/app-store-release-checklist.md §8. Read from the built bundle, not from the source
+          # tree: a file that is in the group but not in the app target's Resources phase is the
+          # mistake this step exists to catch.
+          test -f "$APP/PrivacyInfo.xcprivacy"
+          plutil -lint "$APP/PrivacyInfo.xcprivacy"
+          test "$(plutil -extract NSPrivacyTracking raw "$APP/PrivacyInfo.xcprivacy")" = "false"
+          # At least one required-reason category, each with a reason — an empty array is the
+          # "manifest exists and says nothing" shape that still fails upload.
+          plutil -extract NSPrivacyAccessedAPITypes xml1 -o - "$APP/PrivacyInfo.xcprivacy" | grep -q "NSPrivacyAccessedAPICategory"
+          plutil -extract NSPrivacyAccessedAPITypes xml1 -o - "$APP/PrivacyInfo.xcprivacy" | grep -q "NSPrivacyAccessedAPITypeReasons"
+          MIN=$(plutil -extract MinimumOSVersion raw "$APP/Info.plist")
+          echo "MinimumOSVersion: $MIN"
+          test "$MIN" = "15.0"
+          # Neither the unused background mode nor the stale armv7 capability may come back.
+          if plutil -extract UIBackgroundModes xml1 -o - "$APP/Info.plist" >/dev/null 2>&1; then
+            echo "::error::UIBackgroundModes is back in the built Info.plist"
+            exit 1
+          fi
+          if plutil -extract UIRequiredDeviceCapabilities xml1 -o - "$APP/Info.plist" 2>/dev/null | grep -q armv7; then
+            echo "::error::the built Info.plist requires armv7 again"
+            exit 1
+          fi
 
       - name: Pack the IPA
         run: |

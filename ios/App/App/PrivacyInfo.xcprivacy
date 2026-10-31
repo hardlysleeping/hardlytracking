@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- The app tracks nobody: no analytics, no advertising identifier, no third-party SDK that
+	     profiles. Every entry below is a required-reason API that this app's own code reaches,
+	     with the call site named next to it. `tests/unit/ios-hygiene.test.mjs` reads this file and
+	     fails if a category is declared without a reason, or a reason is not one Apple publishes
+	     for that category. -->
+	<key>NSPrivacyTracking</key>
+	<false/>
+	<key>NSPrivacyTrackingDomains</key>
+	<array/>
+	<!-- Nothing is collected here. Reading progress, the library and cookies stay in the app's own
+	     container unless the user turns on the optional paid sync, and that collection is declared
+	     in App Store Connect's privacy answers, which is the authoritative place for an app's
+	     collected data (this key is mandatory for SDKs, optional for the app target). -->
+	<key>NSPrivacyCollectedDataTypes</key>
+	<array/>
+	<key>NSPrivacyAccessedAPITypes</key>
+	<array>
+		<!-- CA92.1 — user defaults that only this app can read.
+		     `node_modules/@capacitor/ios/.../KeyValueStore.swift` (`KeyValueStore.standard`) is
+		     UserDefaults: `AppUUID.swift` keeps the install's `CapacitorAppUUID` there, and
+		     `CapacitorStorage` (the webview's `localStorage` bridge) reads and writes it. Nothing
+		     leaves the container and no other app can see it. -->
+		<dict>
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryUserDefaults</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>CA92.1</string>
+			</array>
+		</dict>
+		<!-- C617.1 — timestamps and metadata of files inside this app's own container.
+		     The embedded runtime keeps its working state in
+		     `Library/Application Support/MihonExtensions` (`plugins/mihon-runtime/ios/Classes/MihonRuntime.mm`,
+		     `ApplicationSupportDirectory`), and the JVM and WKWebView read file metadata in their own
+		     caches under the same container.
+		     3B52.1 — the same, for a file the user handed over: a CBZ/CBR/PDF tapped in Files or
+		     iCloud Drive is opened in place (`LSSupportsOpeningDocumentsInPlace`) and read once by
+		     `src/lib/files/opened.ts` → `Filesystem.readFile`. -->
+		<dict>
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryFileTimestamp</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>C617.1</string>
+				<string>3B52.1</string>
+			</array>
+		</dict>
+		<!-- 85F4.1 — disk space shown to the user.
+		     Settings → Storage draws "X used of Y this app may use" from
+		     `navigator.storage.estimate()` (`src/views/Settings.svelte`), which WKWebView answers
+		     from the volume's capacity. The number is displayed and goes nowhere; nothing in the app
+		     checks free space before a write, so E174.1 is deliberately not claimed. -->
+		<dict>
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryDiskSpace</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>85F4.1</string>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>

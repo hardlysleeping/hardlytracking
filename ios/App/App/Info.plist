@@ -66,10 +66,11 @@
 	</dict>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>HardlyTracking connects to your Komga server and to the PC running HardlyTracking on your local network.</string>
-	<key>UIBackgroundModes</key>
-	<array>
-		<string>fetch</string>
-	</array>
+	<!-- No `UIBackgroundModes`. There was a `fetch` entry here that nothing implemented: downloads
+	     are queued and resumed while the app runs, never woken by the system. An unused background
+	     mode is a review question with no answer, so it is gone rather than documented.
+	     No `UIRequiredDeviceCapabilities` either: the `armv7` entry was stale (no armv7 device can
+	     run iOS 15), and the deployment target now excludes every one of them by itself. -->
 	<!-- The comics a user already owns, handed over by Files or iCloud Drive. Declaring the document
 	     types is what puts "Copy to HardlyTracking" in the share sheet for a CBZ or PDF, and
 	     `LSSupportsOpeningDocumentsInPlace` is what makes the app open the file where it already is
@@ -171,10 +172,6 @@
 	<string>LaunchScreen</string>
 	<key>UIMainStoryboardFile</key>
 	<string>Main</string>
-	<key>UIRequiredDeviceCapabilities</key>
-	<array>
-		<string>armv7</string>
-	</array>
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>

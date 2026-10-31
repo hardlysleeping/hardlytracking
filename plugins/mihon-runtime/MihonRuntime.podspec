@@ -11,7 +11,7 @@ extension host, so nothing above DalvikClient knows the runtime is local.
   s.license          = { :type => 'Proprietary' }
   s.author           = { 'HardlyTracking' => 'noreply@hardlysleep.ing' }
   s.source           = { :path => '.' }
-  s.platform         = :ios, '13.0'
+  s.platform         = :ios, '15.0'
 
   # The podspec lives at the package root with the sources in `ios/`, because that is the shape
   # `cap sync` expects: it writes `pod 'MihonRuntime', :path => '…/plugins/mihon-runtime'` itself,
