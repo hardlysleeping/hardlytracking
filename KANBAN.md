@@ -48,6 +48,28 @@ Repo: `~/apps/hardlytracking` · branch `master` · remote `github.com/hardlysle
 |---|---|---|---|
 | — | — | Nothing waiting that can be built here: T13 needs his iPhone (the runtime is device-only, no simulator), T26–T28 need his own tracker logins, T29 is deprioritised by his call, T6 waits on the native path. T30's engine is done — what it lacks is an adapter to push through and a button to press | — |
 
+## More ecosystems — planned, not dispatched
+
+Owner's direction 2026-10-30: "support more sources and more types of backups, not just mihon based,
+aidoku or suwatte or paperback too, same with repos, goal is to make transferring in and out easy,
+access same repos, same extensions, from this app, would also like webnovel reading support."
+
+Plan: `~/.hermes/plans/2026-10-30_221335-hardlytracking-multi-ecosystem.md` · Backlog rows **27–39**.
+No live cards are created for these on purpose: a new card is claimed within seconds and the worker
+`cd`s into the main tree (see the worktree trap in the skill). They get cards when they are dispatched,
+each with `--workspace dir:<worktree>`.
+
+| Backlog | Work | Can start now? |
+|---|---|---|
+| 27–30 | Neutral repo index + Aidoku/Suwatte/Paperback list parsers, one Extensions list | **yes** — pure parsers, fixtures from the live lists, no device, no credentials |
+| 31–33 | `.tachibk` reader/writer + Aidoku/Suwatte/Paperback backup readers + one import door | **yes for the readers**; the `.tachibk` writer needs one real Mihon backup as a fixture |
+| 34–37 | Hosts: Aidoku WASM spike first, then the provider; Suwatte/Paperback JS in a Worker; host registry | yes — B1 is a timeboxed measurement on this box, no iPhone needed |
+| 38 | Webnovels: text chapters, text reader mode, per-ecosystem text mapping | yes, after C1's model change |
+| 39 | Export back out to each ecosystem | after the matching reader exists |
+
+Phase A (27–33) is the only part that may run beside the T13 gate, because it is credential-free and
+needs no device. Everything else keeps the "nothing starts while a hard gate fails" rule.
+
 T24 is on the board as `t_2ae97e10`, completed with the same evidence as this file. `src/api/**` and
 `src-tauri/**` were never touched by it, so it did not collide with T12/T17.
 
