@@ -16,8 +16,10 @@
 
 const HOST_KEY = "hardlytracking.host";
 const TOKEN_KEY = "hardlytracking.token";
-/** Whether the paired read server is in use. Its built-in extension's switch writes this. */
-const READ_SERVER_KEY = "hardlytracking.readServer";
+/** Whether the paired HT-Server is in use. Its built-in extension's switch writes this. */
+const HT_SERVER_KEY = "hardlytracking.htServer";
+/** The key this switch had before it was named after what it actually is. Read once, then dropped. */
+const LEGACY_HT_SERVER_KEY = "hardlytracking.readServer";
 
 /** The paired host, or `""` for this origin. */
 export function remoteHost(): string {
@@ -62,9 +64,13 @@ export function setHostToken(token: string): void {
  * own index.html. So every proxy path there answers with HTML, and a caller that expects JSON reads
  * that as "not JSON" (a repository, a page image) instead of "there is no proxy". The desktop build
  * and any http(s) origin do have one.
+ *
+ * A paired HT-Server does **not** count. It used to: the pairing re-pointed every path, so "paired"
+ * meant "someone else's proxy will answer". The pairing is now a source of its own, and the app's
+ * own paths mean this device — so on a packaged phone with a host paired, there is still no local
+ * server, and `/api/repo` must not be asked for.
  */
 export function hasLocalServer(): boolean {
-  if (remoteHost() !== "") return true;
   try {
     return location.protocol === "http:" || location.protocol === "https:";
   } catch {
@@ -73,33 +79,57 @@ export function hasLocalServer(): boolean {
 }
 
 /**
- * Whether this device uses a paired read server.
+ * Whether this device uses a paired HT-Server.
  *
  * Default on: pairing a host is the act of opting in, so an app that has one should use it. Turning
- * the built-in extension off keeps the pairing (address and token) but makes every call local again —
- * the pairing is a setting, the switch is the decision.
+ * the built-in extension off keeps the pairing (address and token) but takes the host's sources out
+ * of the app — the pairing is a setting, the switch is the decision.
+ *
+ * The old key is read once and carried over. Without that, upgrading would silently switch a host
+ * the user had turned off back on, which is the exact failure a remembered switch must not have.
  */
-export function readServerEnabled(): boolean {
+export function htServerEnabled(): boolean {
   try {
-    return (localStorage.getItem(READ_SERVER_KEY) ?? "on") !== "off";
+    const legacy = localStorage.getItem(LEGACY_HT_SERVER_KEY);
+    if (legacy !== null) {
+      localStorage.removeItem(LEGACY_HT_SERVER_KEY);
+      if (legacy === "off") localStorage.setItem(HT_SERVER_KEY, "off");
+    }
+    return (localStorage.getItem(HT_SERVER_KEY) ?? "on") !== "off";
   } catch {
     return true;
   }
 }
 
-export function setReadServerEnabled(enabled: boolean): void {
+export function setHtServerEnabled(enabled: boolean): void {
   try {
-    if (enabled) localStorage.removeItem(READ_SERVER_KEY);
-    else localStorage.setItem(READ_SERVER_KEY, "off");
+    if (enabled) localStorage.removeItem(HT_SERVER_KEY);
+    else localStorage.setItem(HT_SERVER_KEY, "off");
   } catch {
     /* a browser with storage disabled keeps the session default */
   }
 }
 
-/** An API path, resolved against the paired host when there is one and the server is in use. */
+/**
+ * An API path on **this device**.
+ *
+ * It used to prefix the paired host, which made the PC the app's origin: one pairing re-pointed the
+ * Mihon runtime, the dalvik runtime, repository indexes, every page image and host-info. That is
+ * gone. The host is a source (`htServerBase()`), and nothing here may reach another machine.
+ */
 export function apiUrl(path: string): string {
-  const host = readServerEnabled() ? remoteHost() : "";
-  return host === "" ? path : `${host}${path}`;
+  return path;
+}
+
+/**
+ * Where the HT-Server's own `/dalvik` lives, or `""` when there is no host or the switch is off.
+ *
+ * This is the only place the paired address is turned into an API base, and only the HT-Server
+ * provider reads it.
+ */
+export function htServerBase(): string {
+  const host = htServerEnabled() ? remoteHost() : "";
+  return host === "" ? "" : `${host}/api/dalvik`;
 }
 
 /** Headers every API call carries: the token, when this device was paired with one. */

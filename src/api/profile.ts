@@ -8,8 +8,8 @@
  */
 import { apiUrl } from "../lib/host";
 import { createProviders, type DalvikHost } from "./registry";
-import { BUILTIN_ARCHIVE_ID, BUILTIN_READ_SERVER_ID, ensureBuiltinExtensions, isBuiltin } from "./builtin";
-import { readServerEnabled, setReadServerEnabled } from "../lib/host";
+import { BUILTIN_ARCHIVE_ID, BUILTIN_HT_SERVER_ID, ensureBuiltinExtensions, isBuiltin } from "./builtin";
+import { htServerEnabled, setHtServerEnabled } from "../lib/host";
 import type { InstalledExtension } from "./dalvik";
 import type { SourceProvider } from "./source";
 import { openDatabase, type Database } from "../lib/db/open";
@@ -96,7 +96,7 @@ export async function openLibraryProfile(options: OpenProfileOptions = {}): Prom
   const builtins = await ensureBuiltinExtensions(store);
   const switches = {
     archive: builtins.find((row) => row.extensionId === BUILTIN_ARCHIVE_ID)?.enabled !== false,
-    readServer: readServerEnabled(),
+    htServer: htServerEnabled(),
   };
   const registry = await createProviders({
     store,
@@ -155,11 +155,11 @@ export async function openLibraryProfile(options: OpenProfileOptions = {}): Prom
       // A built-in has no host to tell: its provider reads this flag on the next call.
       if (isBuiltin(extensionId)) {
         if (extensionId === BUILTIN_ARCHIVE_ID) switches.archive = enabled;
-        // The read server's switch is the pairing decision: the address and token stay, the calls
-        // stop going to them. Every later call re-reads it through apiUrl().
-        if (extensionId === BUILTIN_READ_SERVER_ID) {
-          switches.readServer = enabled;
-          setReadServerEnabled(enabled);
+        // The HT-Server's switch is the pairing decision: the address and token stay, its sources
+        // stop being offered. Nothing else on this device changes.
+        if (extensionId === BUILTIN_HT_SERVER_ID) {
+          switches.htServer = enabled;
+          setHtServerEnabled(enabled);
         }
         return;
       }

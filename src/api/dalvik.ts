@@ -155,6 +155,22 @@ export interface DalvikOptions {
   baseUrl: string;
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
+  /**
+   * Rewrite the runtime's own `/image/`, `/video/` addresses onto this base whatever origin they
+   * carry.
+   *
+   * True for a host on another machine: the PC's runtime mints `http://127.0.0.1:8792/image/abc`,
+   * and `127.0.0.1` on the phone is the phone. The local client keeps the default, because there a
+   * foreign origin in that shape really is a foreign host and must be left alone.
+   */
+  rewriteRuntimeAssets?: boolean;
+  /**
+   * The token for a host that wants one (the HT-Server), appended to asset URLs.
+   *
+   * A call can carry a header; an `<img src>` cannot, so the token has to ride in the query for
+   * images and nothing else. Read per call so a re-pairing needs no rebuilt client.
+   */
+  token?: () => string;
 }
 
 export interface DalvikCallOptions {
@@ -224,9 +240,13 @@ export class DalvikClient {
   readonly baseUrl: string;
   private readonly fetchImpl: typeof fetch;
   private readonly timeoutMs: number;
+  private readonly token: (() => string) | undefined;
+  private readonly rewriteRuntimeAssets: boolean;
 
   constructor(options: DalvikOptions) {
     this.baseUrl = options.baseUrl.replace(/\/+$/, "");
+    this.token = options.token;
+    this.rewriteRuntimeAssets = options.rewriteRuntimeAssets === true;
     // Never keep `window.fetch` itself: Chrome's is a method of `window`, and calling it
     // through a field throws "Illegal invocation" — in the browser only, so no unit test
     // catches it. Wrapping it keeps the receiver.
@@ -350,14 +370,28 @@ export class DalvikClient {
    */
   asset(url: string | null | undefined): string | undefined {
     if (url === null || url === undefined || url === "") return undefined;
+    const address = this.joined(url);
+    // An `<img>` cannot send a header, so a host that wants a token gets it in the query — and
+    // only for this client's own addresses, never for a source's CDN.
+    return address === undefined ? undefined : this.withToken(address);
+  }
+
+  private joined(url: string): string | undefined {
     if (/^https?:\/\//i.test(url)) {
       const path = pathOf(url);
       const origin = absoluteOrigin(this.baseUrl);
       const ownProxy = /^\/(image|video)\//.test(path);
-      if (ownProxy && (origin === null || url.startsWith(`${origin}/`))) return `${this.baseUrl}${path}`;
+      const mine = origin === null || url.startsWith(`${origin}/`);
+      if (ownProxy && (mine || this.rewriteRuntimeAssets)) return `${this.baseUrl}${path}`;
       return url;
     }
     return `${this.baseUrl}${url.startsWith("/") ? "" : "/"}${url}`;
+  }
+
+  private withToken(address: string): string {
+    const token = this.token?.() ?? "";
+    if (token === "" || !address.startsWith(this.baseUrl)) return address;
+    return `${address}${address.includes("?") ? "&" : "?"}token=${encodeURIComponent(token)}`;
   }
 }
 
@@ -455,6 +489,14 @@ export function packageIdFromApkName(fileName: string): string {
 
 export interface DalvikProviderOptions {
   client: DalvikClient;
+  /**
+   * Which provider this is, when it is not the local dalvik host.
+   *
+   * The HT-Server speaks the same `/dalvik` protocol as a local runtime, so it is the same provider
+   * code — but the ids must not collide with the local host's: `dalvik:src:1` and `htserver:src:1`
+   * are two different sources on two different machines.
+   */
+  kind?: ProviderKind;
   /** Read on every call, so an APK installed later needs no rebuilt provider. */
   extensions: InstalledExtension[];
   /** Titles seen this session, so a chapter call can name the manga it is about. */
@@ -529,7 +571,7 @@ function bareSourceId(sourceId: string): string {
 export function createDalvikProvider(options: DalvikProviderOptions): SourceProvider {
   const { client } = options;
   const titles = options.titles ?? new Map<string, string>();
-  const kind: ProviderKind = "dalvik";
+  const kind: ProviderKind = options.kind ?? "dalvik";
 
   function extensionFor(namespaced: string): InstalledExtension {
     const sourceId = bareSourceId(namespaced);

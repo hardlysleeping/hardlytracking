@@ -13,7 +13,7 @@
   import { extensionLabel, extensionLanguages, sourcesOfExtension } from "../lib/extensions/installed";
   import { proxiedImage } from "../lib/pages";
   import { go, pathTo } from "../lib/nav";
-  import { remoteHost, readServerEnabled } from "../lib/host";
+  import { htServerEnabled, remoteHost } from "../lib/host";
 
   interface Props {
     /** A repository from an install link (`mihon://…`, `?repo=…`), added on arrival. */
@@ -199,9 +199,9 @@
               <div class="info">
                 <span class="name">{label}</span>
                 <span class="sub">
-                  {#if row.extensionId === "builtin:read-server"}
-                    <!-- A transport has no sources: what matters is which host it is using. -->
-                    {row.versionName ?? "1.0.0"} · {remoteHost() === "" ? "this device" : remoteHost()}{#if !readServerEnabled()} · paired but off{/if}
+                  {#if row.extensionId === "builtin:ht-server"}
+                    <!-- A host is not a source itself: what matters is which machine it is. -->
+                    {row.versionName ?? "1.0.0"} · {remoteHost() === "" ? "no host set" : remoteHost()}{#if !htServerEnabled()} · paired but off{/if}
                   {:else}
                     {row.versionName ?? "unknown version"} · {row.sources.length} source{row.sources.length === 1 ? "" : "s"}{#if langs.length > 0} · {langs.join(", ")}{/if}
                   {/if}

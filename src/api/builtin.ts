@@ -18,14 +18,17 @@ import type { LibraryStore } from "../lib/db/store";
 export const BUILTIN_ARCHIVE_ID = "builtin:internet-archive";
 
 /**
- * The read server: the desktop (or any paired host) that serves this app and runs its extensions.
+ * The HT-Server: a PC running HardlyTracking, used as a **source**.
  *
- * This is a built-in because it is a way of *using* the app, not a store you install: on a phone the
- * whole point is that a machine with the runtime does the work and the phone reads. It is not the
- * Mihon runtime itself — that is a service the app talks to, and it has no business appearing as an
- * extension the user could uninstall.
+ * It is a built-in because there is no APK — the code is ours and it ships with the app. It is not
+ * the app's origin: pairing it must never re-point this device's own runtime, repositories or
+ * images. What it adds is one more place to browse from, next to Komga and Suwayomi, and its card
+ * holds the address and token.
  */
-export const BUILTIN_READ_SERVER_ID = "builtin:read-server";
+export const BUILTIN_HT_SERVER_ID = "builtin:ht-server";
+
+/** The id this row had before it was named after what it is. Removed on the next boot. */
+export const LEGACY_HT_SERVER_ID = "builtin:read-server";
 
 /**
  * Internet Archive, preinstalled and on by default.
@@ -46,10 +49,11 @@ export const BUILTIN_EXTENSIONS: InstalledExtension[] = [
     builtin: true,
   },
   {
-    extensionId: BUILTIN_READ_SERVER_ID,
+    extensionId: BUILTIN_HT_SERVER_ID,
     packageId: "ing.hardlysleep.hardlytracking.builtin.readserver",
-    name: "Read server",
-    // No sources of its own: it is a transport. Its card names the host it is paired with.
+    name: "HT-Server",
+    // Sources come from the live provider, never from this row: writing them here would fight the
+    // repair rule below, which treats an empty source list as damage.
     sources: [],
     versionName: "1.0.0",
     enabled: true,
@@ -72,6 +76,9 @@ export function builtinExtension(extensionId: string): InstalledExtension | unde
  * the flag and a missing name are filled in, and `enabled` is never touched.
  */
 export async function ensureBuiltinExtensions(store: LibraryStore): Promise<InstalledExtension[]> {
+  // The row this one replaced. Left behind, it would render as a second "Read server" card that is
+  // not a built-in and therefore offers an Uninstall that cannot work.
+  await store.removeExtension(LEGACY_HT_SERVER_ID);
   for (const builtin of BUILTIN_EXTENSIONS) {
     const existing = await store.getExtension(builtin.extensionId);
     if (existing === undefined) {

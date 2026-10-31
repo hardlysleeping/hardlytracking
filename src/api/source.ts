@@ -21,7 +21,7 @@
  * so they get two kinds: sharing `mihon` would make `providerFor` hand a dalvik id to
  * Suwayomi (first match wins) and every lookup would land on the wrong host.
  */
-export type ProviderKind = "mihon" | "dalvik" | "komga" | "local" | "archive";
+export type ProviderKind = "mihon" | "dalvik" | "htserver" | "komga" | "local" | "archive";
 
 export interface Source {
   /** Namespaced: `mihon:src:0`. */

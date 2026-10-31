@@ -28,7 +28,7 @@
   const account = createSyncAccount(syncConfig());
 
   let session = $state<{ userId: string; email: string } | null>(null);
-  let state = $state<Awaited<ReturnType<NonNullable<typeof account>["entitlement"]>> | null>(null);
+  let entitlementState = $state<Awaited<ReturnType<NonNullable<typeof account>["entitlement"]>> | null>(null);
   let email = $state("");
   let busy = $state(false);
   let sent = $state(false);
@@ -39,7 +39,7 @@
     if (account === null) return;
     const found = await account.session();
     session = found === null ? null : { userId: found.userId, email: found.email };
-    state = found === null ? null : await account.entitlement();
+    entitlementState = found === null ? null : await account.entitlement();
   }
 
   $effect(() => {
@@ -118,20 +118,20 @@
     {:else}
       <div class="row">
         <span>
-          {#if state === null}
+          {#if entitlementState === null}
             Checking…
-          {:else if state.state === "active"}
-            Active{#if state.expiresAt !== null}<em class="sub">Paid to {until(state.expiresAt)}</em>{/if}
-          {:else if state.state === "none"}
-            Not subscribed<em class="sub">{state.reason}</em>
+          {:else if entitlementState.state === "active"}
+            Active{#if entitlementState.expiresAt !== null}<em class="sub">Paid to {until(entitlementState.expiresAt)}</em>{/if}
+          {:else if entitlementState.state === "none"}
+            Not subscribed<em class="sub">{entitlementState.reason}</em>
           {:else}
-            Could not check<em class="sub">{state.reason}</em>
+            Could not check<em class="sub">{entitlementState.reason}</em>
           {/if}
           {#if session.email !== ""}<em class="sub">{session.email}</em>{/if}
         </span>
         <button class="chip" disabled={busy} onclick={() => void refresh()}>Check</button>
       </div>
-      {#if state !== null && state.state !== "active"}
+      {#if entitlementState !== null && entitlementState.state !== "active"}
         <div class="chips">
           <button class="chip on" disabled={busy} onclick={() => void buy("monthly")}>$1 / month</button>
           <button class="chip on" disabled={busy} onclick={() => void buy("yearly")}>$10 / year</button>

@@ -15,11 +15,11 @@ function store() {
   return new LibraryStore(memoryDatabase());
 }
 
-test("the built-ins are archive.org and the read server, and nothing else", () => {
+test("the built-ins are archive.org and the HT-Server, and nothing else", () => {
   assert.equal(BUILTIN_EXTENSIONS.length, 2);
   assert.deepEqual(
     BUILTIN_EXTENSIONS.map((entry) => entry.extensionId),
-    ["builtin:internet-archive", "builtin:read-server"],
+    ["builtin:internet-archive", "builtin:ht-server"],
   );
   // The Mihon runtime is a service the app talks to, not an extension anyone can uninstall.
   assert.equal(BUILTIN_EXTENSIONS.some((entry) => /mihon|runtime/i.test(entry.name)), false);
@@ -122,8 +122,10 @@ test("a packaged app asks the repository directly, because it has no /api/repo o
   assert.equal(proxiedImage("https://example.test/icon.png"), "https://example.test/icon.png");
 });
 
-test("the read server switch turns the pairing off without forgetting it", async () => {
-  const { readServerEnabled, setReadServerEnabled, remoteHost, apiUrl } = await import("../../src/lib/host.ts");
+test("the HT-Server switch adds and removes a source, and never re-points the app", async () => {
+  const { htServerEnabled, setHtServerEnabled, remoteHost, apiUrl, htServerBase } = await import(
+    "../../src/lib/host.ts"
+  );
   const memory = new Map();
   globalThis.localStorage = {
     getItem: (key) => (memory.has(key) ? memory.get(key) : null),
@@ -133,14 +135,34 @@ test("the read server switch turns the pairing off without forgetting it", async
   // `setRemoteHost` compares against location.origin, and node has no location, so the pairing is
   // written the way a browser writes it.
   memory.set("hardlytracking.host", "http://desktop.test:8460");
-  assert.equal(apiUrl("/api/dalvik"), "http://desktop.test:8460/api/dalvik");
+  assert.equal(htServerBase(), "http://desktop.test:8460/api/dalvik");
 
-  setReadServerEnabled(false);
-  assert.equal(readServerEnabled(), false);
-  assert.equal(apiUrl("/api/dalvik"), "/api/dalvik", "off means this device, whatever is paired");
+  // The whole point of the fix: a paired host changes exactly one base, never the app's own paths.
+  for (const path of ["/api/dalvik", "/api/mihon", "/api/repo", "/api/img", "/api/host-info"]) {
+    assert.equal(apiUrl(path), path, `${path} means this device, paired or not`);
+  }
+
+  setHtServerEnabled(false);
+  assert.equal(htServerEnabled(), false);
+  assert.equal(htServerBase(), "", "off means no host source at all");
   assert.equal(remoteHost(), "http://desktop.test:8460", "the address is kept, not deleted");
 
-  setReadServerEnabled(true);
-  assert.equal(apiUrl("/api/dalvik"), "http://desktop.test:8460/api/dalvik", "on again uses the pairing");
+  setHtServerEnabled(true);
+  assert.equal(htServerBase(), "http://desktop.test:8460/api/dalvik", "on again offers the host");
+  delete globalThis.localStorage;
+});
+
+test("the switch carries over from the name it used to have", async () => {
+  const { htServerEnabled } = await import("../../src/lib/host.ts");
+  const memory = new Map([["hardlytracking.readServer", "off"]]);
+  globalThis.localStorage = {
+    getItem: (key) => (memory.has(key) ? memory.get(key) : null),
+    setItem: (key, value) => memory.set(key, String(value)),
+    removeItem: (key) => memory.delete(key),
+  };
+  // A host the user had switched off must not come back on by being renamed.
+  assert.equal(htServerEnabled(), false);
+  assert.equal(memory.has("hardlytracking.readServer"), false, "the old key is dropped after it is read");
+  assert.equal(memory.get("hardlytracking.htServer"), "off");
   delete globalThis.localStorage;
 });
