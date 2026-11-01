@@ -65,7 +65,7 @@
 		</dict>
 	</dict>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>HardlyTracking connects to your Komga server and to the PC running HardlyTracking on your local network.</string>
+	<string>HardlyTracking connects to the Komga or Suwayomi server you run on your own network, and to a PC running HardlyTracking.</string>
 	<!-- No `UIBackgroundModes`. There was a `fetch` entry here that nothing implemented: downloads
 	     are queued and resumed while the app runs, never woken by the system. An unused background
 	     mode is a review question with no answer, so it is gone rather than documented.
@@ -166,6 +166,14 @@
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<!-- Export compliance, answered once in the build instead of once per upload. The app speaks
+	     HTTPS through the system stack and nothing else: no custom or non-standard cryptography, no
+	     bundled cipher implementation. `false` says exactly that, and it removes the "Missing
+	     Compliance" question that otherwise blocks every TestFlight build until someone answers it.
+	     If a bundled crypto library is ever added, this key becomes a lie — change it in the same
+	     commit. -->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>UILaunchStoryboardName</key>

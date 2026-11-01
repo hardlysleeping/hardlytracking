@@ -75,6 +75,30 @@ test("the stale armv7 device capability is gone", () => {
   assert.ok(!required.includes("armv7"), "UIRequiredDeviceCapabilities still requires armv7");
 });
 
+test("export compliance is answered in the build, not per upload", () => {
+  // App Store Connect asks "does your app use encryption?" once per version, and a missing answer
+  // blocks the build. The app uses HTTPS and nothing else, so the answer is `false` — and it has to
+  // be the boolean, not the string "NO": iOS reads this key as a boolean, and a string is a key
+  // Apple's own tooling reports as absent.
+  assert.equal(
+    info.ITSAppUsesNonExemptEncryption,
+    false,
+    "Info.plist must declare ITSAppUsesNonExemptEncryption = false (boolean)",
+  );
+  assert.equal(typeof info.ITSAppUsesNonExemptEncryption, "boolean");
+});
+
+test("the local-network string names the servers a user actually runs", () => {
+  // Without this string, iOS silently drops the first request to a LAN address and the app looks
+  // broken on the one feature it exists for. With a string that names only Komga, a Suwayomi user
+  // is asked to grant local network access by a sentence that never mentions their server.
+  const text = info.NSLocalNetworkUsageDescription;
+  assert.equal(typeof text, "string");
+  assert.ok(text.length > 20, `NSLocalNetworkUsageDescription is too short: ${JSON.stringify(text)}`);
+  assert.match(text, /Komga/);
+  assert.match(text, /Suwayomi/);
+});
+
 test("PrivacyInfo.xcprivacy exists and is a resource of the app target", () => {
   assert.ok(existsSync(MANIFEST), "ios/App/App/PrivacyInfo.xcprivacy does not exist");
 

@@ -158,6 +158,15 @@ jobs:
           MIN=$(plutil -extract MinimumOSVersion raw "$APP/Info.plist")
           echo "MinimumOSVersion: $MIN"
           test "$MIN" = "15.0"
+          # Export compliance and local network, read from the built bundle. Both are keys whose
+          # absence only shows up on the App Store Connect side (a blocked TestFlight build) or as a
+          # LAN request iOS silently drops, so the build is where they get proved.
+          ENC=$(plutil -extract ITSAppUsesNonExemptEncryption raw "$APP/Info.plist") || ENC=missing
+          echo "ITSAppUsesNonExemptEncryption: $ENC"
+          test "$ENC" = "false"
+          LAN=$(plutil -extract NSLocalNetworkUsageDescription raw "$APP/Info.plist") || LAN=missing
+          echo "NSLocalNetworkUsageDescription: $LAN"
+          case "$LAN" in missing|"") echo "::error::NSLocalNetworkUsageDescription is missing from the built bundle"; exit 1;; esac
           # Neither the unused background mode nor the stale armv7 capability may come back.
           if plutil -extract UIBackgroundModes xml1 -o - "$APP/Info.plist" >/dev/null 2>&1; then
             echo "::error::UIBackgroundModes is back in the built Info.plist"
