@@ -87,8 +87,16 @@ jobs:
           fi
 
       - name: Archive without signing
+        # The bundle's version comes from package.json, not from a second place someone has to
+        # remember. Info.plist substitutes MARKETING_VERSION/CURRENT_PROJECT_VERSION into
+        # CFBundleShortVersionString/CFBundleVersion, so whatever those settings say is what the app
+        # installs as — and the pbxproj said 1.0 on an app whose version is 0.5.1. Passing them here
+        # also means a version bump never needs a pbxproj edit.
         run: |
           set -euo pipefail
+          MARKETING_VERSION=$(node -p "require('./package.json').version")
+          CURRENT_PROJECT_VERSION=$GITHUB_RUN_NUMBER
+          echo "bundle version: $MARKETING_VERSION ($CURRENT_PROJECT_VERSION)"
           xcodebuild \
             -workspace ios/App/App.xcworkspace \
             -scheme App \
@@ -100,6 +108,8 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGN_ENTITLEMENTS="" \
+            MARKETING_VERSION="$MARKETING_VERSION" \
+            CURRENT_PROJECT_VERSION="$CURRENT_PROJECT_VERSION" \
             archive
 
       - name: The runtime is inside the app, not just linked
@@ -116,6 +126,20 @@ jobs:
           file "$APP/Frameworks/OpenJDKRuntime.framework/OpenJDKRuntime"
           du -sh "$APP/Frameworks/OpenJDKRuntime.framework" "$(dirname "$JAR")"
           echo "runtime jar: $JAR"
+
+      - name: The bundle is stamped with the app's version
+        run: |
+          set -euo pipefail
+          APP="$RUNNER_TEMP/App.xcarchive/Products/Applications/App.app"
+          WANT=$(node -p "require('./package.json').version")
+          GOT=$(plutil -extract CFBundleShortVersionString raw "$APP/Info.plist")
+          BUILD=$(plutil -extract CFBundleVersion raw "$APP/Info.plist")
+          echo "CFBundleShortVersionString: $GOT (package.json: $WANT), CFBundleVersion: $BUILD"
+          # The built bundle said 1.0 on an app that was 0.5.1, because MARKETING_VERSION was left to
+          # Xcode's default. A version that is wrong is a version nobody can report, so this fails
+          # loudly rather than shipping a build that misnames itself.
+          test "$GOT" = "$WANT"
+          case "$BUILD" in ''|*[!0-9]*) echo "::error::CFBundleVersion is not an integer: $BUILD"; exit 1;; esac
 
       - name: The archive carries the release manifest and the new minimum
         run: |
