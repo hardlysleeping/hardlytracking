@@ -13,6 +13,8 @@
  * Read through functions, never captured once: a card that saves an address must take effect on the
  * next read, not after a relaunch.
  */
+import { RUNTIME_DEADLINE_MS, deadlined } from "./deadline";
+
 const BASE_KEY = "hardlytracking.komga";
 const USER_KEY = "hardlytracking.komgaUser";
 const PASSWORD_KEY = "hardlytracking.komgaPassword";
@@ -111,7 +113,12 @@ export interface KomgaProbe {
  * is 401 there, and a wrong address is a network error. The library list comes along because a
  * login that works but sees no libraries is a different thing to tell the user about.
  */
-export async function probeKomga(settings: KomgaSettings, fetchImpl: typeof fetch = fetch): Promise<KomgaProbe> {
+export async function probeKomga(
+  settings: KomgaSettings,
+  // The same deadline as the provider: a Komga box that is asleep accepts the socket and says
+  // nothing, and "Test login" is the first place a person meets that.
+  fetchImpl: typeof fetch = deadlined(fetch, RUNTIME_DEADLINE_MS, "your Komga server"),
+): Promise<KomgaProbe> {
   const base = settings.baseUrl.replace(/\/+$/, "");
   const bytes = new TextEncoder().encode(`${settings.username}:${settings.password}`);
   let binary = "";

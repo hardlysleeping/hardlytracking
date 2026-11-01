@@ -36,6 +36,7 @@ import {
   type Source,
   type SourceProvider,
 } from "./source";
+import { RUNTIME_DEADLINE_MS, deadlined } from "../lib/deadline";
 
 export const ARCHIVE_BASE = "https://archive.org";
 
@@ -346,7 +347,9 @@ const listingCache = new Map<string, string[]>();
 const LISTING_CACHE_SIZE = 24;
 
 export function createArchiveProvider(options: ArchiveProviderOptions = {}): SourceProvider {
-  const fetchImpl = options.fetchImpl ?? fetch;
+  // archive.org is usually quick and occasionally not; a stalled `advancedsearch.php` used to leave
+  // the search screen with no spinner and no way forward.
+  const fetchImpl = options.fetchImpl ?? deadlined(fetch, RUNTIME_DEADLINE_MS, "the Internet Archive");
   const base = (options.base ?? ARCHIVE_BASE).replace(/\/+$/, "");
   const enabled = options.enabled ?? (() => true);
 

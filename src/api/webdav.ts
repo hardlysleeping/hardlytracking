@@ -27,6 +27,7 @@
 import { nativeId, paged, type Chapter, type Page, type Paged, type Series, type Source, type SourceProvider } from "./source";
 import type { LibraryStore } from "../lib/db/store";
 import { openComic, titleFromFile, kindOf } from "../lib/files/index";
+import { RUNTIME_DEADLINE_MS, deadlined } from "../lib/deadline";
 import { keepCover, shrinkToCover } from "../lib/files/cover";
 
 /** Anything that can do what `fetch` does; a parameter so tests need no network. */
@@ -189,7 +190,9 @@ export async function probeWebdav(
   fetcher?: Fetcher,
 ): Promise<{ ok: boolean; message: string }> {
   const folderUrl = settings.url.replace(/\/+$/, "");
-  const doFetch = fetcher ?? fetch;
+  // The probe is the one WebDAV call that runs against a folder nobody has vouched for yet, so it is
+  // the most likely of all of them to hit a host that accepts the socket and says nothing.
+  const doFetch = fetcher ?? deadlined(fetch, RUNTIME_DEADLINE_MS, "your WebDAV folder");
   const authorization = `Basic ${btoa(`${settings.username}:${settings.password}`)}`;
   try {
     const response = await doFetch(`${folderUrl}/`, {
@@ -214,7 +217,8 @@ export async function probeWebdav(
 
 export function createWebdavProvider(options: WebdavOptions): SourceProvider {
   const folderUrl = options.url.replace(/\/+$/, "");
-  const doFetch = options.fetchImpl ?? fetch;
+  // A WebDAV share on a home NAS can accept a socket and never answer; same deadline, same sentence.
+  const doFetch = options.fetchImpl ?? deadlined(fetch, RUNTIME_DEADLINE_MS, "your WebDAV folder");
   const authorization = `Basic ${btoa(`${options.username}:${options.password}`)}`;
   const sourceId = `webdav:src:folder`;
   /**

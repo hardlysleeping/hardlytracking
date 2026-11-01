@@ -18,6 +18,7 @@
  */
 import { parseIndex, type ExtensionEntry, type ExtensionIndex } from "./index";
 import { apiUrl, hasLocalServer, withToken } from "../host";
+import { RUNTIME_DEADLINE_MS, deadlined } from "../deadline";
 
 export interface Repository {
   /** What the user pasted, normalised; this is the key a repository is remembered by. */
@@ -136,7 +137,10 @@ export interface LoadOptions {
 
 /** Read a repository's index, trying the candidate URLs and reporting what was tried. */
 export async function loadRepository(input: string, options: LoadOptions = {}): Promise<Repository> {
-  const doFetch = options.fetchImpl ?? ((target: string) => fetch(repoFetchUrl(target)));
+  // A repository whose host has gone away answers nothing at all, which a bare `fetch` waits on for
+  // minutes. The deadline turns that into a sentence in the panel instead of a screen that never
+  // changes.
+  const doFetch = options.fetchImpl ?? deadlined((target) => fetch(repoFetchUrl(String(target))), RUNTIME_DEADLINE_MS, "the repository");
   const candidates = candidateIndexUrls(input);
   if (candidates.length === 0) {
     throw new RepositoryError(
@@ -202,7 +206,10 @@ function hostOf(url: string): string {
 
 /** The bytes of an APK, through the same passthrough. */
 export async function downloadApk(entry: ExtensionEntry, options: LoadOptions = {}): Promise<Uint8Array> {
-  const doFetch = options.fetchImpl ?? ((target: string) => fetch(repoFetchUrl(target)));
+  // A repository whose host has gone away answers nothing at all, which a bare `fetch` waits on for
+  // minutes. The deadline turns that into a sentence in the panel instead of a screen that never
+  // changes.
+  const doFetch = options.fetchImpl ?? deadlined((target) => fetch(repoFetchUrl(String(target))), RUNTIME_DEADLINE_MS, "the repository");
   const response = await doFetch(entry.apkUrl);
   if (!response.ok) {
     throw new RepositoryError(`${entry.name} (${entry.version}) could not be downloaded: ${response.status}`, [entry.apkUrl]);

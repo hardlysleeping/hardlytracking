@@ -38,6 +38,7 @@ import {
   type Source,
   type SourceProvider,
 } from "./source";
+import { RUNTIME_DEADLINE_MS, deadlined } from "../lib/deadline";
 
 export interface KomgaRawLibrary {
   id: string;
@@ -207,7 +208,9 @@ export function mapKomgaReadState(books: readonly KomgaRawBook[]): RemoteRead[] 
 export function createKomgaProvider(options: KomgaOptions): SourceProvider {
   const baseUrl = trimBase(options.baseUrl);
   const headers = komgaAuthHeaders(options.username, options.password);
-  const doFetch = options.fetchImpl ?? fetch;
+  // A Komga box that is asleep accepts the socket and then says nothing. The deadline names it in
+  // the error instead of leaving the grid on "loading" until the platform gives up.
+  const doFetch = options.fetchImpl ?? deadlined(fetch, RUNTIME_DEADLINE_MS, "your Komga server");
   const pageSize = options.pageSize ?? 40;
 
   /** The last books list per series, so `chapters()` then `readState()` is one request. */

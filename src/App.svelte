@@ -23,6 +23,7 @@
   import Downloads from "./views/Downloads.svelte";
   import Backup from "./views/Backup.svelte";
   import Welcome from "./components/Welcome.svelte";
+  import SlowNotice from "./components/SlowNotice.svelte";
 
   import { library } from "./state/library.svelte";
   import { categories } from "./state/categories.svelte";
@@ -156,6 +157,8 @@ import { sourceMarks } from "./state/source-marks.svelte";
       <Library />
     {/if}
   </AppShell>
+  <!-- Above every view, outside the shell: a slow source is a property of the app, not of a screen. -->
+  <SlowNotice />
 {/if}
 
 <style>

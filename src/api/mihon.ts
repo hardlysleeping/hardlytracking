@@ -21,6 +21,7 @@
  */
 import { joinId, nativeId, paged, type Chapter, type Page, type Paged, type Series, type Source, type SourceProvider } from "./source";
 import { transport as defaultTransport, type Transport } from "./transport";
+import { RUNTIME_DEADLINE_MS, withDeadline } from "../lib/deadline";
 
 export interface MihonTransport {
   /** One GraphQL round-trip. Rejects on transport error or a GraphQL `errors` entry. */
@@ -32,11 +33,17 @@ export interface MihonTransport {
 /** The browser/PWA transport: same origin, `/api/mihon` proxied to the runtime. */
 export function browserMihonTransport(base = "/api/mihon", transport: Transport = defaultTransport): MihonTransport {
   const gql = async <T,>(query: string, variables?: Record<string, unknown>): Promise<T> => {
-    const res = await transport(`${base}/graphql`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ query, variables }),
-    });
+    // The runtime interprets the extension on the other side of this POST: a source that is slow to
+    // answer its own upstream is what a bare `fetch` here waits on forever.
+    const res = await withDeadline(
+      transport(`${base}/graphql`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query, variables }),
+      }),
+      RUNTIME_DEADLINE_MS,
+      "the Suwayomi runtime",
+    );
     if (!res.ok) throw new Error(`mihon runtime answered ${res.status}`);
     const body = (await res.json()) as { data?: T; errors?: { message?: string }[] };
     if (body.errors?.length) throw new Error(body.errors[0]?.message ?? "mihon runtime error");
