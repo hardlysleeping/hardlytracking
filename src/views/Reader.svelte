@@ -20,6 +20,7 @@
   import { settings } from "../state/settings.svelte";
   import { providerFor } from "../api/registry";
   import type { Chapter, Page } from "../api/source";
+  import { tick } from "svelte";
   import { go, pathTo } from "../lib/nav";
   import { pageSrc } from "../lib/pages";
   import { INACTIVITY_TIMEOUT_MS, shouldEndForBackground } from "../lib/history";
@@ -43,35 +44,57 @@
   const WINDOW = 4;
 
   /**
-   * A page that needs a header: fetch its bytes only when it is near the viewport.
+   * A page that needs bytes we do not have a URL for: fetch them when it is near the viewport — and
+   * the moment it is the page being read.
    *
-   * The source requires a header an `<img>` cannot send, so the app must fetch it — but doing that
-   * for every page of a chapter at once is what filled a renderer with gigabytes of scans. The
-   * observer keeps the fetch local to where the reader actually is, and the blob is released when
-   * the page element goes away.
+   * The second half is not an optimisation. An `IntersectionObserver` is delivered with a rendered
+   * frame, so a tab that is not painting — backgrounded, a screenshot run, a webview still occluded
+   * behind the app that opened it — never delivers one. The reader then sat on "Fetching pages…"
+   * with every page blank, however long it waited, and one frame later it was fine. So the page the
+   * reader is on is fetched by itself; the observer stays for the neighbours it is meant to prefetch.
    */
-  function lazyPage(node: HTMLImageElement, page: Page): { destroy: () => void } {
-    let objectUrl: string | null = null;
+  function lazyPage(
+    node: HTMLImageElement,
+    params: { page: Page; now: boolean },
+  ): { update: (next: { page: Page; now: boolean }) => void; destroy: () => void } {
+    const page = params.page;
     let live = true;
+    let started = false;
+
+    const load = (): void => {
+      if (started) return;
+      started = true;
+      void pageSrc(page).then((src) => {
+        if (!live) return;
+        node.src = src;
+      });
+    };
+
     const observer = new IntersectionObserver(
       (entries) => {
         if (!entries.some((entry) => entry.isIntersecting)) return;
         observer.disconnect();
-        void pageSrc(page).then((src) => {
-          if (!live) return;
-          objectUrl = src;
-          node.src = src;
-        });
+        load();
       },
       // A screen and a half ahead: enough that a scroll never shows a blank, and no more.
       { rootMargin: "150% 0px" },
     );
-    observer.observe(node);
+
+    if (params.now) load();
+    else observer.observe(node);
+
     return {
+      update(next) {
+        if (!next.now) return;
+        observer.disconnect();
+        load();
+      },
       destroy() {
         live = false;
         observer.disconnect();
-        if (objectUrl !== null && objectUrl.startsWith("blob:")) URL.revokeObjectURL(objectUrl);
+        // The URL is not revoked here: `pages.ts` and `imageCache` own the blob URLs they hand out
+        // and bound them themselves (12 local pages, 160 cached images). Revoking one here left that
+        // cache pointing at a dead URL, and a page came back blank when the reader returned to it.
       },
     };
   }
@@ -293,6 +316,9 @@
       lastPage = index;
       sessionId = await library.beginSession(seriesId, id, index);
       armIdle();
+      // `tick()` from Svelte flushes the DOM in a microtask; the old local version was a
+      // `requestAnimationFrame`, so in a tab that was not painting "Fetching pages…" never cleared
+      // at all — the reader was ready and said it was not.
       await tick();
       scrollToPage(index, "auto");
     } catch (e) {
@@ -300,10 +326,6 @@
     } finally {
       busy = false;
     }
-  }
-
-  function tick(): Promise<void> {
-    return new Promise((resolve) => requestAnimationFrame(() => resolve()));
   }
 
   /** Page elements are found by index; the scroller is the only element that moves. */
@@ -453,10 +475,11 @@
                  214-page chapter used to fetch every page at once because a zero-height page is
                  "on screen" for every lazy image in it. -->
           {:else if page.headers !== undefined || page.open !== undefined}
-            <!-- The source needs a header, which an `<img>` cannot send: the action fetches the
-                 bytes when this page is close to the viewport and nothing before then. -->
+            <!-- The bytes have to be fetched by us, which an `<img>` cannot do for a source that
+                 wants a header: this action fetches them when the page is close to the viewport —
+                 or at once, when it is the page being read, because that must not wait on a frame. -->
             <img
-              use:lazyPage={page}
+              use:lazyPage={{ page, now: page.index === index }}
               alt={`Page ${page.index + 1} of ${pages.length}`}
               loading={page.index < 3 ? "eager" : "lazy"}
               decoding="async"
