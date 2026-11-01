@@ -796,16 +796,17 @@
           <p class="empty">Opening the library…</p>
         {:else if rows.length === 0 && library.library.length === 0}
           <div class="blank">
-            <p class="blankline">Your library is empty.</p>
+            <p class="blankline">Nothing here yet.</p>
             <p class="blanksub">
-              Add the comics you already own — a CBZ, CBR or PDF from this device — or a repository, and the first
-              series you keep lands here.
+              Open a comic you already own, add the Komga or Suwayomi server you run yourself, or
+              browse the Internet Archive's public-domain scans. HardlyTracking ships no comics of
+              its own.
             </p>
             <div class="blankacts">
               <AddFiles look="primary" label="Add comic files" />
               <button class="btn ghost" onclick={() => (driveOpen = true)}>From Google Drive</button>
-              <button class="btn" onclick={() => go("/extensions")}>Add a repository</button>
-              <button class="btn" onclick={() => go("/browse")}>Browse sources</button>
+              <button class="btn" onclick={() => go("/browse")}>Internet Archive</button>
+              <button class="btn" onclick={() => go("/extensions")}>My own server</button>
             </div>
           </div>
         {:else if rows.length === 0 && !isEmptyFilter(filter)}

@@ -22,6 +22,7 @@
   import Settings from "./views/Settings.svelte";
   import Downloads from "./views/Downloads.svelte";
   import Backup from "./views/Backup.svelte";
+  import Welcome from "./components/Welcome.svelte";
 
   import { library } from "./state/library.svelte";
   import { categories } from "./state/categories.svelte";
@@ -108,7 +109,15 @@ import { sourceMarks } from "./state/source-marks.svelte";
   });
 </script>
 
-{#if route.name === "read" && route.id !== null && route.chapterId !== null}
+<!--
+  First run, before the shell: App Store review reads this screen first, and it is the one place the
+  app can say what it is not — no comics of its own, no list of sites. `settings.ready` is the gate,
+  not `library.ready`: a preference that has not loaded yet must not flash the welcome at someone who
+  dismissed it months ago.
+-->
+{#if settings.ready && !settings.welcomed}
+  <Welcome />
+{:else if route.name === "read" && route.id !== null && route.chapterId !== null}
   <Reader seriesId={route.id} chapterId={route.chapterId} />
 {:else}
   <AppShell {active}>

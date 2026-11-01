@@ -120,6 +120,8 @@ export interface Prefs {
   imageCacheLimitMb: number;
   /** Cache images at all. */
   cacheImages: boolean;
+  /** The first-run screen has been seen; it never shows again. */
+  welcomed: boolean;
 }
 
 class Settings {
@@ -165,6 +167,13 @@ class Settings {
   historyPane = $state<PanePreference>("auto");
   imageCacheLimitMb = $state(256);
   cacheImages = $state(true);
+  /**
+   * The first-run screen has been shown and dismissed.
+   *
+   * A preference in the library database, not a cookie or a device flag: it travels with an export,
+   * so restoring a backup does not re-show the welcome to someone who has used the app for months.
+   */
+  welcomed = $state(false);
 
   private store: LibraryStore | null = null;
 
@@ -216,6 +225,7 @@ class Settings {
     this.historyPane = await read("historyPane", this.historyPane);
     this.imageCacheLimitMb = await read("imageCacheLimitMb", this.imageCacheLimitMb);
     this.cacheImages = await read("cacheImages", this.cacheImages);
+    this.welcomed = await read("welcomed", this.welcomed);
     this.ready = true;
   }
 
