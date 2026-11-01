@@ -23,6 +23,7 @@
   import { tick } from "svelte";
   import { go, pathTo } from "../lib/nav";
   import { pageSrc } from "../lib/pages";
+  import { RUNTIME_DEADLINE_MS, withDeadline } from "../lib/deadline";
   import { INACTIVITY_TIMEOUT_MS, shouldEndForBackground } from "../lib/history";
   import Sheet from "../components/Sheet.svelte";
 
@@ -227,9 +228,15 @@
    */
   async function chapterList(seriesId: string): Promise<Chapter[]> {
     try {
-      return await library.chapters(seriesId);
+      return await withDeadline(library.chapters(seriesId), RUNTIME_DEADLINE_MS, "the chapter list");
     } catch {
-      return (await library.profile?.store.listChapters(seriesId)) ?? [];
+      // A stored list is the fallback when the source is down — and it too can hang, if the database
+      // is the thing that stopped answering. An empty chapter list is a reader that still reads.
+      try {
+        return (await withDeadline(library.profile?.store.listChapters(seriesId) ?? Promise.resolve([]), RUNTIME_DEADLINE_MS, "the stored chapter list")) ?? [];
+      } catch {
+        return [];
+      }
     }
   }
 
@@ -248,7 +255,7 @@
     let remote: Page[] = [];
     if (gaps) {
       try {
-        remote = await library.pages(local.chapterId);
+        remote = await withDeadline(library.pages(local.chapterId), RUNTIME_DEADLINE_MS, "the missing pages");
       } catch {
         remote = [];
       }
@@ -282,14 +289,19 @@
     urls = [];
     chapterName = "";
     try {
+      // Every step below can wait on something outside this screen — a download row, the database,
+      // a book being unpacked, the source that owns the chapter — and none of them used to have a
+      // deadline. A step that never settled left the reader on "Fetching pages…" with no error and
+      // no way out, which is indistinguishable from a frozen app. Each one now says which part it
+      // was waiting on, in the same 30 s the rest of the app uses for a source that has gone quiet.
       // A downloaded chapter wins: it is the one that works with no network.
-      const local = await downloads.local(id);
+      const local = await withDeadline(downloads.local(id), RUNTIME_DEADLINE_MS, "this device's downloads");
       if (local !== null) {
         fromDownload = true;
         await openLocal(local);
       } else {
         fromDownload = false;
-        pages = await library.pages(id);
+        pages = await withDeadline(library.pages(id), RUNTIME_DEADLINE_MS, "the page list");
         // A plain page is just its URL. A page that needs a header is resolved when it comes near
         // the viewport (`use:lazyPage`), because resolving all of them up front fetched every page
         // of a 214-page chapter the moment it opened — gigabytes of scans for one visible page.
@@ -297,9 +309,15 @@
         // CBZ/PDF — is resolved by `use:lazyPage` when it comes near the viewport.
         urls = pages.map((page) => (page.headers === undefined && page.open === undefined ? page.url : ""));
       }
-      const progress = await library.profile.store.getProgress(id);
+      const progress = await withDeadline(
+        library.profile.store.getProgress(id),
+        RUNTIME_DEADLINE_MS,
+        "the library database",
+      );
       index = Math.min(progress?.page ?? 0, Math.max(pages.length - 1, 0));
-      read = library.ownsProgress(id) ? await library.profile.store.isRead(id) : false;
+      read = library.ownsProgress(id)
+        ? await withDeadline(library.profile.store.isRead(id), RUNTIME_DEADLINE_MS, "the library database")
+        : false;
 
       // The chapter list is a nicety for the name and the prev/next buttons; with the host down
       // it must not stop a downloaded chapter from opening, so the stored list is the fallback.
@@ -308,13 +326,15 @@
       chapterName =
         list.find((row) => row.id === id)?.name ??
         (fromDownload ? (downloads.rows.find((row) => row.chapterId === id)?.chapterName ?? "") : "");
-      // Opening a chapter is the moment history exists; it is not a read mark.
-      await library.remember(seriesId, id, index, pages.length);
+      // Opening a chapter is the moment history exists; it is not a read mark. Neither write is
+      // worth a reader that never opens, so both are bounded: a place that cannot be saved in 30 s
+      // is reported, and the pages are still shown.
+      await withDeadline(library.remember(seriesId, id, index, pages.length), RUNTIME_DEADLINE_MS, "saving your place");
       // One session per chapter opened: the previous one is closed at the page it reached, so a
       // chapter-to-chapter jump does not leave a session running forever.
       closeSession();
       lastPage = index;
-      sessionId = await library.beginSession(seriesId, id, index);
+      sessionId = await withDeadline(library.beginSession(seriesId, id, index), RUNTIME_DEADLINE_MS, "saving your place");
       armIdle();
       // `tick()` from Svelte flushes the DOM in a microtask; the old local version was a
       // `requestAnimationFrame`, so in a tab that was not painting "Fetching pages…" never cleared
@@ -457,6 +477,15 @@
   {#if error}<p class="banner">{error}</p>{/if}
   {#if partialNotice}<p class="banner note">{partialNotice}</p>{/if}
   {#if busy}<p class="loading">Fetching pages…</p>{/if}
+  <!-- A chapter that loaded and produced nothing used to be a blank screen with "—" in the footer:
+       no error, no pages, nothing to press. It is the shape of a page list that came back empty —
+       a row whose file is gone, a source that answered with nothing — and it must say so. -->
+  {#if !busy && error === null && pages.length === 0}
+    <p class="banner note">
+      This chapter has no pages. Its file is no longer on this device, or the source that owns it
+      returned nothing.
+    </p>
+  {/if}
 
   {#if pages.length > 0}
     <div

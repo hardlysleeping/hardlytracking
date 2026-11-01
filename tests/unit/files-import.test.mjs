@@ -144,6 +144,32 @@ test("a file that never opens is named in errors after its deadline, and the nex
   assert.equal(await store.getBook(fileSeriesId("stuck.pdf", 3)), undefined, "a file that never opened left a row behind");
 });
 
+test("a book that opens after its deadline is closed, not leaked", async () => {
+  const store = freshStore();
+  let closed = false;
+  let resolveOpen;
+  const opened = new Promise((resolve) => {
+    resolveOpen = resolve;
+  });
+  const result = await importComicFiles(store, [file("slow.cbz", new Uint8Array([7, 7, 7]))], {
+    cover: async () => picture(),
+    openDeadlineMs: 20,
+    // The shape of a pdf.js worker that keeps parsing after the import stopped waiting: the promise
+    // settles late, and the book it hands back must not sit around holding a decoder.
+    open: async () => {
+      await opened;
+      return { kind: "cbz", pageCount: 1, open: async () => picture(), close: () => { closed = true; } };
+    },
+  });
+  assert.equal(result.added, 0);
+  assert.equal(result.errors.length, 1, "a file that missed its deadline is not silently accepted");
+  assert.equal(closed, false, "nothing is closed while the book has not opened yet");
+  resolveOpen();
+  // One turn of the microtask queue: the abandoned promise resolves and closes itself.
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(closed, true, "the book that arrived too late was never closed");
+});
+
 test("a cover that never finishes becomes the title tile — it never drops the book", async () => {
   assert.ok(COVER_DEADLINE_MS < RUNTIME_DEADLINE_MS, "a cover may not outlast the file it belongs to");
   const store = freshStore();

@@ -70,6 +70,26 @@ export function describeProgress(progress: ImportProgress): string {
  */
 export const COVER_DEADLINE_MS = 15_000;
 
+/**
+ * Wait for a file to open, but not forever — and close it if it opens after we stopped waiting.
+ *
+ * The opening promise cannot be cancelled: pdf.js parses a scan in a worker, and it does not stop
+ * because nobody is waiting any more. So an open that misses its deadline is kept and handed to
+ * `close()` the moment it lands. Left out, one file that missed its deadline kept a pdf.js worker
+ * chewing for the rest of the session, and the tab got heavier with every page drawn afterwards.
+ */
+async function awaitBook(opening: Promise<ComicBook>, ms: number, label: string): Promise<ComicBook> {
+  let abandoned = false;
+  try {
+    return await withDeadline(opening, ms, label);
+  } catch (error) {
+    abandoned = true;
+    throw error;
+  } finally {
+    if (abandoned) void opening.then((book) => book.close(), () => {});
+  }
+}
+
 export interface ImportOptions {
   /**
    * How page 1 becomes a shelf cover.
@@ -165,7 +185,7 @@ export async function importComicFiles(
       // The deadline counts in `activity` under the file's own name, so the shell's chip says
       // "Waiting on Saga v01.pdf · 12s" while this runs — and the same call ends the wait at 30 s
       // rather than leaving the button spinning.
-      const book = await withDeadline(openFor(file, name), openDeadlineMs, name);
+      const book = await awaitBook(openFor(file, name), openDeadlineMs, name);
       const pageCount = book.pageCount;
       // One page, once. A cover that cannot be drawn — or that will not finish within
       // `COVER_DEADLINE_MS` — is not a failed import: the book still opens, and the shelf falls back
