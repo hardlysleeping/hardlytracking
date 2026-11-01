@@ -164,6 +164,47 @@ test("zip members become pages in listing order, and only images count", () => {
   assert.equal(memberUrl("id", "book.cbz", "p1.jpg"), "https://archive.org/download/id/book.cbz/p1.jpg");
 });
 
+test("a volume that keeps its pages in a folder is a volume, not 'no pages'", () => {
+  // archive.org writes the folder as %2F in the href, and the page URL that reads it back the same
+  // way is the one that answers 200 — so the parsed member keeps the folder in its path.
+  const html = `<!DOCTYPE html><html><body>
+    <a href="//archive.org/download/si/Sports%20Illustrated.cbz/Sports%20Illustrated%2Fpage001.jpg">p1</a>
+    <a href="//archive.org/download/si/Sports%20Illustrated.cbz/Sports%20Illustrated%2Fpage002.jpg">p2</a>
+    <a href="//archive.org/download/si/Sports%20Illustrated.cbz/Sports%20Illustrated%2Fpage003.png">p3</a>
+    <a href="//archive.org/download/si/Sports%20Illustrated.cbz/Sports%20Illustrated%2F">the folder</a>
+    <a href="//archive.org/download/si/Sports%20Illustrated.cbz/__MACOSX%2FSports%20Illustrated%2F._page001.jpg">stub</a>
+    <a href="//archive.org/download/si/Sports%20Illustrated.cbz/.DS_Store">junk</a>
+    <a href="//archive.org/download/si/Sports%20Illustrated.cbz/notes.txt">notes</a>
+  </body></html>`;
+  const pages = membersFromListing(html, "si", "Sports Illustrated.cbz");
+  assert.deepEqual(pages, [
+    "https://archive.org/download/si/Sports%20Illustrated.cbz/Sports%20Illustrated%2Fpage001.jpg",
+    "https://archive.org/download/si/Sports%20Illustrated.cbz/Sports%20Illustrated%2Fpage002.jpg",
+    "https://archive.org/download/si/Sports%20Illustrated.cbz/Sports%20Illustrated%2Fpage003.png",
+  ]);
+  assert.equal(memberUrl("si", "Sports Illustrated.cbz", "Sports Illustrated/page001.jpg"), pages[0]);
+});
+
+test("a listing the browser cannot read says so, instead of 'Failed to fetch'", async () => {
+  const refused = async () => {
+    // Exactly what Chromium throws: no status, no host, nothing to show a reader.
+    throw new TypeError("Failed to fetch");
+  };
+  const provider = createArchiveProvider({ fetchImpl: refused });
+  await assert.rejects(
+    () => provider.pages("archive:ch:restricted:Vol.cbz"),
+    /archive\.org did not list the pages of Vol\.cbz/,
+  );
+
+  // A deadline keeps its own sentence: it is already the honest one.
+  const { DeadlineError } = await import("../../src/lib/deadline.ts");
+  const slow = async () => {
+    throw new DeadlineError("the Internet Archive", 30_000);
+  };
+  const timed = createArchiveProvider({ fetchImpl: slow });
+  await assert.rejects(() => timed.pages("archive:ch:slow:Vol.cbz"), /did not answer within 30 s/);
+});
+
 test("page urls and chapter ids round-trip, including names with colons and spaces", () => {
   assert.equal(pageUrl("scanned-book", 0), "https://archive.org/download/scanned-book/page/n0_w1200.jpg");
   assert.equal(pageUrl("scanned-book", 7, 800), "https://archive.org/download/scanned-book/page/n7_w800.jpg");

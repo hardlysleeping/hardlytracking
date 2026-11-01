@@ -253,6 +253,11 @@
     error = null;
     index = 0;
     partialNotice = null;
+    // A chapter that fails to load must not leave the last one's pages on screen: "1 / 124" beside
+    // another book's error reads as if this chapter were 124 pages long.
+    pages = [];
+    urls = [];
+    chapterName = "";
     try {
       // A downloaded chapter wins: it is the one that works with no network.
       const local = await downloads.local(id);

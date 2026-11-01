@@ -21,6 +21,15 @@
  * 4. **The default search is full-text.** Asking for `berserk` matches items that merely mention it,
  *    so queries are scoped to `mediatype:texts` and rows without an identifier are dropped rather
  *    than rendered as untitled, unopenable cards.
+ * 5. **A zip's members live in its own listing page, and the page is HTML that may become unreadable
+ *    halfway.** The listing is a 302 to a storage node, and a refusing node answers 403/503 with no
+ *    `Access-Control-Allow-Origin`, which a browser can only report as "Failed to fetch" — the status
+ *    is lost. So the listing is the one call here that must name its own failure instead of letting
+ *    the browser's message reach the reader, and the members are read out of the HTML carefully: a
+ *    zip that keeps its pages in a folder (`Sports-Illustrated/page001.jpg`) is ordinary, not junk.
+ *    Nothing else can enumerate a zip without downloading it — `/page/n{i}` answers 404 for a book
+ *    file, metadata lists the volume but not what is inside it, and a range read of the bytes is
+ *    refused by CORS.
  *
  * Progress is ours (`ownsProgress: true`): archive.org has no read-state API for these items, and a
  * mark we cannot write is a mark we must not pretend to have written.
@@ -36,7 +45,7 @@ import {
   type Source,
   type SourceProvider,
 } from "./source";
-import { RUNTIME_DEADLINE_MS, deadlined } from "../lib/deadline";
+import { RUNTIME_DEADLINE_MS, DeadlineError, deadlined } from "../lib/deadline";
 
 export const ARCHIVE_BASE = "https://archive.org";
 
@@ -303,6 +312,11 @@ export function memberUrl(identifier: string, book: string, member: string, base
  *
  * Members are filtered to images and kept in the order listed, because that order is the reading
  * order — sorting by name would put "p10" before "p9" on any archive without zero padding.
+ *
+ * A member can be nested: plenty of volumes keep their pages in a folder inside the zip
+ * (`Sports-Illustrated/page001.jpg`), and the listing writes that slash as `%2F`. Those are pages,
+ * not junk — dropping them made half the archive's magazines list as "no pages inside". The
+ * archiver's own bookkeeping is junk: `__MACOSX/…` and dot-files never reach a reader.
  */
 export function membersFromListing(html: string, identifier: string, book: string, base = ARCHIVE_BASE): string[] {
   const seen = new Set<string>();
@@ -316,9 +330,15 @@ export function membersFromListing(html: string, identifier: string, book: strin
         return href;
       }
     })();
-    if (!decoded.includes(book)) continue;
-    const member = decoded.slice(decoded.indexOf(book) + book.length).replace(/^\/+/, "");
-    if (member === "" || member.includes("/")) continue;
+    const at = decoded.indexOf(book);
+    if (at < 0) continue;
+    const member = decoded
+      .slice(at + book.length)
+      .replace(/^\/+/, "")
+      .split(/[?#]/)[0];
+    // A bare directory entry, not a file.
+    if (member === "" || member.endsWith("/")) continue;
+    if (member.split("/").some((part) => part.startsWith(".") || part === "__MACOSX")) continue;
     const extension = (member.split(".").pop() ?? "").toLowerCase();
     if (!PAGE_EXTENSIONS.includes(extension)) continue;
     if (seen.has(member)) continue;
@@ -376,7 +396,28 @@ export function createArchiveProvider(options: ArchiveProviderOptions = {}): Sou
     const key = `${identifier}/${book}`;
     const cached = listingCache.get(key);
     if (cached !== undefined) return cached;
-    const response = await fetchImpl(`${base}/download/${encodeURIComponent(identifier)}/${encodeURIComponent(book)}/`);
+    const url = `${base}/download/${encodeURIComponent(identifier)}/${encodeURIComponent(book)}/`;
+    let response: Response;
+    try {
+      response = await fetchImpl(url);
+    } catch (error) {
+      // The one call in this provider a browser can refuse to deliver. archive.org answers the
+      // directory with a 302 to a storage node, and a refusing node (403 for a restricted item, 503
+      // for a sick one) sends no `Access-Control-Allow-Origin`, so `fetch` rejects and the browser's
+      // whole vocabulary for it is "Failed to fetch" — no status, no host, nothing a reader can act
+      // on. Say what actually happened instead of passing that through.
+      if (error instanceof DeadlineError) throw error;
+      const message = error instanceof Error ? error.message : String(error);
+      if (typeof navigator !== "undefined" && navigator.onLine === false) {
+        throw new Error(`${book} has to be listed from archive.org, and you are offline`);
+      }
+      if (/failed to fetch|networkerror|load failed|fetch failed|cors/i.test(message)) {
+        throw new Error(
+          `archive.org did not list the pages of ${book} — its file server refused the request (the item may be restricted), or answered with no permission for a browser to read it. Opening the item on archive.org shows which.`,
+        );
+      }
+      throw new Error(`archive.org failed while listing ${book}: ${message}`);
+    }
     if (!response.ok) throw new Error(`archive.org listed no directory for ${book} (HTTP ${response.status})`);
     const members = membersFromListing(await response.text(), identifier, book, base);
     if (members.length === 0) throw new Error(`archive.org lists no pages inside ${book}`);
