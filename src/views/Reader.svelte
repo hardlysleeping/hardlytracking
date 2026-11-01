@@ -20,7 +20,7 @@
   import { settings } from "../state/settings.svelte";
   import { providerFor } from "../api/registry";
   import type { Chapter, Page } from "../api/source";
-  import { tick } from "svelte";
+  import { tick, untrack } from "svelte";
   import { go, pathTo } from "../lib/nav";
   import { pageSrc } from "../lib/pages";
   import { RUNTIME_DEADLINE_MS, withDeadline } from "../lib/deadline";
@@ -129,6 +129,17 @@
   let lastPage = 0;
   let idleTimer: ReturnType<typeof setTimeout> | null = null;
   let hiddenAt: number | null = null;
+
+  /**
+   * The series that owns this chapter, which is the series id everything here writes and links to.
+   *
+   * It starts as the one in the URL, because that is what the route said, and `load()` replaces it
+   * with the chapter mirror's answer when the two disagree. A URL can name the wrong series — an old
+   * bookmark, a hand-written hash, `#read/None/<chapter>` — and the chapter is all `load()` needs, so
+   * the chapter opened and then wrote that id into progress, history and Continue. Every resume from
+   * there had a back link to a series that does not exist and two dead chapter buttons.
+   */
+  let owner = untrack(() => seriesId);
 
   const MODES = [
     { id: "vertical", label: "Vertical" },
@@ -277,6 +288,26 @@
         : `${stillMissing} of ${local.total} pages are not on this device and could not be fetched. Retry the download when you have a connection.`;
   }
 
+  /**
+   * The series that owns a chapter, from the chapter mirror.
+   *
+   * One lookup, bounded like every other database step here. The route's answer is the fallback: a
+   * chapter the library has no row for keeps the series the URL named instead of getting nothing.
+   */
+  async function ownerOf(routeId: string, id: string): Promise<string> {
+    try {
+      const row = await withDeadline(
+        library.profile?.store.getChapter(id) ?? Promise.resolve(undefined),
+        RUNTIME_DEADLINE_MS,
+        "the library database",
+      );
+      const stated = row?.seriesId ?? "";
+      return stated === "" ? routeId : stated;
+    } catch {
+      return routeId;
+    }
+  }
+
   async function load(id: string): Promise<void> {
     if (library.profile === null) return;
     busy = true;
@@ -319,9 +350,14 @@
         ? await withDeadline(library.profile.store.isRead(id), RUNTIME_DEADLINE_MS, "the library database")
         : false;
 
+      // A URL that names another series is corrected before anything is written with it: from here
+      // on the address bar, the back link and the two chapter buttons all use `owner`.
+      owner = await ownerOf(seriesId, id);
+      if (owner !== seriesId) history.replaceState(null, "", `#${pathTo("read", owner, id)}`);
+
       // The chapter list is a nicety for the name and the prev/next buttons; with the host down
       // it must not stop a downloaded chapter from opening, so the stored list is the fallback.
-      const list = await chapterList(seriesId);
+      const list = await chapterList(owner);
       chapters = list;
       chapterName =
         list.find((row) => row.id === id)?.name ??
@@ -329,12 +365,12 @@
       // Opening a chapter is the moment history exists; it is not a read mark. Neither write is
       // worth a reader that never opens, so both are bounded: a place that cannot be saved in 30 s
       // is reported, and the pages are still shown.
-      await withDeadline(library.remember(seriesId, id, index, pages.length), RUNTIME_DEADLINE_MS, "saving your place");
+      await withDeadline(library.remember(owner, id, index, pages.length), RUNTIME_DEADLINE_MS, "saving your place");
       // One session per chapter opened: the previous one is closed at the page it reached, so a
       // chapter-to-chapter jump does not leave a session running forever.
       closeSession();
       lastPage = index;
-      sessionId = await withDeadline(library.beginSession(seriesId, id, index), RUNTIME_DEADLINE_MS, "saving your place");
+      sessionId = await withDeadline(library.beginSession(owner, id, index), RUNTIME_DEADLINE_MS, "saving your place");
       armIdle();
       // `tick()` from Svelte flushes the DOM in a microtask; the old local version was a
       // `requestAnimationFrame`, so in a tab that was not painting "Fetching pages…" never cleared
@@ -388,7 +424,7 @@
     if (saveTimer !== null) clearTimeout(saveTimer);
     saveTimer = setTimeout(() => {
       saveTimer = null;
-      void library.remember(seriesId, chapterId, index, pages.length);
+      void library.remember(owner, chapterId, index, pages.length);
     }, 500);
   }
 
@@ -435,16 +471,16 @@
       event.preventDefault();
       step(key === "PageUp" ? -1 : rtl ? 1 : -1);
     } else if (key === "j" || key === "J") {
-      if (following !== null) go(pathTo("read", seriesId, following.id));
+      if (following !== null) go(pathTo("read", owner, following.id));
     } else if (key === "k" || key === "K") {
-      if (previous !== null) go(pathTo("read", seriesId, previous.id));
+      if (previous !== null) go(pathTo("read", owner, previous.id));
     } else if (key === "f" || key === "F") {
       if (document.fullscreenElement === null) void document.documentElement.requestFullscreen?.();
       else void document.exitFullscreen?.();
     } else if (key === "r" || key === "R") {
       void toggleRead();
     } else if (key === "Escape") {
-      if (chrome) go(pathTo("series", seriesId));
+      if (chrome) go(pathTo("series", owner));
       else showChrome();
     }
   }
@@ -459,7 +495,7 @@
 
 <section class="reader" class:hide={!chrome}>
   <header class="chrome top" class:shown={chrome}>
-    <button class="btn ghost icon" aria-label="Back to series" onclick={() => go(pathTo("series", seriesId))}>
+    <button class="btn ghost icon" aria-label="Back to series" onclick={() => go(pathTo("series", owner))}>
       <svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7" /></svg>
     </button>
     <div class="titles">
@@ -554,8 +590,8 @@
     </div>
     <!-- Both chapter buttons sit at the bottom edge, where a thumb already is. -->
     <div class="turn">
-      <button class="btn" disabled={previous === null} onclick={() => previous && go(pathTo("read", seriesId, previous.id))}>‹ Previous chapter</button>
-      <button class="btn" disabled={following === null} onclick={() => following && go(pathTo("read", seriesId, following.id))}>Next chapter ›</button>
+      <button class="btn" disabled={previous === null} onclick={() => previous && go(pathTo("read", owner, previous.id))}>‹ Previous chapter</button>
+      <button class="btn" disabled={following === null} onclick={() => following && go(pathTo("read", owner, following.id))}>Next chapter ›</button>
     </div>
   </footer>
 </section>

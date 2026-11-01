@@ -13,7 +13,7 @@ import { remoteHost } from "../lib/host";
 import type { ExtensionEntry } from "../lib/extensions/index";
 import type { RepoRow, ViewStateRow } from "../lib/db/store";
 import { BACKGROUND_GRACE_MS, viewStateKey } from "../lib/history";
-import { nextUnread } from "../lib/library/continue";
+import { nextUnread, seriesOfPosition } from "../lib/library/continue";
 import { settings } from "./settings.svelte";
 import { installTrackerSync } from "../lib/trackers/sync";
 import { planReadState, remoteReadCount } from "../lib/read-state";
@@ -590,16 +590,33 @@ class LibraryState {
       if (!titles.has(row.id)) titles.set(row.id, row.title);
       if (covers.get(row.id) === undefined && row.cover !== undefined) covers.set(row.id, row.cover);
     }
-    const chapterNames = new Map((await this.profile.store.listAllChapters()).map((chapter) => [chapter.id, chapter.name]));
-    return positions.slice(0, limit).map((row) => ({
-      seriesId: row.seriesId,
-      chapterId: row.chapterId,
-      page: row.page,
-      // A title we have seen beats an id; an id is never shown as a title.
-      title: titles.get(row.seriesId) ?? "Unknown title",
-      ...(covers.get(row.seriesId) === undefined ? {} : { cover: covers.get(row.seriesId) }),
-      chapterName: chapterNames.get(row.chapterId) ?? "",
-    }));
+    const chapterRows = new Map((await this.profile.store.listAllChapters()).map((chapter) => [chapter.id, chapter]));
+    // Positions arrive newest first, and Continue is one card per title. Two rows can resolve to
+    // the same series when a bad link wrote a second position under the wrong id — and a duplicate
+    // is not cosmetic here: the strip is keyed by series id, so it failed to render at all
+    // (`each_key_duplicate`) and took the whole Library screen with it.
+    const seen = new Set<string>();
+    const rows: Array<{ seriesId: string; title: string; cover?: string; chapterId: string; page: number; chapterName: string }> = [];
+    for (const row of positions) {
+      // The stored id is the series the reader was opened under; the chapter mirror says which
+      // series the chapter actually belongs to, and it wins when they disagree (see
+      // `seriesOfPosition`). Otherwise one stale link leaves a resume row pointing at a series that
+      // was never in the library: an unnamed title, a back link to nowhere, no prev/next.
+      const seriesId = seriesOfPosition(row.seriesId, chapterRows.get(row.chapterId));
+      if (seen.has(seriesId)) continue;
+      seen.add(seriesId);
+      rows.push({
+        seriesId,
+        chapterId: row.chapterId,
+        page: row.page,
+        // A title we have seen beats an id; an id is never shown as a title.
+        title: titles.get(seriesId) ?? "Unknown title",
+        ...(covers.get(seriesId) === undefined ? {} : { cover: covers.get(seriesId) }),
+        chapterName: chapterRows.get(row.chapterId)?.name ?? "",
+      });
+      if (rows.length === limit) break;
+    }
+    return rows;
   }
 
   /**

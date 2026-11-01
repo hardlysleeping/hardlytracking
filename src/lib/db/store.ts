@@ -237,6 +237,17 @@ export class LibraryStore {
   }
 
   /**
+   * One chapter row by id.
+   *
+   * A URL can hand a screen a chapter without its series (`#read/…` from a stale link), and the
+   * chapter row is what knows which series owns it — one lookup instead of a full pass.
+   */
+  async getChapter(chapterId: string): Promise<Chapter | undefined> {
+    const row = await this.db.get<ChapterRow>("chapters", chapterId);
+    return row === undefined ? undefined : { ...row };
+  }
+
+  /**
    * Every mirrored chapter, in one read.
    *
    * The library needs unread counts for every row on the shelf; asking per series would be one

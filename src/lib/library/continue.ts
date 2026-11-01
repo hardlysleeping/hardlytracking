@@ -47,6 +47,21 @@ export function clampMax(value: number): number {
   return Math.min(Math.max(Math.round(value), 1), 20);
 }
 
+/**
+ * The series a position row belongs to.
+ *
+ * The row stores whatever series id the reader was opened under, and a URL can name another one —
+ * an old bookmark, a hand-written hash, a link from before a migration. The chapter mirror is the
+ * authority on which series owns a chapter, so when the two disagree the chapter wins: the resume
+ * link then carries a series that exists, and prev/next and the back link work. Without this a
+ * position written under a wrong id made Continue point at a series that was never in the library,
+ * which read as a title with no name and two dead buttons.
+ */
+export function seriesOfPosition(stored: string, chapter: { seriesId?: string } | undefined): string {
+  const owner = chapter?.seriesId;
+  return typeof owner === "string" && owner !== "" ? owner : stored;
+}
+
 /** The rows the strip draws: dismissed series dropped, order kept, then truncated. */
 export function eligible(rows: ContinueRow[], dismissed: Set<string>, max: number = DEFAULT_CONTINUE_RULES.max): ContinueRow[] {
   const kept = rows.filter((row) => !dismissed.has(row.seriesId));

@@ -5,6 +5,7 @@ import {
   clampMax,
   eligible,
   nextUnread,
+  seriesOfPosition,
   showsContinue,
 } from "../../src/lib/library/continue.ts";
 
@@ -64,4 +65,19 @@ test("the strip is drawn only when it is switched on and has rows", () => {
 
 test("the default rules are the spec's: next unread, 10, small, above", () => {
   assert.deepEqual(DEFAULT_CONTINUE_RULES, { afterFinish: "next-unread", max: 10, size: "small", position: "above" });
+});
+
+test("a continue row points at the series that owns its chapter, whatever the row stored", () => {
+  // The position row is written from whatever series id the reader was opened under, and a stale
+  // link can name another one — `#read/None/<chapter>` is what a bad URL looked like. The chapter
+  // mirror knows the truth, so the resume link still carries a series that exists.
+  assert.equal(seriesOfPosition("None", { seriesId: "local:file:plastic-man-001-se8t" }), "local:file:plastic-man-001-se8t");
+  assert.equal(seriesOfPosition("local:file:old", { seriesId: "local:file:new" }), "local:file:new");
+});
+
+test("without a chapter row the stored series id stands", () => {
+  // A chapter this device has never mirrored is no reason to blank the link.
+  assert.equal(seriesOfPosition("mihon:12", undefined), "mihon:12");
+  assert.equal(seriesOfPosition("mihon:12", { seriesId: "" }), "mihon:12");
+  assert.equal(seriesOfPosition("mihon:12", {}), "mihon:12");
 });

@@ -228,3 +228,16 @@ test("removing a series leaves history and position alone", async () => {
   assert.equal((await s.getPosition("local:1")).page, 2, "a removed series still knows where you were, in case it returns");
   assert.equal((await s.listHistory()).length, 1);
 });
+
+test("a chapter row names the series that owns it, so a link can resolve one from the other", async () => {
+  const s = store();
+  await s.putChapters("local:file:plastic-man-001-se8t", [
+    { id: "local:ch:plastic-man-001-se8t:1", seriesId: "stale", name: "Plastic Man 001", number: 1, pageCount: 4, read: false },
+  ]);
+
+  // `putChapters` stamps the series it was called with; the row is the authority for `#read/<chapter>`.
+  const chapter = await s.getChapter("local:ch:plastic-man-001-se8t:1");
+  assert.equal(chapter.seriesId, "local:file:plastic-man-001-se8t");
+  assert.equal(chapter.name, "Plastic Man 001");
+  assert.equal(await s.getChapter("local:ch:nope:1"), undefined);
+});
