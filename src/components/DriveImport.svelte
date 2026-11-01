@@ -16,7 +16,7 @@
    */
   import Sheet from "./Sheet.svelte";
   import { library } from "../state/library.svelte";
-  import { importComicFiles } from "../lib/files/import";
+  import { describeProgress, importComicFiles } from "../lib/files/import";
   import {
     DRIVE_SCOPE,
     comicFiles,
@@ -96,7 +96,9 @@
       const files = await driveToFiles(token, picked, fetch, (done, total) => {
         note = `Downloading ${done} of ${total}…`;
       });
-      const result = await importComicFiles(library.profile.store, files);
+      const result = await importComicFiles(library.profile.store, files, {
+        onProgress: (next) => (note = describeProgress(next)),
+      });
       await library.refreshLibrary();
       const bits: string[] = [];
       if (result.added > 0) bits.push(`${result.added} added`);

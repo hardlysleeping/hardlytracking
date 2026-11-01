@@ -17,10 +17,14 @@ answers are copies, and only copies can be dropped.
   already local and is skipped.
 - **One kind of row is not a copy of anything remote:** a picture this app drew itself, kept under a
   `book:` key — an owned book's cover, drawn from its own page 1 at import (`src/lib/files/cover.ts`,
-  `imageCache.remember`). It is served by `resolve()` before the cache switch is consulted, because
-  turning off "remember covers downloaded from the network" must not blank the shelf of a book that
-  has no network at all. It counts against the ceiling like any other row, so a cleared cache leaves
-  the title fallback behind, never a broken image.
+  `imageCache.remember`). It is drawn **at a cover's width, not the reader's** (`open(0, { maxWidth })`,
+  so a scan whose page box is in pixels is not rendered 5 100 px wide to become a 400 px tile) and
+  **under a deadline** (`COVER_DEADLINE_MS`, 15 s): a cover that cannot be drawn, or that runs out of
+  time, leaves the title fallback behind and never costs the book itself. It is served by `resolve()`
+  before the cache switch is consulted, because turning off "remember covers downloaded from the
+  network" must not blank the shelf of a book that has no network at all. It counts against the
+  ceiling like any other row, so a cleared cache leaves the title fallback behind, never a broken
+  image.
 - **Where it is used:** `Cover.svelte` (every cover, including History and Updates) and the reader's
   page images via `use:cacheImage` (`src/lib/cache/action.ts`).
 - **Ceiling:** `settings.imageCacheLimitMb`, default 256 MB, choices 64 MB – 1 GB. `prune()` runs at

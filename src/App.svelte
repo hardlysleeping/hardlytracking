@@ -157,9 +157,14 @@ import { sourceMarks } from "./state/source-marks.svelte";
       <Library />
     {/if}
   </AppShell>
-  <!-- Above every view, outside the shell: a slow source is a property of the app, not of a screen. -->
-  <SlowNotice />
 {/if}
+
+<!--
+  Above every view, outside the shell and outside the welcome: a slow source is a property of the app,
+  not of a screen. The welcome screen picks comic files too, and that is the one place a first import
+  happens — a chip that only mounts after it cannot say the first file is still being read.
+-->
+<SlowNotice />
 
 <style>
   .boot {

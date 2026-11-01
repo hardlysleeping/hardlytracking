@@ -6,12 +6,12 @@
  * same through a wasm decoder; a PDF asks pdf.js to draw one page onto a canvas. None keeps a decoded
  * page alive after the caller drops it.
  */
-import { kindOf, mimeOf, pageEntries, type ComicBook } from "./comic";
+import { kindOf, mimeOf, pageEntries, type ComicBook, type PageRequest } from "./comic";
 import { openRar } from "./rar";
 import { openZip } from "./zip";
 
 export { kindOf, titleFromFile, extensionOf, naturalCompare, pageEntries } from "./comic";
-export type { ComicBook } from "./comic";
+export type { ComicBook, PageRequest } from "./comic";
 export { coverFromBook, coverKey, isCoverKey, keepCover, shrinkToCover } from "./cover";
 
 /** A RAR of images — every `.cbr` — read one entry at a time through the wasm decoder. */
@@ -78,10 +78,14 @@ async function openPdfBook(blob: Blob, name: string): Promise<ComicBook> {
   return {
     kind: "pdf",
     pageCount: pdf.numPages,
-    async open(index: number): Promise<Blob> {
+    async open(index: number, request: PageRequest = {}): Promise<Blob> {
       const page = await pdf.getPage(index + 1);
-      // A comic PDF is a scan, so drawing at twice the CSS size keeps it sharp without guessing DPI.
-      const viewport = page.getViewport({ scale: 2 });
+      // A comic PDF is a scan, so drawing at twice the CSS size keeps it sharp without guessing DPI
+      // — but that is the reader's need. A cover asks for a cover's width, and a scan exported with
+      // its page box in pixels would otherwise be drawn 5100 px wide to become a 400 px tile.
+      const natural = page.getViewport({ scale: 1 });
+      const scale = request.maxWidth === undefined ? 2 : Math.min(2, request.maxWidth / natural.width);
+      const viewport = page.getViewport({ scale });
       const canvas = document.createElement("canvas");
       canvas.width = Math.ceil(viewport.width);
       canvas.height = Math.ceil(viewport.height);
@@ -94,7 +98,9 @@ async function openPdfBook(blob: Blob, name: string): Promise<ComicBook> {
       return image;
     },
     close(): void {
-      void task.destroy();
+      // An import that gave up on the cover leaves this render running; `destroy()` ends the worker
+      // underneath it, and the abandoned promise must not surface as an unhandled rejection.
+      void task.destroy().catch(() => {});
     },
   };
 }

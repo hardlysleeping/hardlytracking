@@ -52,9 +52,9 @@ export async function shrinkToCover(page: Blob): Promise<Blob | null> {
   }
 }
 
-/** Page 1 of an open book, as a cover. */
+/** Page 1 of an open book, as a cover — drawn at a cover's size, not the reader's. */
 export async function coverFromBook(book: ComicBook): Promise<Blob | null> {
-  return await shrinkToCover(await book.open(0));
+  return await shrinkToCover(await book.open(0, { maxWidth: COVER_WIDTH * 2 }));
 }
 
 /**

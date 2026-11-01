@@ -14,13 +14,26 @@
 /** The image types a comic archive realistically holds. */
 const IMAGE_EXTENSIONS = [".jpg", ".jpeg", ".png", ".webp", ".gif", ".avif", ".bmp"];
 
+/**
+ * How big to draw a page, for a caller that does not need the reader's size.
+ *
+ * Left out by the reader, which wants the page as sharp as it can get. A cover asks for a cover's
+ * width instead: rendering a scan whose page box is in pixels (2550 × 3300 pt is a common export)
+ * at the reader's scale is a 34 MP canvas for a 400 px picture — seconds of work, hundreds of
+ * megabytes, and on a phone a tab that does not come back.
+ */
+export interface PageRequest {
+  /** The widest the drawn page need be, in pixels. */
+  maxWidth?: number;
+}
+
 export interface ComicBook {
   /** `cbz` for a zip of images, `cbr` for a RAR of them, `pdf` for a PDF. */
   kind: "cbz" | "cbr" | "pdf";
 
   pageCount: number;
   /** One page as an image blob, in reading order. */
-  open(index: number): Promise<Blob>;
+  open(index: number, request?: PageRequest): Promise<Blob>;
   /** Release anything the book is holding; safe to call twice. */
   close(): void;
 }
