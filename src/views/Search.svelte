@@ -617,6 +617,7 @@
           </header>
           {#if block.items.length > 0}
             <SeriesGrid
+              saved={saved}
               series={block.items}
               cover={116}
               empty=""

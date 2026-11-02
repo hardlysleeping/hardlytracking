@@ -54,6 +54,14 @@
     /** Where a resume would go, per series: a `▶` is drawn only when this has a chapter. */
     resume?: Map<string, string>;
     /**
+     * Titles already in the library.
+     *
+     * A search result and a shelf tile look identical otherwise, so the only way to tell "I have
+     * this" at a glance is a mark on the tile. Not a badge: badges are a preference the user turns
+     * on and off, and membership of your own library is not an opinion.
+     */
+    saved?: Set<string> | null;
+    /**
      * A card that opens *in the grid*, after the tile with this id.
      *
      * The tile stays where it is and the opened card takes the whole next row, so the rest of the
@@ -79,6 +87,7 @@
     onmove,
     badges = new Map(),
     resume = new Map(),
+    saved = null,
     expandAfter = null,
     expanded = null,
   }: Props = $props();
@@ -245,6 +254,9 @@
                 onclick={(event) => resumeAt(event, item)}
               >▶</button>
             {/if}
+            {#if saved?.has(item.id) === true}
+              <span class="saved" title="In your library" aria-label="In your library">✓</span>
+            {/if}
             {#if selection !== null}
               <span class="tick" aria-hidden="true">{selection.has(item.id) ? "✓" : ""}</span>
             {/if}
@@ -253,7 +265,9 @@
         <span class="meta">
           <span class="title">{item.title}</span>
           {#if view === "list"}
-            <span class="sub">{item.author ?? item.provider}</span>
+            <span class="sub">
+              {saved?.has(item.id) === true ? "✓ In your library" : (item.author ?? item.provider)}
+            </span>
           {:else if view === "compact"}
             <span class="sub">{badgeFor(item.id) > 0 ? `${badgeFor(item.id)} unread` : ""}</span>
           {:else}
@@ -418,6 +432,25 @@
     display: grid;
     place-items: center;
     backdrop-filter: blur(4px);
+  }
+
+  /* Membership of the library, drawn where the eye already goes for state: the corner of the
+     artwork, opposite the badges. Small enough to ignore when it is not what you are looking for. */
+  .saved {
+    position: absolute;
+    left: var(--s1);
+    bottom: var(--s1);
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    font-size: 11px;
+    line-height: 1;
+    background: color-mix(in srgb, var(--bg) 72%, transparent);
+    color: var(--text-1);
+    border: 1px solid color-mix(in srgb, var(--text-3) 45%, transparent);
+    pointer-events: none;
   }
 
   .tick {
