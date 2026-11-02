@@ -26,6 +26,20 @@ export function chapterLabel(name: string | undefined | null): string {
   return readableName(name, "Chapter");
 }
 
+/**
+ * What a chapter row is called.
+ *
+ * A real name beats a generated one: Mihon's own names are "Chapter 12", so those stay as they are,
+ * while an archive.org volume called "Berserk v01 (2003)" stops being "Chapter 1". The series page and
+ * the search card both draw chapter rows, and they must not disagree about the same chapter.
+ */
+export function chapterTitle(chapter: { name?: string | null; number?: number | null }): string {
+  const named = chapterLabel(chapter.name);
+  if (named !== "Chapter") return named;
+  const number = chapter.number ?? 0;
+  return number > 0 ? `Chapter ${number}` : named;
+}
+
 /** `Unknown title` — the placeholder for a series we cannot name yet. */
 export function seriesLabel(name: string | undefined | null): string {
   return readableName(name, "Unknown title");

@@ -21,6 +21,8 @@ import {
   pageUrl,
   parseChapterId,
   plainText,
+  naturalBookOrder,
+  bookUrl,
   rowToSeries,
   usefulDescription,
 } from "../../src/api/archive.ts";
@@ -260,3 +262,41 @@ test("a bundle names its chapters in words, and keeps their ids keyed on the fil
   assert.match(chapters[0].id, /Berserk%20v01%20\(2003\)\.cbz$/);
 });
 
+
+test("a collection's files are numbered in reading order, not in lexicographic order", () => {
+  const books = ["TITANS N°1.cbz", "TITANS N°10.cbz", "TITANS N°2.cbz", "TITANS N°100.cbz", "TITANS N°9.cbz"].map(
+    (name) => ({ name, format: "Comic Book ZIP", extension: "cbz", size: 1 }),
+  );
+  assert.deepEqual(
+    naturalBookOrder(books).map((book) => book.name),
+    ["TITANS N°1.cbz", "TITANS N°2.cbz", "TITANS N°9.cbz", "TITANS N°10.cbz", "TITANS N°100.cbz"],
+    "numbering chapters 1..n from a lexicographic listing makes issue 10 the second issue",
+  );
+  assert.equal(books[0].name, "TITANS N°1.cbz", "the input is not reordered in place");
+});
+
+test("a file name keeps the space archive.org stores it with, because the download URL needs it", () => {
+  const item = metadataToItem("titans-n-1", {
+    files: [{ name: " TITANS N°2 .cbz", format: "Comic Book ZIP", size: "29210861" }],
+  });
+  assert.equal(item.books[0].name, " TITANS N°2 .cbz", "trimming it turns /download/<id>/<name> into a 404");
+  const url = bookUrl("https://archive.org", "titans-n-1", item.books[0].name, false);
+  assert.equal(url, "https://archive.org/download/titans-n-1/%20TITANS%20N%C2%B02%20.cbz");
+  // What the reader shows is still the trimmed label.
+  assert.equal(chapterNameOf(item.books[0].name), "TITANS N°2");
+});
+
+test("one volume shipped with and without padding is still one volume", () => {
+  const item = metadataToItem("mixed", {
+    files: [
+      { name: " TITANS N°1 .cbz", format: "Comic Book ZIP", size: "1" },
+      { name: "TITANS N°1.pdf", format: "Text PDF", size: "2" },
+      { name: " TITANS N°2 .cbz", format: "Comic Book ZIP", size: "3" },
+    ],
+  });
+  assert.deepEqual(
+    item.books.map((book) => book.name.trim()),
+    ["TITANS N°1 .cbz", "TITANS N°2 .cbz"],
+    "the padded and unpadded copies of volume 1 are one volume, and the zip is the one kept",
+  );
+});

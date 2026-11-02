@@ -205,6 +205,36 @@ export interface BookFile {
 }
 
 /**
+ * Which volume a file is, ignoring how it was packed.
+ *
+ * "[space]TITANS N°1 .cbz" and "TITANS N°1.pdf" are one volume: padding, the space before the
+ * extension, the extension itself and the `_text` OCR derivative are not part of the identity. The
+ * raw name is only needed for the download URL. Without the final trim the padded copy keys as
+ * "titans n°1 " and the plain one as "titans n°1", and the same volume appears twice.
+ */
+export function volumeKey(name: string): string {
+  return name
+    .trim()
+    .replace(/\.[^.]+$/, "")
+    .replace(/_text$/i, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+/**
+ * The volume files in reading order.
+ *
+ * archive.org lists a collection's files lexicographically, which is not reading order: "TITANS
+ * N°1, N°10, N°100, N°101" is what a plain sort gives, and numbering chapters from that made issue 10
+ * the second issue on both the series page and the search card — the number was ours, so "sort by
+ * number" could not repair it. Natural order compares the digits as digits.
+ */
+export function naturalBookOrder(books: readonly BookFile[]): BookFile[] {
+  return [...books].sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+}
+
+/**
  * How long one volume may take to arrive before the reader gives up on it.
  *
  * A scanned volume is 10-60 MB. Thirty seconds — the deadline every runtime call uses — is a
@@ -291,8 +321,11 @@ export function metadataToItem(identifier: string, body: unknown): ItemMetadata 
   const books: BookFile[] = [];
   const seenBase = new Map<string, BookFile>();
   for (const file of files) {
-    const name = firstOf(file.name);
-    if (name === "" || !name.includes(".")) continue;
+    // The name is used *as a URL* as well as a label: archive.org stores `" TITANS N°1 .cbz"` with a
+    // leading space, and `/download/<id>/<name>` answers 404 without it. Trimming here silently
+    // broke every volume on such an item, so only the emptiness check trims.
+    const name = typeof file.name === "string" ? file.name : firstOf(file.name);
+    if (name.trim() === "" || !name.includes(".")) continue;
     const extension = (name.split(".").pop() ?? "").toLowerCase();
     const format = (firstOf(file.format) || extension).toLowerCase();
     const isBook = BOOK_EXTENSIONS.includes(extension) || BOOK_FORMATS.some((known) => format.startsWith(known));
@@ -305,7 +338,7 @@ export function metadataToItem(identifier: string, body: unknown): ItemMetadata 
     // that is cheapest to read: a zip (unpacked entry by entry, nothing decoded), then the plain
     // PDF (its scans are JPEG), and the `_text` derivative only when it is all there is — pdf.js
     // decodes JPEG 2000 in JavaScript, which is minutes per page rather than milliseconds.
-    const base = name.replace(/\.[^.]+$/, "").replace(/_text$/i, "").toLowerCase();
+    const base = volumeKey(name);
     const existing = seenBase.get(base);
     if (existing === undefined) {
       seenBase.set(base, book);
@@ -536,7 +569,7 @@ export function createArchiveProvider(options: ArchiveProviderOptions = {}): Sou
 
       if (meta.books.length > 0) {
         const taken = new Set<string>();
-        return meta.books.map((book, index) => {
+        return naturalBookOrder(meta.books).map((book, index) => {
           const name = chapterNameOf(book.name, taken);
           taken.add(name);
           return {

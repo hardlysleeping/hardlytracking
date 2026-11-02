@@ -24,7 +24,9 @@
   import { go, pathTo } from "../lib/nav";
   import { filterByLevel, levelOfSource } from "../lib/content/levels";
   import { languageLabel } from "../lib/language";
-  import { chapterLabel } from "../lib/titles";
+  import { chapterTitle } from "../lib/titles";
+  import { mergeReadMarks, stillWanted } from "../lib/issues";
+  import { orderChapters } from "../lib/chapter-order";
   import { hostOf, openExternal } from "../lib/external";
 
   interface Props {
@@ -343,9 +345,25 @@
   let issueSeries = "";
   /** Long descriptions are clamped until asked for: the issues are why the card is open. */
   let descOpen = $state(false);
+  /** Bumped by "Try again": a failed list is not cached, so asking again is the whole fix. */
+  let issueAttempt = $state(0);
+  /** A 221-issue collection is one card; drawing all 221 rows is not. */
+  const ISSUE_PREVIEW = 40;
+  let allIssues = $state(false);
+
+  /**
+   * The list as a reader looks at it: first issue first, not the host's order.
+   *
+   * An archive collection comes back lexicographic — N°1, N°10, N°100 — which reads as broken. The
+   * series page always sorts and this must agree with it; `orderChapters` keeps unnumbered rows last
+   * and ties stable.
+   */
+  const sortedIssues = $derived(orderChapters(issues, "oldest"));
+  const listIssues = $derived(allIssues ? sortedIssues : sortedIssues.slice(0, ISSUE_PREVIEW));
 
   $effect(() => {
     const id = record?.id ?? null;
+    void issueAttempt;
     if (id === null) {
       issues = [];
       issueState = "idle";
@@ -353,6 +371,7 @@
     }
     issueSeries = id;
     descOpen = false;
+    allIssues = false;
     const cached = issueCache.get(id);
     if (cached !== undefined) {
       issues = cached;
@@ -365,31 +384,22 @@
     void (async () => {
       try {
         const list = await library.chapters(id);
-        // A provider that keeps its own read marks says so per chapter; ours live in prefs. Merge,
-        // exactly as the series page does, so a chapter does not lose its tick on this screen.
-        const local = new Set(
-          ((await library.profile?.store.listPrefs()) ?? [])
-            .filter((row) => String(row.key).startsWith("read:") && row.value === true)
-            .map((row) => String(row.key).slice(5)),
-        );
-        const rows = list.map((chapter) => ({ ...chapter, read: chapter.read || local.has(chapter.id) }));
+        // A provider that keeps its own read marks says so per chapter; ours live in prefs. Both
+        // count, and neither clears the other — see `mergeReadMarks`.
+        const rows = mergeReadMarks(list, (await library.profile?.store.listPrefs()) ?? []);
         issueCache.set(id, rows);
-        if (mine !== issueToken) return;
+        if (!stillWanted(mine, issueToken)) return;
         issues = rows;
         issueState = "ready";
       } catch (error) {
-        if (mine !== issueToken) return;
+        if (!stillWanted(mine, issueToken)) return;
         issueError = error instanceof Error ? error.message : String(error);
         issueState = "error";
       }
     })();
   });
 
-  function label(chapter: Chapter): string {
-    const named = chapterLabel(chapter.name);
-    if (named !== "Chapter") return named;
-    return chapter.number > 0 ? `Chapter ${chapter.number}` : named;
-  }
+
 </script>
 
 {#snippet detailCard()}
@@ -418,12 +428,21 @@
           {#if issueState === "loading"}
             <p class="diempty muted">Asking {record.provider} for the issue list…</p>
           {:else if issueState === "error"}
-            <p class="diempty muted">The issue list did not arrive ({issueError}).</p>
+            <p class="diempty muted">
+              The issue list did not arrive ({issueError}).
+              <button
+                class="moredesc"
+                onclick={() => {
+                  if (record !== null) issueCache.delete(record.id);
+                  issueAttempt += 1;
+                }}>Try again</button
+              >
+            </p>
           {:else if issues.length === 0}
             <p class="diempty muted">This source lists no issues for this title.</p>
           {:else}
             <ul class="dilist">
-              {#each issues as chapter (chapter.id)}
+              {#each listIssues as chapter (chapter.id)}
                 <li>
                   <button
                     class="dirow"
@@ -433,7 +452,7 @@
                       go(pathTo("read", record!.id, chapter.id));
                     }}
                   >
-                    <span class="diname">{label(chapter)}</span>
+                    <span class="diname">{chapterTitle(chapter)}</span>
                     <span class="disub">
                       {[chapter.pageCount > 0 ? `${chapter.pageCount} pages` : "", chapter.read ? "read" : ""]
                         .filter(Boolean)
@@ -444,6 +463,11 @@
                 </li>
               {/each}
             </ul>
+            {#if sortedIssues.length > ISSUE_PREVIEW}
+              <button class="moredesc" onclick={() => (allIssues = !allIssues)}>
+                {allIssues ? "Show fewer" : `Show all ${sortedIssues.length}`}
+              </button>
+            {/if}
           {/if}
         </section>
         <div class="dact">

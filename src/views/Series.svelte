@@ -17,7 +17,7 @@
   import MigrateSheet from "../components/MigrateSheet.svelte";
   import { go, pathTo } from "../lib/nav";
   import { flipOrder, orderChapters, orderLabel, type ChapterOrder } from "../lib/chapter-order";
-  import { chapterLabel } from "../lib/titles";
+  import { chapterTitle } from "../lib/titles";
 
   interface Props {
     seriesId: string;
@@ -146,14 +146,6 @@
     menuOpen = false;
   }
 
-  function label(chapter: Chapter): string {
-    // A real name beats a generated one. Mihon's own names are "Chapter 12", so this keeps them as
-    // they are, while an archive.org volume called "Berserk v01 (2003)" stops being "Chapter 1".
-    const named = chapterLabel(chapter.name);
-    if (named !== "Chapter") return named;
-    return chapter.number > 0 ? `Chapter ${chapter.number}` : named;
-  }
-
   function when(chapter: Chapter): string {
     if (chapter.uploadedAt === undefined) return "";
     const days = Math.floor((Date.now() - chapter.uploadedAt) / 86_400_000);
@@ -190,7 +182,7 @@
         <div class="actions">
           {#if next}
             <button class="btn primary wide" onclick={() => go(pathTo("read", seriesId, next.id))}>
-              Continue · {label(next)}{position ? ` · p.${position.page + 1}` : ""}
+              Continue · {chapterTitle(next)}{position ? ` · p.${position.page + 1}` : ""}
             </button>
           {:else if chapters.length > 0}
             <button class="btn primary wide" onclick={() => go(pathTo("read", seriesId, chapters[chapters.length - 1].id))}>Start reading</button>
@@ -267,7 +259,7 @@
                 }}
               >
                 <span class="name">
-                  <span class="n">{label(chapter)}</span>
+                  <span class="n">{chapterTitle(chapter)}</span>
                   <span class="sub">
                     {[when(chapter), chapter.pageCount > 0 ? `${chapter.pageCount} pages` : "", downloads.isDownloaded(chapter.id) ? "downloaded" : ""]
                       .filter(Boolean)
@@ -278,7 +270,7 @@
                 <span class="rowacts">
                   <button
                     class="mini"
-                    aria-label={`Download ${label(chapter)}`}
+                    aria-label={`Download ${chapterTitle(chapter)}`}
                     title={downloads.isDownloaded(chapter.id) ? "Downloaded" : "Download"}
                     onclick={(event) => {
                       event.stopPropagation();
@@ -322,7 +314,7 @@
   onmigrated={() => void load(seriesId)}
 />
 
-<Sheet open={chapterMenu !== null} title={chapterMenu === null ? "Chapter" : label(chapterMenu)} onclose={() => (chapterMenu = null)}>
+<Sheet open={chapterMenu !== null} title={chapterMenu === null ? "Chapter" : chapterTitle(chapterMenu)} onclose={() => (chapterMenu = null)}>
   {#if chapterMenu}
     {@const chapter = chapterMenu}
     <div class="menu">
