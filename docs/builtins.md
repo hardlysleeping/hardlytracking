@@ -33,6 +33,22 @@ Three kinds, and each is allowed for a stated reason:
   service the app talks to on `127.0.0.1:8792`; it has no card, no switch and nothing to uninstall,
   because it ships no content either — it executes APKs the user installed.
 
+### Checking the hop without a Komga login
+
+`node tests/manual/stub-komga.mjs` answers the five routes the provider uses on `:25611` with the
+login `tester` / `secret`, a 1×1 PNG behind every cover and page, and a log at `GET /__log` that
+records the authorization header each request arrived with. Point the Komga card at that address and
+the whole path — library list, shelves, cover, chapter, page 2 on scroll, a `PATCH` back — can be
+read end to end without touching a real server or a real password.
+
+Two things it caught, both worth keeping in mind:
+
+- A cover that needs a header must never go into an `<img src>`. The browser asks anonymously, takes
+  a 401, and the tile falls back to the title for good even though the image cache has the picture.
+  `Cover.svelte` only ever shows such a cover once it resolves to a blob.
+- A page URL handed to `/api/img` must be absolute. That route takes a URL and rejects a path, so a
+  root-relative `/api/komga/…` arrives as `url=%2Fapi%2Fkomga…` and draws nothing.
+
 ## The `/api/komga` route
 
 The browser build cannot reach Komga: Komga sends no `Access-Control-Allow-Origin`, so a page served
