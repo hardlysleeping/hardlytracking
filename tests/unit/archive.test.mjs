@@ -12,6 +12,7 @@ import test from "node:test";
 import {
   ARCHIVE_MAX_PAGES,
   buildQuery,
+  chapterNameOf,
   createArchiveProvider,
   firstOf,
   memberUrl,
@@ -281,4 +282,34 @@ test("a foreign id is refused, and read state is never faked", async () => {
 test("the page ceiling holds for a huge volume", () => {
   const many = Array.from({ length: ARCHIVE_MAX_PAGES + 50 }, (_, i) => `<a href="/download/b/Big.cbz/p${i}.jpg">x</a>`).join("");
   assert.equal(membersFromListing(many, "b", "Big.cbz").length, ARCHIVE_MAX_PAGES + 50);
+});
+
+test("a chapter is named from the file, not quoted as one", () => {
+  // The archive's own separators become spaces, and the extension goes: a chapter list is the last
+  // place that should look like a file path.
+  assert.equal(chapterNameOf("Quality__Blackhawk_009.cbz"), "Quality Blackhawk 009");
+  assert.equal(chapterNameOf("Plastic_Man_v1_001__paper_Flatterman_text.pdf"), "Plastic Man v1 001 paper Flatterman text");
+  assert.equal(chapterNameOf("Berserk v01 (2003).cbr"), "Berserk v01 (2003)");
+  // A name that is only separators is the whole item, and says so.
+  assert.equal(chapterNameOf("__.cbz"), "Complete book");
+  // Two files of one volume (a zip of scans and its text-layer PDF) clean to the same words; the
+  // second gets its number rather than a duplicate row.
+  const taken = new Set();
+  const first = chapterNameOf("Volume_01.cbz", taken);
+  taken.add(first);
+  const second = chapterNameOf("Volume__01.pdf", taken);
+  assert.equal(first, "Volume 01");
+  assert.equal(second, "Volume 01 (2)");
+});
+
+test("a bundle names its chapters in words, and keeps their ids keyed on the file", async () => {
+  const { impl } = stubFetch([
+    ["/metadata/berserk-bundle", BUNDLE_BODY],
+    ["/download/berserk-bundle/", LISTING_HTML],
+  ]);
+  const provider = createArchiveProvider({ fetchImpl: impl });
+  const chapters = await provider.chapters("archive:berserk-bundle");
+  assert.equal(chapters[0].name, "Berserk v01 (2003)");
+  // The id still carries the file's own name: renaming a row must not change what it opens.
+  assert.match(chapters[0].id, /Berserk%20v01%20\(2003\)\.cbz$/);
 });

@@ -194,6 +194,34 @@ export interface BookFile {
 }
 
 /**
+ * A chapter's name, from the file archive.org stores it in.
+ *
+ * `Quality__Blackhawk_009.cbz` is how the archive names a scan, and a chapter list is the one place
+ * that name is the wrong thing to show: it reads as a leaked file path sitting under a clean title.
+ * The separators are the archive's own convention, so they become spaces and the extension goes;
+ * nothing else is invented, because the rest of the name is the only thing telling two volumes of
+ * the same run apart.
+ *
+ * An item that ships the same volume twice — a zip of scans and a text-layer PDF, which is common —
+ * keeps both rows (`books` dedupes by base name, and those bases differ) and so two chapters can
+ * clean to the same words. The second one gets its number, so a list never shows two identical rows.
+ */
+export function chapterNameOf(fileName: string, taken: ReadonlySet<string> = new Set()): string {
+  const cleaned = fileName
+    .replace(/\.[^.]+$/, "")
+    .replace(/[_]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (cleaned === "") return "Complete book";
+  if (!taken.has(cleaned)) return cleaned;
+  for (let suffix = 2; suffix < 100; suffix += 1) {
+    const candidate = `${cleaned} (${suffix})`;
+    if (!taken.has(candidate)) return candidate;
+  }
+  return cleaned;
+}
+
+/**
  * What counts as a book file.
  *
  * The extension is the reliable half: archive.org's `format` labels are human strings ("Comic Book
@@ -467,20 +495,22 @@ export function createArchiveProvider(options: ArchiveProviderOptions = {}): Sou
       const meta = await item(identifier);
 
       if (meta.books.length > 0) {
-        return meta.books.map(
-          (book, index) =>
-            ({
-              id: chapterId(identifier, book.name),
-              seriesId,
-              name: book.name.replace(/\.[^.]+$/, ""),
-              number: index + 1,
-              // The zip's directory page is the real count and costs one request per chapter:
-              // asking for forty-one of them on a series screen is a stampede. `pages()` fetches
-              // the one chapter actually opened, and the row stays quiet until then.
-              pageCount: 0,
-              read: false,
-            }) satisfies Chapter,
-        );
+        const taken = new Set<string>();
+        return meta.books.map((book, index) => {
+          const name = chapterNameOf(book.name, taken);
+          taken.add(name);
+          return {
+            id: chapterId(identifier, book.name),
+            seriesId,
+            name,
+            number: index + 1,
+            // The zip's directory page is the real count and costs one request per chapter:
+            // asking for forty-one of them on a series screen is a stampede. `pages()` fetches
+            // the one chapter actually opened, and the row stays quiet until then.
+            pageCount: 0,
+            read: false,
+          } satisfies Chapter;
+        });
       }
 
       const leaves = meta.leafCount ?? (await pageIndexCount(fetchImpl, base, identifier, [])) ?? null;
