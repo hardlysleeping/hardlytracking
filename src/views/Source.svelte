@@ -6,13 +6,17 @@
    * desktop split — it asks the provider for pages and draws a grid, and knows nothing about
    * where it sits.
    */
+  import { untrack } from "svelte";
   import { library } from "../state/library.svelte";
   import { providerFor } from "../api/registry";
   import { needsLogin } from "../api/mihon-bridge";
-  import type { Series } from "../api/source";
+  import type { Series, SourceFilter, SourceFilterSelection } from "../api/source";
   import SeriesGrid from "../components/SeriesGrid.svelte";
   import SeriesActions from "../components/SeriesActions.svelte";
   import SourceSettings from "../components/SourceSettings.svelte";
+  import SourceFilterSheet from "../components/SourceFilterSheet.svelte";
+  import { settings } from "../state/settings.svelte";
+  import { activeCount, cleanSelection } from "../lib/source-filters";
   import { go, pathTo } from "../lib/nav";
 
   interface Props {
@@ -49,15 +53,59 @@
   const configurable = $derived(source?.id.startsWith("dalvik:") === true);
   let settingsOpen = $state(false);
 
+  /**
+   * The source's own filter form, asked once per source.
+   *
+   * An empty list is the answer for most sources, and it is also where a provider that cannot ask
+   * lands: the Filters button is drawn only for a form that exists, so a source with nothing to
+   * filter never shows a button that opens an empty sheet.
+   */
+  let filters = $state<SourceFilter[]>([]);
+  let filterSheetOpen = $state(false);
+  /** Which source the in-flight filter request is for, so a late answer cannot land on the wrong one. */
+  let askedFor = "";
+
+  /** What this source's search carries: the stored choices, minus anything that is not a change. */
+  const filterSelection = $derived<SourceFilterSelection>(
+    cleanSelection(filters, settings.sourceFilters[sourceId] ?? {}),
+  );
+
+  async function loadFilters(): Promise<void> {
+    filters = [];
+    const wanted = sourceId;
+    askedFor = wanted;
+    if (library.profile === null) return;
+    const provider = providerFor(library.profile.providers, wanted);
+    if (provider.filters === undefined) return;
+    try {
+      const answer = await provider.filters(wanted);
+      if (askedFor !== wanted) return;
+      filters = answer;
+    } catch {
+      // A source that cannot answer its own form has no filters, not an error banner: the listing
+      // above it still works, and the reader did not ask this source a question.
+      filters = [];
+    }
+  }
+
   $effect(() => {
     // A new source resets the grid: keeping the old rows while the next fetch runs is how a
     // screen ends up showing one source's results under another source's name.
+    //
+    // Everything below is `untrack`ed on purpose: `run()` reads `mode` and `query` before its first
+    // await, and a plain call here would make those reads dependencies of *this* effect — so tapping
+    // Latest set the mode, this effect re-ran, and set it back to Popular. The tabs stopped working
+    // and the only thing that moved was nothing. The effect depends on `sourceId` and nothing else.
     void sourceId;
-    items = [];
-    page = 1;
-    mode = "popular";
-    query = "";
-    void run(1);
+    untrack(() => {
+      items = [];
+      page = 1;
+      mode = "popular";
+      query = "";
+      filterSheetOpen = false;
+      void loadFilters();
+      void run(1);
+    });
   });
 
   async function run(next = 1): Promise<void> {
@@ -73,7 +121,9 @@
           ? await provider.popular(sourceId, next)
           : mode === "latest"
             ? await provider.latest(sourceId, next)
-            : await provider.search(sourceId, query.trim(), next);
+            : // The source's own form travels with the search, and only with the search: a Mihon
+              // extension applies filters in `getSearchManga` and ignores them for popular/latest.
+              await provider.search(sourceId, query.trim(), next, Object.keys(filterSelection).length > 0 ? filterSelection : undefined);
       items = next === 1 ? result.items : [...items, ...result.items];
       hasNext = result.hasNext;
       page = next;
@@ -85,6 +135,20 @@
     } finally {
       busy = false;
     }
+  }
+
+  /**
+   * Write the sheet's choices for this source and re-run what is on screen.
+   *
+   * Stored as one entry of `settings.sourceFilters`, and an empty selection removes the entry rather
+   * than keeping a key that says nothing — the pref only names sources that actually filter.
+   */
+  function applyFilters(selection: SourceFilterSelection): void {
+    const all = { ...settings.sourceFilters };
+    if (Object.keys(selection).length === 0) delete all[sourceId];
+    else all[sourceId] = selection;
+    settings.set("sourceFilters", all);
+    if (mode === "search") void run(1);
   }
 
   /**
@@ -171,8 +235,22 @@
   <div class="modes" role="tablist" aria-label="Listing">
     <button class="chip" class:on={mode === "popular"} role="tab" aria-selected={mode === "popular"} onclick={() => setMode("popular")}>Popular</button>
     <button class="chip" class:on={mode === "latest"} role="tab" aria-selected={mode === "latest"} onclick={() => setMode("latest")}>Latest</button>
+    {#if filters.length > 0}
+      <button
+        class="chip filters"
+        class:on={activeCount(filterSelection) > 0}
+        title={activeCount(filterSelection) > 0
+          ? "This source's search carries your filter choices"
+          : "Pick what this source should narrow its searches to"}
+        onclick={() => (filterSheetOpen = true)}
+      >
+        Filters{activeCount(filterSelection) > 0 ? ` (${activeCount(filterSelection)})` : ""}
+      </button>
+    {/if}
     {#if mode === "search"}
       <span class="hint">searching “{query}”</span>
+    {:else if activeCount(filterSelection) > 0}
+      <span class="hint">filters apply to search</span>
     {/if}
   </div>
 
@@ -211,6 +289,17 @@
 
 {#if configurable}
   <SourceSettings open={settingsOpen} {sourceId} onclose={() => (settingsOpen = false)} />
+{/if}
+
+{#if filters.length > 0}
+  <SourceFilterSheet
+    open={filterSheetOpen}
+    sourceName={source?.name ?? "this source"}
+    {filters}
+    selection={filterSelection}
+    onclose={() => (filterSheetOpen = false)}
+    onapply={applyFilters}
+  />
 {/if}
 
 <style>

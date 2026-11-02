@@ -116,6 +116,44 @@ export interface Page {
   open?: () => Promise<Blob>;
 }
 
+/**
+ * One entry of a source's own filter list, in the order the source declares it.
+ *
+ * This is not our library filter (`lib/library/filter.ts`): that one narrows rows we already hold
+ * and is ours to define. This is the extension's own form — the albums, the languages, the sort —
+ * and only the source can say what it holds. Positions are the contract: the runtime reads
+ * `position`, so an entry this client cannot draw is kept in the list as `unknown` rather than
+ * dropped, or every later filter would be sent under the wrong index.
+ */
+export type TriState = "IGNORE" | "INCLUDE" | "EXCLUDE";
+
+export type SourceFilter =
+  | { kind: "header"; name: string }
+  | { kind: "separator"; name: string }
+  | { kind: "select"; name: string; values: string[]; default: number }
+  | { kind: "checkbox"; name: string; default: boolean }
+  | { kind: "text"; name: string; default: string }
+  | { kind: "sort"; name: string; values: string[]; default: { index: number; ascending: boolean } }
+  | { kind: "tristate"; name: string; default: TriState }
+  | { kind: "unknown"; name: string };
+
+/**
+ * What the user chose for one filter, in the wire shape the runtime reads.
+ *
+ * One variant per filter kind, so a selector cannot carry a `textState` to a checkbox. The map is
+ * keyed by position (as a string, because prefs are JSON), and an absent position means "leave the
+ * source's own default alone" — which is not the same as sending the default explicitly.
+ */
+export type FilterState =
+  | { selectState: number }
+  | { checkBoxState: boolean }
+  | { textState: string }
+  | { triState: TriState }
+  | { sortState: { index: number; ascending: boolean } };
+
+/** A source's filter choices: position -> state. Persisted as one pref per source. */
+export type SourceFilterSelection = Record<string, FilterState>;
+
 export interface Paged<T> {
   items: T[];
   hasNext: boolean;
@@ -135,7 +173,22 @@ export interface SourceProvider {
   sources(): Promise<Source[]>;
   popular(sourceId: string, page: number): Promise<Paged<Series>>;
   latest(sourceId: string, page: number): Promise<Paged<Series>>;
-  search(sourceId: string, query: string, page: number): Promise<Paged<Series>>;
+  /**
+   * A title search, carrying the source's own filter choices when the user made any.
+   *
+   * Only search: a Mihon extension applies its filters in `getSearchManga` and ignores them in
+   * popular/latest, and a provider that pretended otherwise would return an unfiltered list under a
+   * filtered heading. `filters` is keyed by the source's own filter position and is absent when the
+   * user changed nothing.
+   */
+  search(sourceId: string, query: string, page: number, filters?: SourceFilterSelection): Promise<Paged<Series>>;
+  /**
+   * What this source can filter on, in its own order, or absent when the provider cannot ask.
+   *
+   * Absent is a real answer: a folder, archive.org and a host that does not answer `filtersManga`
+   * have no form, and the UI draws no Filters button rather than an empty sheet.
+   */
+  filters?(sourceId: string): Promise<SourceFilter[]>;
   details(seriesId: string): Promise<Series>;
   chapters(seriesId: string): Promise<Chapter[]>;
   pages(chapterId: string): Promise<Page[]>;

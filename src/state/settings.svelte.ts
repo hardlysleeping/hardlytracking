@@ -11,6 +11,7 @@ import { EMPTY_FILTER, type LibraryFilter } from "../lib/library/filter";
 import { sortSpecOfLegacy, type SortSpec } from "../lib/library/sort";
 import { DEFAULT_BADGES } from "../lib/library/badges";
 import type { Margins, PanePreference } from "../lib/view-options";
+import type { SourceFilterSelection } from "../api/source";
 import { DEFAULT_CPU_LEVEL, type CpuLevel } from "../lib/performance";
 import { levelOr, type ContentLevel } from "../lib/content/levels";
 
@@ -87,6 +88,13 @@ export interface Prefs {
   historyRetentionDays: number;
   /** Source ids the user pinned, for "search pinned sources only" (Komikku's behaviour). */
   pinnedSources: string[];
+  /**
+   * Each source's own filter choices, keyed by source id then by the filter's position.
+   *
+   * One field, not one pref per source: the map travels in an export and a source that disappears
+   * with its extension leaves an entry that is simply never read.
+   */
+  sourceFilters: Record<string, SourceFilterSelection>;
   /** Global search defaults to the pinned sources when there are any. */
   searchPinnedOnly: boolean;
   /** How hard the app may work: pages fetched at once and pacing between them. */
@@ -156,6 +164,7 @@ class Settings {
   historyPaused = $state(false);
   historyRetentionDays = $state(0);
   pinnedSources = $state<string[]>([]);
+  sourceFilters = $state<Record<string, SourceFilterSelection>>({});
   searchPinnedOnly = $state(true);
   cpuLevel = $state<CpuLevel>(DEFAULT_CPU_LEVEL);
   contentLevel = $state<ContentLevel>("mature");
@@ -214,6 +223,7 @@ class Settings {
     this.historyPaused = await read("historyPaused", this.historyPaused);
     this.historyRetentionDays = await read("historyRetentionDays", this.historyRetentionDays);
     this.pinnedSources = await read("pinnedSources", this.pinnedSources);
+    this.sourceFilters = await read("sourceFilters", this.sourceFilters);
     this.searchPinnedOnly = await read("searchPinnedOnly", this.searchPinnedOnly);
     this.cpuLevel = await read("cpuLevel", this.cpuLevel);
     this.contentLevel = levelOr(await read<unknown>("contentLevel", this.contentLevel));

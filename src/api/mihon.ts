@@ -19,7 +19,8 @@
  *    not URLs. They must be joined to the runtime base, or every page 404s.
  * 2. `thumbnailUrl` is relative in exactly the same way.
  */
-import { joinId, nativeId, paged, type Chapter, type Page, type Paged, type Series, type Source, type SourceProvider } from "./source";
+import { joinId, nativeId, paged, type Chapter, type Page, type Paged, type Series, type Source, type SourceFilter, type SourceFilterSelection, type SourceProvider } from "./source";
+import { mapFilters, wireChanges, type RawFilter } from "../lib/source-filters";
 import { transport as defaultTransport, type Transport } from "./transport";
 import { RUNTIME_DEADLINE_MS, withDeadline } from "../lib/deadline";
 
@@ -134,8 +135,8 @@ export function mapPages(paths: string[], asset: (p: string) => string): Page[] 
 
 const Q_SOURCES = `query Sources { sources { nodes { id displayName name lang isNsfw supportsLatest } } }`;
 
-const M_FETCH_SOURCE = `mutation FetchSource($source: LongString!, $page: Int!, $type: FetchSourceMangaType!, $query: String) {
-  fetchSourceManga(input: { source: $source, page: $page, type: $type, query: $query }) {
+const M_FETCH_SOURCE = `mutation FetchSource($source: LongString!, $page: Int!, $type: FetchSourceMangaType!, $query: String, $filters: [FilterChangeInput!]) {
+  fetchSourceManga(input: { source: $source, page: $page, type: $type, query: $query, filters: $filters }) {
     mangas { id title thumbnailUrl author description status }
     hasNextPage
   }
@@ -143,6 +144,32 @@ const M_FETCH_SOURCE = `mutation FetchSource($source: LongString!, $page: Int!, 
 
 const Q_MANGA = `query Manga($id: Int!) {
   manga(id: $id) { id title thumbnailUrl author description status }
+}`;
+
+/**
+ * One source's filter form.
+ *
+ * `source(id:)` takes a `LongString!` — the id is a 19-digit Long and `Int!` is refused, exactly as
+ * `fetchSourceManga`'s `source` is.
+ *
+ * `default` gets **one alias per filter class**, not one shared alias: GraphQL refuses a response key
+ * that resolves to two types (`SelectFilter.default` is an index, `CheckBoxFilter.default` a boolean,
+ * the tri-state's an enum) with *FieldsConflict*, and the runtime hides that behind the whole query
+ * failing. Distinct aliases are the only shape that validates.
+ */
+const Q_FILTERS = `query SourceFilters($id: LongString!) {
+  source(id: $id) {
+    filters {
+      __typename
+      ... on HeaderFilter { name }
+      ... on SeparatorFilter { name }
+      ... on SelectFilter { name values selectDefault: default }
+      ... on CheckBoxFilter { name checkDefault: default }
+      ... on TextFilter { name textDefault: default }
+      ... on TriStateFilter { name triDefault: default }
+      ... on SortFilter { name values sortDefault: default { index ascending } }
+    }
+  }
 }`;
 
 const Q_CHAPTERS = `query Chapters($mangaId: Int!, $limit: Int!) {
@@ -183,13 +210,23 @@ export function createMihonProvider(t: MihonTransport): SourceProvider {
     }
   };
 
-  const browse = async (sourceId: string, type: FetchType, page: number, query?: string): Promise<Paged<Series>> => {
+  const browse = async (
+    sourceId: string,
+    type: FetchType,
+    page: number,
+    query?: string,
+    filters?: SourceFilterSelection,
+  ): Promise<Paged<Series>> => {
     const native = nativeId(sourceId, "mihon").replace(/^src:/, "");
+    // A form the user left alone is sent as null — the source's own defaults. An empty list would be
+    // a claim about a form this call never read.
+    const changes = wireChanges(filters);
     const data = await t.gql<{ fetchSourceManga: { mangas: RawManga[]; hasNextPage: boolean } }>(M_FETCH_SOURCE, {
       source: native,
       page,
       type,
       query: query ?? null,
+      filters: changes.length === 0 ? null : changes,
     });
     return paged(data.fetchSourceManga.mangas.map((m) => mapSeries(m, t.asset)), data.fetchSourceManga.hasNextPage);
   };
@@ -206,7 +243,20 @@ export function createMihonProvider(t: MihonTransport): SourceProvider {
 
     popular: (sourceId, page) => browse(sourceId, "POPULAR", page),
     latest: (sourceId, page) => browse(sourceId, "LATEST", page),
-    search: (sourceId, query, page) => browse(sourceId, "SEARCH", page, query),
+    search: (sourceId, query, page, filters) => browse(sourceId, "SEARCH", page, query, filters),
+
+    /**
+     * The source's own form.
+     *
+     * `source(id:)` answers whatever the extension declared, in its own order, so the array's
+     * indexes *are* the `position` a change is sent under. A source with no filters answers an empty
+     * list — the same answer as "nothing to show", and the UI draws no button for it.
+     */
+    async filters(sourceId): Promise<SourceFilter[]> {
+      const native = nativeId(sourceId, "mihon").replace(/^src:/, "");
+      const data = await t.gql<{ source: { filters: RawFilter[] } | null }>(Q_FILTERS, { id: native });
+      return mapFilters(data.source?.filters);
+    },
 
     async details(seriesId) {
       const data = await t.gql<{ manga: RawManga | null }>(Q_MANGA, { id: Number(nativeId(seriesId, "mihon")) });

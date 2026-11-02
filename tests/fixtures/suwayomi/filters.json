@@ -1,0 +1,73 @@
+{
+  "_note": "Shapes captured from the live Suwayomi v2.4.2366 on 2026-11-02 with `source(id:) { filters { \u2026 } }`. Values are generic: the real packages' lists are long and site-specific, and a fixture only needs the shape.",
+  "sources": {
+    "album": [
+      {
+        "__typename": "HeaderFilter",
+        "name": "Text search only combines with sort!"
+      },
+      {
+        "__typename": "SeparatorFilter",
+        "name": ""
+      },
+      {
+        "__typename": "SelectFilter",
+        "name": "Album",
+        "values": [
+          "All Authors",
+          "Various Authors",
+          "One Studio",
+          "Another Studio"
+        ],
+        "selectDefault": 0
+      },
+      {
+        "__typename": "SelectFilter",
+        "name": "Sort Order",
+        "values": [
+          "Views",
+          "Likes",
+          "Date",
+          "A-Z"
+        ],
+        "selectDefault": 0
+      }
+    ],
+    "local": [
+      {
+        "__typename": "SortFilter",
+        "name": "Order by",
+        "values": [
+          "Title",
+          "Date"
+        ],
+        "sortDefault": {
+          "index": 0,
+          "ascending": true
+        }
+      }
+    ]
+  },
+  "_synthetic": [
+    {
+      "__typename": "CheckBoxFilter",
+      "name": "Has available chapters",
+      "checkDefault": true
+    },
+    {
+      "__typename": "TextFilter",
+      "name": "Author",
+      "textDefault": "miura"
+    },
+    {
+      "__typename": "TriStateFilter",
+      "name": "Tags",
+      "triDefault": "EXCLUDE"
+    },
+    {
+      "__typename": "GroupFilter",
+      "name": "Advanced",
+      "filters": []
+    }
+  ]
+}
