@@ -16,6 +16,7 @@
   import { sourceKeyOf, sourceKeyOfMapping } from "../lib/marks";
   import { mappingFromId, type MigrationTarget } from "../lib/migrate";
   import { seriesLabel } from "../lib/titles";
+  import { languageLabel } from "../lib/language";
   import Cover from "./Cover.svelte";
   import Sheet from "./Sheet.svelte";
 
@@ -186,7 +187,7 @@
         {#each offered.slice(0, SOURCE_LIMIT) as source (source.id)}
           <button class="row" onclick={() => chooseSource(source)}>
             <span class="name">{source.name}</span>
-            <span class="meta">{providerLabel(source.provider)}{source.lang === undefined ? "" : ` · ${source.lang}`}</span>
+            <span class="meta">{providerLabel(source.provider)}{languageLabel(source.lang) === null ? "" : ` · ${languageLabel(source.lang)}`}</span>
           </button>
         {/each}
       </div>

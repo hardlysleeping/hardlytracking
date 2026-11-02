@@ -22,6 +22,7 @@
   import { pinnedSources, togglePin } from "../lib/pinned";
   import { go, pathTo } from "../lib/nav";
   import { filterByLevel, levelOfSource } from "../lib/content/levels";
+  import { languageLabel } from "../lib/language";
 
   interface Props {
     initial?: string | null;
@@ -314,7 +315,7 @@
       {#each sources as source (source.id)}
         <span class="pick" class:on={chosen.has(source.id)}>
           <button class="chip" class:on={chosen.has(source.id)} aria-pressed={chosen.has(source.id)} onclick={() => toggle(source.id)}>
-            {source.name}{#if source.lang}<span class="lang">{source.lang}</span>{/if}
+            {source.name}{#if languageLabel(source.lang)}<span class="lang">{languageLabel(source.lang)}</span>{/if}
           </button>
           <button
             class="pinbtn"
@@ -355,7 +356,7 @@
       {#each blocks as block (block.source.id)}
         <section class="block">
           <header>
-            <h2>{block.source.name}{#if block.source.lang}<span class="lang">{block.source.lang}</span>{/if}</h2>
+            <h2>{block.source.name}{#if languageLabel(block.source.lang)}<span class="lang">{languageLabel(block.source.lang)}</span>{/if}</h2>
             {#if block.state === "loading"}<span class="state">searching…</span>
             {:else if block.state === "error"}<span class="state bad">{block.error}</span>
             {:else}<span class="state">{block.items.length}</span>{/if}

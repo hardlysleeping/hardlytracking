@@ -15,6 +15,7 @@
   import { visibleSources } from "../lib/marks";
   import { providerLabel } from "../api/source";
   import { filterByLevel, hiddenNotice, levelOfSource } from "../lib/content/levels";
+  import { languageLabel } from "../lib/language";
 
   let { current = null }: { current?: string | null } = $props();
 
@@ -114,7 +115,7 @@
             <div class="rowwrap" class:current={current === source.id}>
               <button class="row" onclick={() => go(pathTo("source", source.id))}>
                 <span class="name">{source.name}</span>
-                {#if source.lang}<span class="lang">{source.lang}</span>{/if}
+                {#if languageLabel(source.lang)}<span class="lang">{languageLabel(source.lang)}</span>{/if}
                 {#if source.nsfw}<span class="nsfw">18+</span>{/if}
               </button>
               <button
