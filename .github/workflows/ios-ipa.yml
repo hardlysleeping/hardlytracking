@@ -177,6 +177,28 @@ jobs:
             exit 1
           fi
 
+      - name: Every binary in the app is arm64 and nothing else
+        run: |
+          set -euo pipefail
+          APP="$RUNNER_TEMP/App.xcarchive/Products/Applications/App.app"
+          # `file` is the honest reader here — `lipo` skips anything that is not a universal binary,
+          # which is exactly the shape a leftover slice hides in. A universal binary would pass a
+          # bare "is arm64 present" test, so a slice of any other arch is refused by name.
+          BINARIES=$(find "$APP" -type f -print0 | xargs -0 file | grep -i "mach-o" || true)
+          if [ -z "$BINARIES" ]; then
+            echo "::error::no Mach-O binaries found in $APP — the scan looked at the wrong path"
+            exit 1
+          fi
+          BAD=$(printf '%s\n' "$BINARIES" | grep -Ei "x86_64|i386|armv7|universal" || true)
+          if [ -n "$BAD" ]; then
+            echo "::error::a binary in the app carries a slice that is not arm64"
+            echo "$BAD"
+            exit 1
+          fi
+          COUNT=$(printf '%s\n' "$BINARIES" | wc -l | tr -d ' ')
+          echo "Mach-O binaries checked: $COUNT"
+          test "$COUNT" -ge 6
+
       - name: Pack the IPA
         run: |
           set -euo pipefail
