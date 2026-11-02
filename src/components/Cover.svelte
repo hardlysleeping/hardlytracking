@@ -24,11 +24,19 @@
    * draw its own broken-image icon. Until the blob URL arrives the tile shows the title, which is
    * what it showed before covers existed.
    */
-  /** A cover a browser can load as it stands: a URL. Never a cache key. */
-  function loadable(cover: string | undefined): string | undefined {
-    return cover === undefined || isCoverKey(cover) ? undefined : cover;
+  /**
+   * A cover a browser can load as it stands: a URL it can fetch *without a header*.
+   *
+   * A cache key is not a URL, and neither is a cover that needs the login (`coverHeaders`): handing
+   * Komga's thumbnail to an `<img>` asks for it anonymously, gets a 401, and the tile falls back to
+   * the title for good — while the image cache, which does send the header, has the picture. So a
+   * cover with headers only ever arrives as the resolved blob.
+   */
+  function loadable(cover: string | undefined, needsLogin: boolean): string | undefined {
+    return cover === undefined || needsLogin || isCoverKey(cover) ? undefined : cover;
   }
-  let src = $state<string | undefined>(loadable(series.cover));
+  // Set by the effect below, never captured at construction: `series` is a prop and may change.
+  let src = $state<string | undefined>(undefined);
   let tile = $state<HTMLElement | null>(null);
 
   $effect(() => {
@@ -38,7 +46,11 @@
       return;
     }
     let live = true;
-    src = isCoverKey(url) ? undefined : url;
+    const needsLogin = series.coverHeaders !== undefined;
+    src = loadable(url, needsLogin);
+    // A cover that failed anonymously can still be fetched with the login, so a changed series must
+    // not stay broken from the previous attempt.
+    broken = false;
     const headers = series.coverHeaders;
     // Only a tile that is (nearly) on screen is worth fetching: a 5 000-title library was resolving
     // every cover the moment the shelf opened, which is thousands of images for the forty visible.

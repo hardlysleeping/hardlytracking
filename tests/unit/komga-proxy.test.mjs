@@ -45,10 +45,16 @@ test("the client's proxy path and the server's parser agree", () => {
 
 test("in the page every Komga URL is proxied; in a packaged build it is not", () => {
   assert.equal(
-    komgaUrl("http://127.0.0.1:25600", "/api/v1/series", true),
-    `/api/komga/${b64("http://127.0.0.1:25600")}/api/v1/series`,
+    komgaUrl("http://127.0.0.1:25600", "/api/v1/series", true, "http://127.0.0.1:8460"),
+    `http://127.0.0.1:8460/api/komga/${b64("http://127.0.0.1:25600")}/api/v1/series`,
+    "absolute — the reader hands page URLs to /api/img, which refuses a bare path",
   );
   assert.equal(komgaUrl("http://127.0.0.1:25600/", "/api/v1/series", false), "http://127.0.0.1:25600/api/v1/series");
+  assert.equal(
+    komgaUrl("http://127.0.0.1:25600", "/api/v1/series", true),
+    `/api/komga/${b64("http://127.0.0.1:25600")}/api/v1/series`,
+    "with no origin available (node, a test) it stays a path",
+  );
   assert.equal(komgaUrl("http://h:1", "api/v1/x", false), "http://h:1/api/v1/x", "a missing slash is added");
 });
 

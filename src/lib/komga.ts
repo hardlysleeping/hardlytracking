@@ -53,11 +53,18 @@ function write(key: string, value: string): void {
  * the address is in the path rather than a header because covers and pages are fetched as plain
  * URLs.
  */
-export function komgaUrl(baseUrl: string, path: string, proxied: boolean = hasLocalServer()): string {
+export function komgaUrl(
+  baseUrl: string,
+  path: string,
+  proxied: boolean = hasLocalServer(),
+  origin: string = typeof location === "undefined" ? "" : location.origin,
+): string {
   const base = baseUrl.trim().replace(/\/+$/, "");
   const tail = path.startsWith("/") ? path : `/${path}`;
   if (!proxied) return `${base}${tail}`;
-  return `/api/komga/${encodeBase64Url(base)}${tail}`;
+  // Absolute, not root-relative: the reader hands a page URL to `/api/img`, which takes a URL and
+  // refuses a path — a relative one arrives as `url=%2Fapi%2Fkomga…` and draws nothing.
+  return `${origin}/api/komga/${encodeBase64Url(base)}${tail}`;
 }
 
 /** `btoa` with the URL-safe alphabet and no padding, in both the page and Node. */
