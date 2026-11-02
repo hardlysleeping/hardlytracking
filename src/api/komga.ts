@@ -167,6 +167,9 @@ export function mapKomgaSeries(raw: KomgaRawSeries, baseUrl: string, headers: Re
     // itself and hands the UI a blob. See the header comment.
     cover: `${baseUrl}/api/v1/series/${raw.id}/thumbnail`,
     coverHeaders: headers,
+    // Komga's own web UI answers at /series/{id}: the same title opened where it is managed, not a
+    // second front end for it.
+    url: `${baseUrl}/series/${raw.id}`,
     ...(unique.length === 0 ? {} : { author: unique.slice(0, 3).join(", ") }),
     ...(raw.metadata?.summary ? { description: raw.metadata.summary } : {}),
     ...(raw.metadata?.status ? { status: raw.metadata.status } : {}),

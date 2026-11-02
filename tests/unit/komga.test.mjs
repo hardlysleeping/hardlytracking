@@ -89,6 +89,7 @@ test("a series carries its cover url and the header that cover needs", () => {
   assert.deepEqual(series.coverHeaders, AUTH, "an <img> cannot send the login, so the app must");
   assert.equal(series.author, "Brian K. Vaughan, Fiona Staples");
   assert.equal(series.description, "Space opera.");
+  assert.equal(series.url, `${BASE}/series/s-1`, "the series page in Komga's own UI");
   assert.equal(series.status, "ONGOING");
 });
 

@@ -59,6 +59,15 @@ export interface Series {
   status?: string;
   /** Ids of the local categories this row is filed under. Empty/absent = uncategorised. */
   categoryIds?: string[];
+  /**
+   * The source's own page for this title, when it has a web page at all.
+   *
+   * Absent for the sources that are only an API or a folder: a Mihon extension answers with an id and
+   * nothing else, and a file on this device has no page to open. Present for archive.org and Komga,
+   * where "open it where it lives" is a real thing to do — the same affordance HardlyReading's panel
+   * has for archive.org.
+   */
+  url?: string;
 }
 
 export interface Chapter {

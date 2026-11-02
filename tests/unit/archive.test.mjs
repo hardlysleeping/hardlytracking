@@ -102,6 +102,7 @@ test("a search row keeps the string-or-array fields and drops the unusable one",
   assert.equal(first.description, "The Black Swordsman arc.");
   assert.equal(first.status, "Published 1989");
   assert.equal(first.cover, "https://archive.org/services/img/berserk-bundle");
+  assert.equal(first.url, "https://archive.org/details/berserk-bundle", "the item's own page");
   assert.equal(second, null);
 });
 

@@ -25,6 +25,7 @@
   import { filterByLevel, levelOfSource } from "../lib/content/levels";
   import { languageLabel } from "../lib/language";
   import { chapterLabel } from "../lib/titles";
+  import { hostOf, openExternal } from "../lib/external";
 
   interface Props {
     initial?: string | null;
@@ -302,7 +303,14 @@
     const free = view.height - covered;
     const delta = box.height <= free ? box.bottom - (view.bottom - covered) : box.top - view.top;
     if (delta <= 1) return;
-    pane.scrollTo({ top: pane.scrollTop + delta, behavior: "smooth" });
+    const from = pane.scrollTop;
+    const to = from + delta;
+    pane.scrollTo({ top: to, behavior: "smooth" });
+    // Some engines refuse to animate and then do not move at all — the card would stay off screen
+    // with no error to show for it. If nothing has moved by the next few frames, jump instead.
+    window.setTimeout(() => {
+      if (Math.abs(pane.scrollTop - from) < 2) pane.scrollTop = to;
+    }, 150);
   }
 
   $effect(() => {
@@ -448,6 +456,20 @@
             <button class="btn ghost" onclick={() => go(pathTo("series", record.id))}>Open chapters</button>
           {/if}
         </div>
+        {#if record.url !== undefined}
+          <!-- Where it actually lives. A source that has a web page gets one link to it; an extension
+               or a folder has none, so the line is simply absent rather than a dead button. -->
+          <a
+            class="dsrc"
+            href={record.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            onclick={(event) => {
+              event.preventDefault();
+              void openExternal(record.url!);
+            }}>Open on {hostOf(record.url)} ↗</a
+          >
+        {/if}
         {#if record.description !== undefined && record.description !== ""}
           <p class="ddesc" class:open={descOpen}>{record.description}</p>
           {#if record.description.length > 320}
@@ -962,6 +984,18 @@
     -webkit-line-clamp: unset;
     line-clamp: unset;
     overflow: visible;
+  }
+
+  .dsrc {
+    display: inline-block;
+    margin-top: var(--s2);
+    font-size: var(--t-xs);
+    color: var(--text-3);
+    text-decoration: none;
+  }
+
+  .dsrc:hover {
+    color: var(--text);
   }
 
   .moredesc {

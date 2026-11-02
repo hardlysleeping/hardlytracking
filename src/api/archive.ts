@@ -178,6 +178,7 @@ export function rowToSeries(doc: SearchDoc): Series | null {
     provider: "archive",
     title,
     cover: `${ARCHIVE_BASE}/services/img/${encodeURIComponent(identifier)}`,
+    url: `${ARCHIVE_BASE}/details/${encodeURIComponent(identifier)}`,
     ...(creator === "" ? {} : { author: creator }),
     ...(description === "" ? {} : { description }),
     ...(year === "" ? {} : { status: `Published ${year}` }),
@@ -523,6 +524,7 @@ export function createArchiveProvider(options: ArchiveProviderOptions = {}): Sou
         provider: "archive",
         title: meta.title,
         cover: `${ARCHIVE_BASE}/services/img/${encodeURIComponent(identifier)}`,
+        url: `${ARCHIVE_BASE}/details/${encodeURIComponent(identifier)}`,
         ...(meta.creator === "" ? {} : { author: meta.creator }),
         ...(meta.description === "" ? {} : { description: meta.description }),
       };

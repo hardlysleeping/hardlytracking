@@ -30,6 +30,7 @@
  *   row is still read: a subscription bought on the web is the same row here.
  */
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { openExternal } from "../lib/external";
 
 /** Where the shop is. Public: it is a URL, not a key. The reader's default. */
 export const SYNC_BILLING_DEFAULT = "https://billing.hardlysleep.ing";
@@ -403,25 +404,6 @@ export class SyncAccount {
     } catch {
       /* a sign-out that cannot reach the server still clears this device */
     }
-  }
-}
-
-/** The system browser, when the app is not the thing a card is typed into. */
-async function openExternal(url: string): Promise<void> {
-  const bridge = (
-    globalThis as {
-      Capacitor?: {
-        Plugins?: { Browser?: { open?: (options: { url: string }) => Promise<unknown> } };
-      };
-    }
-  ).Capacitor;
-  const open = bridge?.Plugins?.Browser?.open;
-  if (typeof open === "function") {
-    await open({ url });
-    return;
-  }
-  if (typeof globalThis.open === "function") {
-    globalThis.open(url, "_blank", "noopener");
   }
 }
 
