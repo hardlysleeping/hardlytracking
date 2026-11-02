@@ -105,13 +105,47 @@ export function parseExtension(entry: unknown): ExtensionEntry | null {
 }
 
 /**
+ * A URL as written in an index, against the index's own address.
+ *
+ * Real indexes are not consistent: keiyoushi's v2 JSON writes absolute URLs, while several others
+ * write `apk/mangadex.apk` beside themselves. A relative one has to be joined to the index before it
+ * can be fetched at all — `/api/repo?url=<relative>` is refused as unparseable, which surfaces as
+ * "could not be downloaded: 400" and looks like a broken repository rather than a broken link.
+ *
+ * No base (a caller parsing an index it did not fetch) or an unparseable one leaves the value alone,
+ * because inventing a host would be worse than keeping the string the publisher wrote.
+ */
+function absolute(value: string, base: string | undefined): string {
+  if (base === undefined || value === "" || /^[a-z][a-z0-9+.-]*:/i.test(value)) return value;
+  try {
+    return new URL(value, base).toString();
+  } catch {
+    return value;
+  }
+}
+
+function resolveUrls(entry: ExtensionEntry, base: string | undefined): ExtensionEntry {
+  if (base === undefined) return entry;
+  const out: ExtensionEntry = { ...entry, apkUrl: absolute(entry.apkUrl, base) };
+  if (entry.iconUrl !== undefined) out.iconUrl = absolute(entry.iconUrl, base);
+  if (entry.jarUrl !== undefined) out.jarUrl = absolute(entry.jarUrl, base);
+  return out;
+}
+
+/**
  * An index in either shape. Unknown/blank rows are dropped rather than half-parsed: an
  * entry without an APK URL cannot be installed, and pretending otherwise makes the store
  * show an extension that can never be added.
+ *
+ * `indexUrl` is where this JSON came from. Given it, every relative `apkUrl`/`iconUrl`/`jarUrl`
+ * is resolved against that address, so an index that writes short paths beside itself installs.
  */
-export function parseIndex(raw: unknown): ExtensionIndex {
+export function parseIndex(raw: unknown, indexUrl?: string): ExtensionIndex {
   if (Array.isArray(raw)) {
-    return { name: "Mihon repository", extensions: raw.map(parseExtension).filter((e): e is ExtensionEntry => e !== null) };
+    return {
+      name: "Mihon repository",
+      extensions: raw.map(parseExtension).filter((e): e is ExtensionEntry => e !== null).map((e) => resolveUrls(e, indexUrl)),
+    };
   }
   if (raw !== null && typeof raw === "object") {
     const o = raw as Record<string, unknown>;
@@ -119,7 +153,7 @@ export function parseIndex(raw: unknown): ExtensionIndex {
     const entries = Array.isArray(list?.extensions) ? (list.extensions as unknown[]) : [];
     return {
       name: typeof o.name === "string" && o.name !== "" ? o.name : "Mihon repository",
-      extensions: entries.map(parseExtension).filter((e): e is ExtensionEntry => e !== null),
+      extensions: entries.map(parseExtension).filter((e): e is ExtensionEntry => e !== null).map((e) => resolveUrls(e, indexUrl)),
     };
   }
   throw new Error("not an extension index: expected an array or an object with extensionList");

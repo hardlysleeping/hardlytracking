@@ -263,6 +263,7 @@ test("the runtime's own cookie contract: the headers it reads, and only those", 
   assert.equal(headers.cookie, "a=1; b=2");
   assert.equal(headers["x-hardlytracking-cookies"], "a=1; b=2");
   assert.equal(headers["user-agent"], "UA/1");
+  assert.equal(headers["x-hardlytracking-user-agent"], "UA/1", "a tab cannot set User-Agent, so the UA rides this header too");
   assert.equal(headers["source-base-url"], "https://toonily.com/");
   assert.equal(headers["x-mangayomi-webview-port"], "4567");
   assert.deepEqual(authHeaders(undefined), {});

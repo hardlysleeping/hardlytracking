@@ -19,7 +19,8 @@
  * page on a single origin, which is also why `DalvikClient.asset()` re-points the absolute
  * `http://127.0.0.1:<port>/image/…` addresses it mints.
  */
-import { createServer } from "node:http";
+import { createServer, request as httpRequest } from "node:http";
+import { request as httpsRequest } from "node:https";
 import { upstreamPath } from "./upstream-path.mjs";
 import { komgaTarget } from "./komga-target.mjs";
 import { networkInterfaces } from "node:os";
@@ -200,12 +201,27 @@ async function serveDalvik(request, response) {
   const incoming = new URL(request.url ?? "/", "http://localhost");
   const target = `${DALVIK}${upstreamPath(incoming.pathname, /^\/api\/dalvik/)}${incoming.search}`;
   const headers = forwardHeaders(request);
+  // The browser's own `User-Agent` must never reach the runtime: the runtime applies whatever UA it
+  // receives to the *extension's* HTTP client (`NetworkHelper.setUA`), so a forwarded Chrome UA (or
+  // `fetch`'s own `node`) becomes the extension's identity, and sites that block browser or unknown
+  // user-agents answer an HTML challenge page the extension then reads as JSON. MangaDex did exactly
+  // that — `getPopularManga` came back as `<!doctype html>`, surfaced as a Jackson "Unexpected JSON
+  // token" 500 and an empty source. A tab cannot set `User-Agent` itself (forbidden header, dropped
+  // silently), so a UA the app means to send travels as `x-hardlytracking-user-agent`, the same way
+  // the session travels as `x-hardlytracking-cookies`. Absent means absent: the runtime keeps the
+  // extension's own identity, which is what a source expects.
+  const appUserAgent = headers["x-hardlytracking-user-agent"];
+  delete headers["x-hardlytracking-user-agent"];
+  delete headers["user-agent"];
+  if (typeof appUserAgent === "string" && appUserAgent !== "") headers["user-agent"] = appUserAgent;
+  // `node:http` (unlike `fetch`) forwards `host` verbatim, and this one names the proxy's own port.
+  delete headers["host"];
   const payload = await body(request);
   const isCall = request.method === "POST" && incoming.pathname === "/api/dalvik/dalvik";
 
   let upstream;
   try {
-    upstream = await fetch(target, { method: request.method, headers, body: payload });
+    upstream = await rawRequest(target, { method: request.method, headers, body: payload });
   } catch (error) {
     response.writeHead(502, { "Content-Type": "application/json" });
     response.end(JSON.stringify({ error: `runtime unreachable at ${DALVIK}`, detail: String(error) }));
@@ -213,24 +229,19 @@ async function serveDalvik(request, response) {
   }
 
   const out = {};
-  upstream.headers.forEach((value, key) => {
-    if (!RESPONSE_DROP.has(key)) out[key] = value;
-  });
+  for (const [key, value] of Object.entries(upstream.headers)) {
+    if (!RESPONSE_DROP.has(key) && value !== undefined) out[key] = value;
+  }
 
   if (!isCall) {
-    response.writeHead(upstream.status, out);
-    if (upstream.body === null) {
-      response.end();
-      return;
-    }
-    for await (const chunk of upstream.body) response.write(chunk);
-    response.end();
+    response.writeHead(upstream.statusCode ?? 502, out);
+    upstream.pipe(response);
     return;
   }
 
-  let text = await upstream.text();
-  let status = upstream.status;
-  if (!upstream.ok) {
+  let text = await textOf(upstream);
+  let status = upstream.statusCode ?? 502;
+  if (status >= 400) {
     let detail = null;
     try {
       detail = JSON.parse(text);
@@ -255,10 +266,10 @@ async function serveDalvik(request, response) {
       if (apk !== null) {
         try {
           await host.installOnRuntime(apk.toString("base64"));
-          const replay = await fetch(target, { method: "POST", headers, body: payload });
-          text = await replay.text();
-          status = replay.status;
-          console.log(`dalvik: reinstalled ${extensionId} from the host's own APK and replayed the call (${replay.status})`);
+          const replay = await rawRequest(target, { method: "POST", headers, body: payload });
+          text = await textOf(replay);
+          status = replay.statusCode ?? 502;
+          console.log(`dalvik: reinstalled ${extensionId} from the host's own APK and replayed the call (${status})`);
         } catch (error) {
           // A replay that fails is the caller's answer: the runtime's first error is what it sees.
           console.log(`dalvik: could not reinstall ${extensionId}: ${String(error)}`);
@@ -268,6 +279,32 @@ async function serveDalvik(request, response) {
   }
   response.writeHead(status, out);
   response.end(text);
+}
+
+/**
+ * A request to the runtime made with `node:http`, not `fetch`.
+ *
+ * `fetch` fills a missing `User-Agent` with `node` and there is no way to ask it not to (an
+ * `undefined` value is sent as the string `"undefined"`). That default is poison on this hop: the
+ * runtime applies the UA it receives to the extension's HTTP client, and MangaDex answers `node`
+ * with an HTML challenge page. A raw request sends exactly the headers it is given, so an absent UA
+ * stays absent.
+ */
+function rawRequest(target, { method, headers, body }) {
+  const url = new URL(target);
+  const send = url.protocol === "https:" ? httpsRequest : httpRequest;
+  return new Promise((resolve, reject) => {
+    const outgoing = send(url, { method, headers }, resolve);
+    outgoing.on("error", reject);
+    outgoing.end(body);
+  });
+}
+
+/** A stream's bytes as one string — for a small JSON answer, never for an image. */
+async function textOf(stream) {
+  const chunks = [];
+  for await (const chunk of stream) chunks.push(chunk);
+  return Buffer.concat(chunks).toString("utf8");
 }
 
 /**

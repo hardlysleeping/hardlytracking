@@ -88,3 +88,24 @@ Measured 2026-11-02 through `/api/mihon/graphql` on the second command's port:
   sending them would present an unfiltered list under a filtered heading.
 - The source with no filters drew no Filters button at all, which is the "absent is a real answer"
   rule in `SourceProvider.filters?`.
+
+## The dalvik hop invents no headers
+
+`/api/dalvik/*` is passed to the runtime with `node:http`, not `fetch`, and two of the tab's own
+headers are dropped on the way:
+
+- **`user-agent`** — the runtime applies whatever UA it receives to the *extension's* HTTP client
+  (`NetworkHelper.setUA`), so a forwarded browser UA makes the extension browse as Chrome. MangaDex
+  answers a browser or unknown UA with an HTML challenge page, which the extension then tries to read
+  as JSON: `Unexpected JSON token at offset 0 … <!doctype html>`, a 500, and a source that "returned
+  nothing". Measured 2026-11-02: the real MangaDex APK through this proxy answered 20 titles with no
+  UA and the same 500 with a Chrome UA. `fetch` cannot express "no user-agent" — it sends `node`, or
+  the literal string `undefined` — which is why this hop uses a raw request. A UA the app *means* to
+  send travels as `x-hardlytracking-user-agent` (a tab cannot set `User-Agent` itself) and is the
+  only value that reaches the runtime.
+- **`host`** — `fetch` used to set it from the target; a raw request forwards it verbatim, and the
+  browser's `host` names the proxy's port, not the runtime's. Forwarding it makes the runtime answer
+  its own HTML error page.
+
+`tests/unit/dalvik-user-agent.test.mjs` starts a real proxy against a recording stand-in for the
+runtime, so both rules are asserted on the wire rather than in the source text.

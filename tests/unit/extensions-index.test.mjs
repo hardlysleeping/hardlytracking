@@ -126,3 +126,42 @@ test("a built-in is never offered as an update, and an unknown package is not in
 test("a row with no version code cannot be compared, so it is left alone", () => {
   assert.deepEqual(planUpdates([{ packageId: "a" }], [entry("a", 99, "9.9")], "r"), []);
 });
+
+test("an index that writes its APK beside itself still installs: the URL is joined to the index", () => {
+  // Several published indexes write `apk/x.apk` rather than an absolute URL. Handing that string to
+  // the repo fetch is refused ("url must be an absolute http(s) URL"), which read as a broken
+  // repository rather than a relative link.
+  const index = parseIndex(
+    {
+      name: "relative",
+      extensionList: {
+        extensions: [
+          {
+            name: "MangaDex",
+            packageName: "eu.kanade.tachiyomi.extension.all.mangadex",
+            versionName: "1.6.0",
+            versionCode: 106000,
+            resources: { apkUrl: "apk/mangadex.apk", iconUrl: "icons/md.png", jarUrl: "x.jar" },
+          },
+        ],
+      },
+    },
+    "https://repo.test/sub/index.min.json",
+  );
+  assert.equal(index.extensions[0].apkUrl, "https://repo.test/sub/apk/mangadex.apk");
+  assert.equal(index.extensions[0].iconUrl, "https://repo.test/sub/icons/md.png");
+  assert.equal(index.extensions[0].jarUrl, "https://repo.test/sub/x.jar");
+});
+
+test("an absolute APK URL is left exactly as published, base or no base", () => {
+  const raw = [{ pkg: "a.b", apk: "https://cdn.test/a.apk", versionCode: 1 }];
+  assert.equal(parseIndex(raw, "https://repo.test/index.json").extensions[0].apkUrl, "https://cdn.test/a.apk");
+  assert.equal(parseIndex(raw).extensions[0].apkUrl, "https://cdn.test/a.apk");
+});
+
+test("with no index address nothing is invented: a relative APK stays relative", () => {
+  // `parseExtension` is also used on rows that never had a URL beside them; guessing a host there
+  // would turn "this row is unusable" into "this row points somewhere wrong".
+  const index = parseIndex([{ pkg: "a.b", apk: "apk/a.apk", versionCode: 1 }]);
+  assert.equal(index.extensions[0].apkUrl, "apk/a.apk");
+});

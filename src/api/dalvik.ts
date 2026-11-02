@@ -207,6 +207,17 @@ const EXTENSION_HEADER = "x-mangayomi-extension-id";
  */
 const COOKIE_HEADER = "x-hardlytracking-cookies";
 
+/**
+ * The UA header, sent twice, for the same reason as the cookie.
+ *
+ * `User-Agent` is a forbidden header for `fetch` in a browser tab, and a forwarded *browser* UA is
+ * actively wrong: the runtime applies it to the extension's HTTP client, and a site that blocks
+ * browser user-agents then answers HTML where the extension expects JSON (MangaDex: a Jackson
+ * "Unexpected JSON token" 500, empty source). So a UA the app means to send rides this private
+ * header too, and `server/proxy.mjs` puts it on the upstream call.
+ */
+const USER_AGENT_HEADER = "x-hardlytracking-user-agent";
+
 /** A `DalvikAuth` as request headers. Absent fields are absent headers, never empty ones. */
 export function authHeaders(auth: DalvikAuth | undefined): Record<string, string> {
   if (auth === undefined) return {};
@@ -216,7 +227,10 @@ export function authHeaders(auth: DalvikAuth | undefined): Record<string, string
     headers[COOKIE_HEADER] = auth.cookie;
   }
   // Empty and `Dart/…` are ignored by the runtime anyway; not sending them keeps the intent clear.
-  if (auth.userAgent !== undefined && auth.userAgent.trim() !== "") headers["user-agent"] = auth.userAgent.trim();
+  if (auth.userAgent !== undefined && auth.userAgent.trim() !== "") {
+    headers["user-agent"] = auth.userAgent.trim();
+    headers[USER_AGENT_HEADER] = auth.userAgent.trim();
+  }
   if (auth.sourceBaseUrl !== undefined && auth.sourceBaseUrl !== "") headers["source-base-url"] = auth.sourceBaseUrl;
   if (auth.webviewPort !== undefined && auth.webviewPort > 0) headers["x-mangayomi-webview-port"] = String(auth.webviewPort);
   return headers;

@@ -171,7 +171,7 @@ export async function loadRepository(input: string, options: LoadOptions = {}): 
       continue;
     }
 
-    const index: ExtensionIndex = parseIndex(raw);
+    const index: ExtensionIndex = parseIndex(raw, indexUrl);
     if (index.extensions.length === 0) {
       // An empty index is a valid answer, but not a useful repository; say so rather than
       // registering a repository with nothing in it.
