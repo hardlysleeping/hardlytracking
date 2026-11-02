@@ -69,3 +69,22 @@ Two rules keep it from being an open proxy, and both are unit-tested:
 
 The login is the same one the card asks for, forwarded as `authorization` and never stored on this
 server.
+
+### A source's own filters, and how they were proved
+
+`node tests/manual/stub-mihon-graphql.mjs` is a stand-in Mihon host on `:25777` with two sources: one
+that declares a filter form (select, checkbox, text, sort) and one with none. It **applies** what it is
+sent, so a result set that shrinks is the proof, and `GET /__log` keeps every `fetchSourceManga` payload.
+
+    node tests/manual/stub-mihon-graphql.mjs
+    RUNTIME_URL=http://127.0.0.1:25777 PORT=8461 node server/proxy.mjs
+
+Measured 2026-11-02 through `/api/mihon/graphql` on the second command's port:
+
+- six titles with no filters; `checkBoxState: true` at position 3 returned the three finished ones;
+  adding `selectState: 2` at position 2 returned two — and the payload carried exactly two changes,
+  in the source's order.
+- POPULAR and LATEST sent `filters: null`: a Mihon extension ignores filters outside a search, so
+  sending them would present an unfiltered list under a filtered heading.
+- The source with no filters drew no Filters button at all, which is the "absent is a real answer"
+  rule in `SourceProvider.filters?`.
