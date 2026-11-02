@@ -14,7 +14,7 @@
   import { tick } from "svelte";
   import { library } from "../state/library.svelte";
   import { providerFor } from "../api/registry";
-  import type { Series, Source } from "../api/source";
+  import type { Chapter, Series, Source } from "../api/source";
   import SeriesGrid from "../components/SeriesGrid.svelte";
   import SeriesActions from "../components/SeriesActions.svelte";
   import Cover from "../components/Cover.svelte";
@@ -24,6 +24,7 @@
   import { go, pathTo } from "../lib/nav";
   import { filterByLevel, levelOfSource } from "../lib/content/levels";
   import { languageLabel } from "../lib/language";
+  import { chapterLabel } from "../lib/titles";
 
   interface Props {
     initial?: string | null;
@@ -277,19 +278,110 @@
   const record = $derived(detailed ?? shown);
 
   /**
-   * Bring the opened card into view, once, gently.
+   * Bring the opened card into view, gently, and again once its issue list has arrived.
    *
-   * The card is drawn after its own tile, so on a phone it can open just below the fold; jumping the
-   * whole page would lose the search box. `block: "nearest"` scrolls only as far as it must.
+   * The first nudge happens while the card still says "asking the source…", so it is measured
+   * against a card that has not finished growing; the second happens when the list (or the failure)
+   * is actually on screen. Both bail out if the card is already wholly visible, so a short card does
+   * not move the page at all and a tall one is aligned to the top of its own scroll pane.
    */
+  function revealCard(): void {
+    const card = document.querySelector("[data-expanded]") as HTMLElement | null;
+    if (card === null) return;
+    // The results scroll inside their own pane, not the document, so `scrollIntoView` decides for
+    // its own reasons how much to move. Measure against that pane and move by exactly the overflow:
+    // the card bottom lands on the pane bottom when the card fits, and its top when it does not.
+    const pane = card.closest("main") ?? (document.scrollingElement as HTMLElement | null);
+    if (pane === null) return;
+    const box = card.getBoundingClientRect();
+    const view = pane.getBoundingClientRect();
+    // The tab bar is fixed over the bottom of the pane, so treat its height as dead space: landing
+    // the card under it would hide the very rows this scroll exists to show.
+    const tabs = document.querySelector("nav.bar");
+    const covered = tabs === null ? 0 : Math.max(0, Math.round(tabs.getBoundingClientRect().height));
+    const free = view.height - covered;
+    const delta = box.height <= free ? box.bottom - (view.bottom - covered) : box.top - view.top;
+    if (delta <= 1) return;
+    pane.scrollTo({ top: pane.scrollTop + delta, behavior: "smooth" });
+  }
+
   $effect(() => {
     if (record === null) return;
-    void tick().then(() => {
-      const card = document.querySelector("[data-expanded]");
-      card?.scrollIntoView({ block: "nearest", behavior: "smooth" });
-    });
+    void tick().then(revealCard);
+  });
+
+  $effect(() => {
+    if (issueState !== "ready" && issueState !== "error") return;
+    void tick().then(revealCard);
   });
   const inLibrary = $derived(shown !== null && saved.has(shown.id));
+
+  /**
+   * The issues behind the opened card.
+   *
+   * Search used to answer "what is this?" and stop, so deciding whether a title is the one you want
+   * meant leaving for the series page and coming back. The list belongs in the card: the numbers, how
+   * many pages each has, which are read, and a tap that starts reading the one you picked.
+   *
+   * Fetched once per title and kept: reopening a card is instant, and flicking through six candidates
+   * asks each source once.
+   */
+  let issues = $state<Chapter[]>([]);
+  let issueState = $state<"idle" | "loading" | "ready" | "error">("idle");
+  let issueError = $state("");
+  const issueCache = new Map<string, Chapter[]>();
+  /** Bumped per open, so a slow answer for a card you already left is dropped. */
+  let issueToken = 0;
+  let issueSeries = "";
+  /** Long descriptions are clamped until asked for: the issues are why the card is open. */
+  let descOpen = $state(false);
+
+  $effect(() => {
+    const id = record?.id ?? null;
+    if (id === null) {
+      issues = [];
+      issueState = "idle";
+      return;
+    }
+    issueSeries = id;
+    descOpen = false;
+    const cached = issueCache.get(id);
+    if (cached !== undefined) {
+      issues = cached;
+      issueState = "ready";
+      return;
+    }
+    issues = [];
+    issueState = "loading";
+    const mine = ++issueToken;
+    void (async () => {
+      try {
+        const list = await library.chapters(id);
+        // A provider that keeps its own read marks says so per chapter; ours live in prefs. Merge,
+        // exactly as the series page does, so a chapter does not lose its tick on this screen.
+        const local = new Set(
+          ((await library.profile?.store.listPrefs()) ?? [])
+            .filter((row) => String(row.key).startsWith("read:") && row.value === true)
+            .map((row) => String(row.key).slice(5)),
+        );
+        const rows = list.map((chapter) => ({ ...chapter, read: chapter.read || local.has(chapter.id) }));
+        issueCache.set(id, rows);
+        if (mine !== issueToken) return;
+        issues = rows;
+        issueState = "ready";
+      } catch (error) {
+        if (mine !== issueToken) return;
+        issueError = error instanceof Error ? error.message : String(error);
+        issueState = "error";
+      }
+    })();
+  });
+
+  function label(chapter: Chapter): string {
+    const named = chapterLabel(chapter.name);
+    if (named !== "Chapter") return named;
+    return chapter.number > 0 ? `Chapter ${chapter.number}` : named;
+  }
 </script>
 
 {#snippet detailCard()}
@@ -308,15 +400,44 @@
           {#if record.status}<span class="pill">{record.status}</span>{/if}
           {#if inLibrary}<span class="pill saved">In your library</span>{/if}
         </div>
-        {#if record.description !== undefined && record.description !== ""}
-          <p class="ddesc">{record.description}</p>
-        {:else if detailState === "loading"}
-          <p class="ddesc muted">Reading the description from the source…</p>
-        {:else if detailState === "error"}
-          <p class="ddesc muted">The source did not answer with a description ({detailError}).</p>
-        {:else}
-          <p class="ddesc muted">This source gives no description for this title.</p>
-        {/if}
+        <section class="dissues" aria-label={`Issues of ${record.title}`}>
+          <header class="dihead">
+            <span>Issues</span>
+            {#if issueState === "ready"}
+              <span class="dicount">{issues.length}{issues.some((row) => !row.read) ? ` · ${issues.filter((row) => !row.read).length} unread` : ""}</span>
+            {/if}
+          </header>
+          {#if issueState === "loading"}
+            <p class="diempty muted">Asking {record.provider} for the issue list…</p>
+          {:else if issueState === "error"}
+            <p class="diempty muted">The issue list did not arrive ({issueError}).</p>
+          {:else if issues.length === 0}
+            <p class="diempty muted">This source lists no issues for this title.</p>
+          {:else}
+            <ul class="dilist">
+              {#each issues as chapter (chapter.id)}
+                <li>
+                  <button
+                    class="dirow"
+                    class:read={chapter.read}
+                    onclick={() => {
+                      if (issueSeries !== record?.id) return;
+                      go(pathTo("read", record!.id, chapter.id));
+                    }}
+                  >
+                    <span class="diname">{label(chapter)}</span>
+                    <span class="disub">
+                      {[chapter.pageCount > 0 ? `${chapter.pageCount} pages` : "", chapter.read ? "read" : ""]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    </span>
+                    <span class="dimark" aria-hidden="true">{chapter.read ? "✓" : "›"}</span>
+                  </button>
+                </li>
+              {/each}
+            </ul>
+          {/if}
+        </section>
         <div class="dact">
           <button class="btn ghost" onclick={() => (actions = record)}>Read, keep, download…</button>
           {#if inLibrary}
@@ -327,6 +448,20 @@
             <button class="btn ghost" onclick={() => go(pathTo("series", record.id))}>Open chapters</button>
           {/if}
         </div>
+        {#if record.description !== undefined && record.description !== ""}
+          <p class="ddesc" class:open={descOpen}>{record.description}</p>
+          {#if record.description.length > 320}
+            <button class="moredesc" onclick={() => (descOpen = !descOpen)}>
+              {descOpen ? "Less" : "More"}
+            </button>
+          {/if}
+        {:else if detailState === "loading"}
+          <p class="ddesc muted">Reading the description from the source…</p>
+        {:else if detailState === "error"}
+          <p class="ddesc muted">The source did not answer with a description ({detailError}).</p>
+        {:else}
+          <p class="ddesc muted">This source gives no description for this title.</p>
+        {/if}
       </div>
     </div>
   {/if}
@@ -636,6 +771,93 @@
     overflow: auto;
   }
 
+  /* The issue list in the card: the numbers are the reason you opened it. */
+  .dissues {
+    margin-top: var(--s4);
+    border-top: 1px solid var(--line);
+    padding-top: var(--s3);
+  }
+
+  .dihead {
+    display: flex;
+    align-items: baseline;
+    gap: var(--s2);
+    font-size: var(--t-xs);
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-2);
+    margin-bottom: var(--s2);
+  }
+
+  .dicount {
+    font-weight: 500;
+    letter-spacing: 0;
+    text-transform: none;
+    color: var(--text-3);
+  }
+
+  .dilist {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+  }
+
+  .dirow {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    align-items: center;
+    gap: var(--s2);
+    width: 100%;
+    padding: var(--s2) var(--s2);
+    border: 0;
+    border-radius: var(--r1);
+    background: transparent;
+    color: var(--text);
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .dirow:hover {
+    background: var(--surface-2);
+  }
+
+  .dirow.read .diname {
+    color: var(--text-2);
+  }
+
+  .diname {
+    font-size: var(--t-sm);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .disub {
+    font-size: var(--t-xs);
+    color: var(--text-3);
+    white-space: nowrap;
+  }
+
+  .dimark {
+    font-size: var(--t-sm);
+    color: var(--text-3);
+    width: 1em;
+    text-align: center;
+  }
+
+  .dirow.read .dimark {
+    color: var(--accent);
+  }
+
+  .diempty {
+    margin: 0;
+    font-size: var(--t-sm);
+  }
+
   .dhead {
     display: flex;
     align-items: center;
@@ -675,8 +897,20 @@
     padding: var(--s3);
   }
 
+  /* The cover is an aid, not the answer: capped so the title and the issue list are on screen the
+     moment the card opens, instead of after a scroll through artwork. */
   .dcover {
     margin-bottom: var(--s3);
+    height: 200px;
+    overflow: hidden;
+    border-radius: var(--r2);
+  }
+
+  .dcover :global(img) {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    object-position: left center;
   }
 
   .detail h3 {
@@ -710,11 +944,34 @@
   }
 
   .ddesc {
-    margin: 0 0 var(--s4);
+    margin: var(--s3) 0 0;
     font-size: var(--t-sm);
     line-height: 1.5;
     color: var(--text-2);
     white-space: pre-line;
+    /* Six lines of blurb; the issues above it must be reachable. The card scrolls — three nested
+       scrollers under one finger was the alternative. */
+    display: -webkit-box;
+    -webkit-line-clamp: 6;
+    line-clamp: 6;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .ddesc.open {
+    -webkit-line-clamp: unset;
+    line-clamp: unset;
+    overflow: visible;
+  }
+
+  .moredesc {
+    margin-top: var(--s1);
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--accent);
+    font-size: var(--t-xs);
+    cursor: pointer;
   }
 
   .ddesc.muted {
