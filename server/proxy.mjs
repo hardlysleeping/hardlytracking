@@ -21,6 +21,7 @@
  */
 import { createServer } from "node:http";
 import { upstreamPath } from "./upstream-path.mjs";
+import { komgaTarget } from "./komga-target.mjs";
 import { networkInterfaces } from "node:os";
 import { readFile } from "node:fs/promises";
 import { extname, join, normalize } from "node:path";
@@ -128,6 +129,55 @@ async function proxy(request, response, upstreamBase, prefix, replacement = "") 
   }
   for await (const chunk of upstream.body) response.write(chunk);
   response.end();
+}
+
+/**
+ * Komga, for the page.
+ *
+ * The packaged builds reach Komga themselves; a page cannot, because Komga sends no CORS headers. The
+ * address travels in the path (`server/komga-target.mjs` explains why) and only a server on the
+ * user's own network is accepted. Everything else — method, body, `authorization` — is forwarded as
+ * it arrives, because Komga authenticates with the login the person already uses, and this box never
+ * stores it.
+ */
+async function serveKomga(request, response) {
+  const incoming = new URL(request.url ?? "/", "http://localhost");
+  const routed = komgaTarget(incoming.pathname, incoming.search);
+  if (routed.url === undefined) {
+    response.writeHead(routed.status ?? 400, { "Content-Type": "text/plain; charset=utf-8" });
+    response.end(routed.error ?? "komga route");
+    return;
+  }
+
+  const headers = forwardHeaders(request);
+  delete headers["x-hardlytracking-token"];
+  delete headers["x-hardlytracking-cookies"];
+  delete headers["host"];
+
+  let upstream;
+  try {
+    upstream = await fetch(routed.url, { method: request.method, headers, body: await body(request) });
+  } catch (error) {
+    response.writeHead(502, { "Content-Type": "application/json" });
+    response.end(JSON.stringify({ error: `Komga unreachable at ${new URL(routed.url).origin}`, detail: String(error) }));
+    return;
+  }
+
+  // Buffered, not streamed. These are JSON answers, covers and single pages — kilobytes, not the
+  // 40 MB scans `/api/file` carries — and a browser that is handed a chunked body whose encoding
+  // header we stripped waits for bytes that never come. One buffer, one exact `content-length`.
+  const bytes = Buffer.from(await upstream.arrayBuffer());
+  const out = {};
+  upstream.headers.forEach((value, key) => {
+    // `www-authenticate` is Komga's challenge to *Komga*, and forwarding it makes the browser issue
+    // one against this app's own origin — the page then sits waiting on an auth retry that never
+    // settles instead of reading a plain 401. The client only needs the status.
+    if (RESPONSE_DROP.has(key) || key === "content-length" || key === "www-authenticate") return;
+    out[key] = value;
+  });
+  out["content-length"] = String(bytes.length);
+  response.writeHead(upstream.status, out);
+  response.end(bytes);
 }
 
 const host = createHostExtensions({ dir: STATE, dalvikUrl: DALVIK });
@@ -526,6 +576,8 @@ const server = createServer((request, response) => {
     ? (req, res) => serveUpstream(req, res, "image")
     : path === "/api/file"
     ? (req, res) => serveUpstream(req, res, "file")
+    : path.startsWith("/api/komga/")
+    ? serveKomga
     : path.startsWith("/api/dalvik/")
     ? serveDalvik
     : path.startsWith("/api/mihon/")

@@ -32,3 +32,24 @@ Three kinds, and each is allowed for a stated reason:
 - The Mihon extension runtime (M-Extension-Server) is **infrastructure, not an extension**. It is a
   service the app talks to on `127.0.0.1:8792`; it has no card, no switch and nothing to uninstall,
   because it ships no content either — it executes APKs the user installed.
+
+## The `/api/komga` route
+
+The browser build cannot reach Komga: Komga sends no `Access-Control-Allow-Origin`, so a page served
+from another origin is refused before credentials matter. The packaged builds do not have that
+problem (Capacitor's HTTP and the desktop shell bypass CORS), so the route exists for the page only.
+
+The address travels in the path — `/api/komga/<base64url of the origin>/api/v1/…` — because covers and
+page images are fetched as URLs and an `<img>` cannot send a header. `server/komga-target.mjs` parses
+it, `serveKomga` in `server/proxy.mjs` forwards it.
+
+Two rules keep it from being an open proxy, and both are unit-tested:
+
+- **Only a server on the user's own network** — loopback, RFC1918, link-local, CGNAT (tailnet) or
+  `.local`. A public Komga is refused; it never needed the proxy.
+- **`www-authenticate` is not forwarded.** It is Komga's challenge to Komga; passing it on makes the
+  browser raise a credential challenge against *this* app's origin, and the request hangs instead of
+  answering 401.
+
+The login is the same one the card asks for, forwarded as `authorization` and never stored on this
+server.

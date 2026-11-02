@@ -14,6 +14,7 @@
  * next read, not after a relaunch.
  */
 import { RUNTIME_DEADLINE_MS, deadlined } from "./deadline";
+import { hasLocalServer } from "./host";
 
 const BASE_KEY = "hardlytracking.komga";
 const USER_KEY = "hardlytracking.komgaUser";
@@ -41,6 +42,31 @@ function write(key: string, value: string): void {
   } catch {
     // A browser with storage disabled still runs; the setting simply does not survive a reload.
   }
+}
+
+/**
+ * A URL the *page* can actually load, given where Komga is.
+ *
+ * Komga sends no `Access-Control-Allow-Origin`, so in the browser build every request has to go
+ * through the app's own server (`/api/komga`, see `server/komga-target.mjs`). The packaged builds
+ * bypass CORS, so they keep talking to Komga directly and this is the identity there. The base64 of
+ * the address is in the path rather than a header because covers and pages are fetched as plain
+ * URLs.
+ */
+export function komgaUrl(baseUrl: string, path: string, proxied: boolean = hasLocalServer()): string {
+  const base = baseUrl.trim().replace(/\/+$/, "");
+  const tail = path.startsWith("/") ? path : `/${path}`;
+  if (!proxied) return `${base}${tail}`;
+  return `/api/komga/${encodeBase64Url(base)}${tail}`;
+}
+
+/** `btoa` with the URL-safe alphabet and no padding, in both the page and Node. */
+export function encodeBase64Url(value: string): string {
+  const bytes = new TextEncoder().encode(value);
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  const plain = typeof btoa === "function" ? btoa(binary) : Buffer.from(value, "utf8").toString("base64");
+  return plain.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
 /** The address, trimmed to a bare origin-ish base. `null` when there is no address to talk to. */
@@ -125,12 +151,14 @@ export async function probeKomga(
   for (const byte of bytes) binary += String.fromCharCode(byte);
   const headers = { authorization: `Basic ${btoa(binary)}`, accept: "application/json" };
   try {
-    const me = await fetchImpl(`${base}/api/v1/users/me`, { headers });
+    // Through `/api/komga` in the page: the proxy forwards `authorization` untouched, so the check
+    // is the same one the packaged app makes directly.
+    const me = await fetchImpl(komgaUrl(base, "/api/v1/users/me"), { headers });
     if (me.status === 401 || me.status === 403) {
       return { ok: false, error: `Komga refused that login (${me.status})` };
     }
     if (!me.ok) return { ok: false, error: `Komga answered ${me.status}` };
-    const libraries = await fetchImpl(`${base}/api/v1/libraries`, { headers });
+    const libraries = await fetchImpl(komgaUrl(base, "/api/v1/libraries"), { headers });
     if (!libraries.ok) return { ok: false, error: `signed in, but the library list answered ${libraries.status}` };
     const rows = (await libraries.json()) as Array<{ name?: string }>;
     return { ok: true, libraries: rows.map((row) => row.name ?? "Untitled library") };

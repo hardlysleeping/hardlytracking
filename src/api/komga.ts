@@ -19,10 +19,11 @@
  * Two consequences worth stating, because they shape the code:
  *
  * 1. **Images need the header, and an `<img>` cannot send one.** Covers and pages are returned as
- *    real Komga URLs *plus* the header they need (`coverHeaders`, `Page.headers`), and the app
- *    fetches those bytes itself (`imageCache.resolve(url, { headers })`) so the result is a blob on
- *    this device. The `/api/img` proxy is not used: it refuses private addresses, and a Komga is
- *    almost always a private address.
+ *    Komga URLs *plus* the header they need (`coverHeaders`, `Page.headers`), and the app fetches
+ *    those bytes itself (`imageCache.resolve(url, { headers })`) so the result is a blob on this
+ *    device. `/api/img` is not used: it refuses private addresses, and a Komga is almost always a
+ *    private address. In a browser tab every URL goes through `/api/komga` instead, because Komga
+ *    sends no CORS headers at all — see `komgaUrl()` in `src/lib/komga.ts`.
  * 2. **A wrong password is not an empty shelf.** A 401 says so, by name, because "no series here"
  *    and "your login was refused" are different problems with different fixes.
  */
@@ -39,6 +40,8 @@ import {
   type SourceProvider,
 } from "./source";
 import { RUNTIME_DEADLINE_MS, deadlined } from "../lib/deadline";
+import { hasLocalServer } from "../lib/host";
+import { komgaUrl } from "../lib/komga";
 
 export interface KomgaRawLibrary {
   id: string;
@@ -153,7 +156,12 @@ export function mapKomgaLibrary(raw: KomgaRawLibrary): Source {
   };
 }
 
-export function mapKomgaSeries(raw: KomgaRawSeries, baseUrl: string, headers: Record<string, string>): Series {
+export function mapKomgaSeries(
+  raw: KomgaRawSeries,
+  baseUrl: string,
+  headers: Record<string, string>,
+  proxied: boolean = hasLocalServer(),
+): Series {
   const authors = (raw.booksMetadata?.authors ?? [])
     .map((author) => author.name ?? "")
     .filter((name) => name !== "");
@@ -165,7 +173,9 @@ export function mapKomgaSeries(raw: KomgaRawSeries, baseUrl: string, headers: Re
     title,
     // The URL *and* the header it needs: an `<img>` cannot send the login, so the app fetches this
     // itself and hands the UI a blob. See the header comment.
-    cover: `${baseUrl}/api/v1/series/${raw.id}/thumbnail`,
+    // Through the proxy in the page: an `<img>` cannot send the login, the image cache fetches it
+    // with the header, and the same server passes that header on.
+    cover: komgaUrl(baseUrl, `/api/v1/series/${raw.id}/thumbnail`, proxied),
     coverHeaders: headers,
     // Komga's own web UI answers at /series/{id}: the same title opened where it is managed, not a
     // second front end for it.
@@ -222,7 +232,7 @@ export function createKomgaProvider(options: KomgaOptions): SourceProvider {
   async function json<T>(path: string, init: RequestInit = {}): Promise<T> {
     let response: Response;
     try {
-      response = await doFetch(`${baseUrl}${path}`, {
+      response = await doFetch(komgaUrl(baseUrl, path), {
         ...init,
         headers: { accept: "application/json", ...headers, ...(init.headers as Record<string, string> | undefined) },
       });
@@ -308,7 +318,7 @@ export function createKomgaProvider(options: KomgaOptions): SourceProvider {
       return list.map(
         (row, index): Page => ({
           index,
-          url: `${baseUrl}/api/v1/books/${encodeURIComponent(native)}/pages/${row.number}`,
+          url: komgaUrl(baseUrl, `/api/v1/books/${encodeURIComponent(native)}/pages/${row.number}`),
           // The login, because Komga serves the image to a logged-in client and an `<img>` cannot
           // send a header: the app fetches these bytes itself.
           headers,
