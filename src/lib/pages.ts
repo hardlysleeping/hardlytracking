@@ -21,6 +21,7 @@ export function proxiedImage(url: string): string {
  */
 import type { Page } from "../api/source";
 import { imageCache } from "./cache/images";
+import { DeadlineError, withDeadline } from "./deadline";
 
 /**
  * The URL to put in an `<img>` for one page, asynchronously, when the source needs a header.
@@ -72,6 +73,15 @@ export function isPrivate(url: string): boolean {
 const LOCAL_PAGE_LIMIT = 12;
 const localPages = new Map<string, string>();
 
+/**
+ * How long one page may take to be produced here.
+ *
+ * A page out of a zip is milliseconds; a PDF page is pdf.js drawing a JPEG. A page encoded as JPEG
+ * 2000 takes pdf.js *minutes*, because it decodes that format in JavaScript — so the wait has an end
+ * and a sentence, rather than a box that stays blank for as long as the tab is open.
+ */
+const LOCAL_PAGE_DEADLINE_MS = 45_000;
+
 async function localPageSrc(page: Page): Promise<string> {
   const cached = localPages.get(page.url);
   if (cached !== undefined) {
@@ -79,7 +89,16 @@ async function localPageSrc(page: Page): Promise<string> {
     localPages.set(page.url, cached);
     return cached;
   }
-  const blob = await page.open!();
+  const label = `page ${page.index + 1}`;
+  let blob: Blob;
+  try {
+    blob = await withDeadline(page.open!(), LOCAL_PAGE_DEADLINE_MS, label);
+  } catch (error) {
+    if (error instanceof DeadlineError) {
+      throw new Error(`${label} is still being drawn after ${Math.round(error.ms / 1000)} s — this book's page encoding is slow to decode`);
+    }
+    throw error;
+  }
   const url = URL.createObjectURL(blob);
   localPages.set(page.url, url);
   while (localPages.size > LOCAL_PAGE_LIMIT) {

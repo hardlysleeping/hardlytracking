@@ -45,7 +45,10 @@ import {
   type Source,
   type SourceProvider,
 } from "./source";
-import { RUNTIME_DEADLINE_MS, DeadlineError, deadlined } from "../lib/deadline";
+import { RUNTIME_DEADLINE_MS, DeadlineError, deadlined, withDeadline } from "../lib/deadline";
+import { apiUrl, hasLocalServer, withToken } from "../lib/host";
+import { openComic, kindOf } from "../lib/files/index";
+import type { LibraryStore } from "../lib/db/store";
 
 export const ARCHIVE_BASE = "https://archive.org";
 
@@ -71,8 +74,6 @@ const SEARCH_FIELDS = ["identifier", "title", "creator", "year", "description", 
 /** A hard ceiling on one chapter: some dumps are thousands of leaves and the reader cannot preload it. */
 export const ARCHIVE_MAX_PAGES = 600;
 
-/** Members of a zip that are pages. Anything else in there is a note, a cover variant or junk. */
-const PAGE_EXTENSIONS = ["jpg", "jpeg", "png", "webp", "gif", "bmp"];
 
 export interface ArchiveProviderOptions {
   fetchImpl?: typeof fetch;
@@ -85,6 +86,15 @@ export interface ArchiveProviderOptions {
    * turning an extension off should not make a saved book unopenable.
    */
   enabled?: () => boolean;
+  /**
+   * Where a downloaded book is kept, so the second read is offline and instant.
+   *
+   * An archive item is a PDF or a CBR — there is no page listing to walk (a per-file directory
+   * answers 404 today), so a volume is read by fetching it once and opening it exactly like a file
+   * the user owns. Left out (tests, and any caller that only wants the catalogue), volumes download
+   * into a small in-memory cache instead.
+   */
+  store?: LibraryStore;
 }
 
 /** archive.org's own list-vs-string habit, flattened once here so nothing downstream has to know. */
@@ -194,18 +204,43 @@ export interface BookFile {
 }
 
 /**
- * A chapter's name, from the file archive.org stores it in.
+ * How long one volume may take to arrive before the reader gives up on it.
  *
- * `Quality__Blackhawk_009.cbz` is how the archive names a scan, and a chapter list is the one place
- * that name is the wrong thing to show: it reads as a leaked file path sitting under a clean title.
- * The separators are the archive's own convention, so they become spaces and the extension goes;
- * nothing else is invented, because the rest of the name is the only thing telling two volumes of
- * the same run apart.
- *
- * An item that ships the same volume twice — a zip of scans and a text-layer PDF, which is common —
- * keeps both rows (`books` dedupes by base name, and those bases differ) and so two chapters can
- * clean to the same words. The second one gets its number, so a list never shows two identical rows.
+ * A scanned volume is 10-60 MB. Thirty seconds — the deadline every runtime call uses — is a
+ * sensible limit on a JSON answer and an unreasonable one on a 40 MB scan over a phone connection,
+ * so this is the one call with its own, longer limit. It is still a limit: waiting four minutes for
+ * a page to appear is worse than being told the archive did not send it.
  */
+export const BOOK_DOWNLOAD_DEADLINE_MS = 240_000;
+
+/** A volume, opened: enough for the reader to ask for page N without knowing where it came from. */
+export interface ArchivedBook {
+  name: string;
+  pageCount: number;
+  open(index: number): Promise<Blob>;
+}
+
+/**
+ * The fetch a volume download uses.
+ *
+ * The provider's own `fetchImpl` is `deadlined(...)` at thirty seconds, which is right for metadata
+ * and wrong for a 40 MB scan; the volume download is raced against `BOOK_DOWNLOAD_DEADLINE_MS`
+ * instead, through the same `withDeadline` the rest of the app uses. An injected `fetchImpl` is used
+ * as it is — a caller that brought its own (a test, an app with a custom transport) owns its limits.
+ */
+
+/**
+ * The URL a volume's bytes come from.
+ *
+ * `/download/<id>/<file>` is the file itself, and unlike the per-file *directory* it answers 200.
+ * Through a browser page it is still cross-origin, so with a server of our own the bytes come
+ * through `/api/file`; a packaged app fetches it directly.
+ */
+export function bookUrl(base: string, identifier: string, book: string, proxied = hasLocalServer()): string {
+  const direct = `${base}/download/${encodeURIComponent(identifier)}/${encodeURIComponent(book)}`;
+  return proxied ? withToken(apiUrl(`/api/file?url=${encodeURIComponent(direct)}`)) : direct;
+}
+
 export function chapterNameOf(fileName: string, taken: ReadonlySet<string> = new Set()): string {
   const cleaned = fileName
     .replace(/\.[^.]+$/, "")
@@ -231,15 +266,6 @@ export function chapterNameOf(fileName: string, taken: ReadonlySet<string> = new
  */
 const BOOK_EXTENSIONS = ["cbz", "cbr", "cbt", "pdf"];
 const BOOK_FORMATS = ["comic book zip", "comic book rar", "text pdf", "comic book"];
-
-/**
- * Formats whose pages can be listed without downloading the whole file.
- *
- * Only zip: archive.org can show the directory of a zip, and cannot show the contents of a RAR or a
- * PDF. A `.cbr` volume is still listed as a chapter — it exists — but reading it says so plainly
- * instead of drawing an empty book.
- */
-const STREAMABLE_EXTENSIONS = ["cbz"];
 
 function positiveInt(value: unknown): number | null {
   const n = typeof value === "number" ? value : Number.parseInt(firstOf(value), 10);
@@ -272,18 +298,19 @@ export function metadataToItem(identifier: string, body: unknown): ItemMetadata 
     if (!isBook) continue;
     const size = Number.parseInt(firstOf(file.size), 10);
     const book: BookFile = { name, format, extension, size: Number.isFinite(size) ? size : 0 };
-    // An item usually ships each volume twice — a `.cbz` and a `.pdf` of the same scan. Two rows
-    // for one volume reads as a duplicate, so the base name keeps one: a zip, because its pages can
-    // be listed and read, where a PDF's cannot be without downloading it.
-    const base = name.replace(/\.[^.]+$/, "").toLowerCase();
+    // An item usually ships each volume more than once: a `.cbz` and a `.pdf` of the same scan, and
+    // often a `_text.pdf` beside the plain one — the same pages with an OCR layer, re-encoded as
+    // JPEG 2000 and JBIG2. Two rows for one volume reads as a duplicate, so a volume keeps the copy
+    // that is cheapest to read: a zip (unpacked entry by entry, nothing decoded), then the plain
+    // PDF (its scans are JPEG), and the `_text` derivative only when it is all there is — pdf.js
+    // decodes JPEG 2000 in JavaScript, which is minutes per page rather than milliseconds.
+    const base = name.replace(/\.[^.]+$/, "").replace(/_text$/i, "").toLowerCase();
     const existing = seenBase.get(base);
     if (existing === undefined) {
       seenBase.set(base, book);
       continue;
     }
-    if (STREAMABLE_EXTENSIONS.includes(book.extension) && !STREAMABLE_EXTENSIONS.includes(existing.extension)) {
-      seenBase.set(base, book);
-    }
+    if (volumeRank(book) > volumeRank(existing)) seenBase.set(base, book);
   }
   books.push(...seenBase.values());
 
@@ -296,6 +323,19 @@ export function metadataToItem(identifier: string, body: unknown): ItemMetadata 
     leafCount,
     books,
   };
+}
+
+/**
+ * How good a volume is to read, best last.
+ *
+ * A zip needs no decoder; a plain PDF's scans are JPEG, which pdf.js draws straight onto the canvas;
+ * a `_text` PDF holds the same scans as JPEG 2000 and JBIG2, which pdf.js decodes in JavaScript.
+ */
+function volumeRank(book: BookFile): number {
+  if (book.extension === "cbz" || book.extension === "zip" || book.extension === "cbr") return 3;
+  if (/^application\/(vnd\.comicbook\+zip|x-cbz)/i.test(book.format)) return 3;
+  if (book.extension === "pdf") return 2;
+  return 1;
 }
 
 /**
@@ -330,52 +370,6 @@ export function pageUrl(identifier: string, index: number, width = ARCHIVE_PAGE_
   return `${ARCHIVE_BASE}/download/${encodeURIComponent(identifier)}/page/n${Math.max(0, Math.floor(index))}_w${width}.jpg`;
 }
 
-/** A page inside a book file: `/download/{id}/{file.cbz}/{member.jpg}`. */
-export function memberUrl(identifier: string, book: string, member: string, base = ARCHIVE_BASE): string {
-  return `${base}/download/${encodeURIComponent(identifier)}/${encodeURIComponent(book)}/${encodeURIComponent(member)}`;
-}
-
-/**
- * The directory page of a zip: archive.org lists every member with a link, in zip order.
- *
- * Members are filtered to images and kept in the order listed, because that order is the reading
- * order — sorting by name would put "p10" before "p9" on any archive without zero padding.
- *
- * A member can be nested: plenty of volumes keep their pages in a folder inside the zip
- * (`Sports-Illustrated/page001.jpg`), and the listing writes that slash as `%2F`. Those are pages,
- * not junk — dropping them made half the archive's magazines list as "no pages inside". The
- * archiver's own bookkeeping is junk: `__MACOSX/…` and dot-files never reach a reader.
- */
-export function membersFromListing(html: string, identifier: string, book: string, base = ARCHIVE_BASE): string[] {
-  const seen = new Set<string>();
-  const members: string[] = [];
-  for (const match of html.matchAll(/href="([^"]+)"/g)) {
-    const href = match[1];
-    const decoded = (() => {
-      try {
-        return decodeURIComponent(href);
-      } catch {
-        return href;
-      }
-    })();
-    const at = decoded.indexOf(book);
-    if (at < 0) continue;
-    const member = decoded
-      .slice(at + book.length)
-      .replace(/^\/+/, "")
-      .split(/[?#]/)[0];
-    // A bare directory entry, not a file.
-    if (member === "" || member.endsWith("/")) continue;
-    if (member.split("/").some((part) => part.startsWith(".") || part === "__MACOSX")) continue;
-    const extension = (member.split(".").pop() ?? "").toLowerCase();
-    if (!PAGE_EXTENSIONS.includes(extension)) continue;
-    if (seen.has(member)) continue;
-    seen.add(member);
-    members.push(memberUrl(identifier, book, member, base));
-  }
-  return members;
-}
-
 /** `archive:ch:<identifier>:<book>` — a scanned item's single chapter carries an empty book. */
 export function chapterId(identifier: string, book: string): string {
   return joinId("archive", `ch:${encodeURIComponent(identifier)}:${encodeURIComponent(book)}`);
@@ -390,16 +384,97 @@ export function parseChapterId(native: string): { identifier: string; book: stri
   return identifier === "" ? null : { identifier, book };
 }
 
-/** Listings are stable and cost one request each; re-opening the same chapter should be free. */
-const listingCache = new Map<string, string[]>();
-const LISTING_CACHE_SIZE = 24;
-
 export function createArchiveProvider(options: ArchiveProviderOptions = {}): SourceProvider {
   // archive.org is usually quick and occasionally not; a stalled `advancedsearch.php` used to leave
   // the search screen with no spinner and no way forward.
   const fetchImpl = options.fetchImpl ?? deadlined(fetch, RUNTIME_DEADLINE_MS, "the Internet Archive");
   const base = (options.base ?? ARCHIVE_BASE).replace(/\/+$/, "");
   const enabled = options.enabled ?? (() => true);
+  const bookFetch = options.fetchImpl ?? ((url: string) => fetch(url));
+
+  /**
+   * Volumes in flight, and volumes already fetched in this session.
+   *
+   * Two things ask for the same book at once — the quick sheet's Read and the reader itself — and a
+   * 40 MB scan must not be fetched twice for that reason. `pending` makes the second caller wait on
+   * the first; the memory cache keeps a book that was read once readable without a store (tests, and
+   * any build where the caller passed none).
+   */
+  const pendingBooks = new Map<string, Promise<ArchivedBook>>();
+  const memoryBooks = new Map<string, Blob>();
+  const MEMORY_BOOKS = 2;
+
+  /**
+   * A volume as a book this device can page through.
+   *
+   * archive.org has no page listing for a file: `/download/<id>/<book>/` answers 404 today, and the
+   * item's metadata lists the volume but not what is inside it. So a volume is *downloaded* once and
+   * opened exactly like a file the user owns — pdf.js for a PDF, the zip reader for a CBZ — which is
+   * also the only way to read a PDF at all.
+   */
+  const book = async (identifier: string, name: string): Promise<ArchivedBook> => {
+    const key = `${identifier}/${name}`;
+    const stored = await options.store?.getBook(key);
+    if (stored !== undefined) {
+      const comic = await openComic(stored.blob, stored.name);
+      return { name: stored.name, pageCount: comic.pageCount, open: (index) => comic.open(index) };
+    }
+    const running = pendingBooks.get(key);
+    if (running !== undefined) return await running;
+
+    const work = (async (): Promise<ArchivedBook> => {
+      const remembered = memoryBooks.get(key);
+      let blob = remembered;
+      if (blob === undefined) {
+        blob = await fetchBook(identifier, name);
+        memoryBooks.set(key, blob);
+        while (memoryBooks.size > MEMORY_BOOKS) {
+          const oldest = memoryBooks.keys().next();
+          if (oldest.done === true) break;
+          memoryBooks.delete(oldest.value);
+        }
+      }
+      const comic = await openComic(blob, name);
+      if (options.store !== undefined) {
+        await options.store.putBook({
+          // Keyed by the volume, not the series: one item ships several, and each is its own file.
+          seriesId: key,
+          chapterId: key,
+          name,
+          kind: kindOf(name) ?? "pdf",
+          pageCount: comic.pageCount,
+          bytes: blob.size,
+          blob,
+          addedAt: Date.now(),
+        });
+      }
+      return { name, pageCount: comic.pageCount, open: (index) => comic.open(index) };
+    })();
+    pendingBooks.set(key, work);
+    try {
+      return await work;
+    } finally {
+      pendingBooks.delete(key);
+    }
+  };
+
+  /** The volume's bytes, with the long deadline and a sentence when it never lands. */
+  const fetchBook = async (identifier: string, name: string): Promise<Blob> => {
+    const url = bookUrl(base, identifier, name);
+    let response: Response;
+    try {
+      response = await withDeadline(bookFetch(url), BOOK_DOWNLOAD_DEADLINE_MS, name);
+    } catch (error) {
+      if (error instanceof DeadlineError) {
+        throw new Error(`${name} did not arrive from archive.org within ${Math.round(error.ms / 1000)} s`);
+      }
+      throw new Error(`${name} could not be fetched from archive.org: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    if (!response.ok) {
+      throw new Error(`archive.org answered HTTP ${response.status} for ${name} — the item may be restricted`);
+    }
+    return await response.blob();
+  };
 
   const search = async (query: string, page: number, sort: string): Promise<Paged<Series>> => {
     const params = buildQuery({ query, sort });
@@ -418,43 +493,6 @@ export function createArchiveProvider(options: ArchiveProviderOptions = {}): Sou
     const response = await fetchImpl(`${base}/metadata/${encodeURIComponent(identifier)}`);
     if (!response.ok) throw new Error(`archive.org item ${identifier} failed (HTTP ${response.status})`);
     return metadataToItem(identifier, await response.json());
-  };
-
-  const listing = async (identifier: string, book: string): Promise<string[]> => {
-    const key = `${identifier}/${book}`;
-    const cached = listingCache.get(key);
-    if (cached !== undefined) return cached;
-    const url = `${base}/download/${encodeURIComponent(identifier)}/${encodeURIComponent(book)}/`;
-    let response: Response;
-    try {
-      response = await fetchImpl(url);
-    } catch (error) {
-      // The one call in this provider a browser can refuse to deliver. archive.org answers the
-      // directory with a 302 to a storage node, and a refusing node (403 for a restricted item, 503
-      // for a sick one) sends no `Access-Control-Allow-Origin`, so `fetch` rejects and the browser's
-      // whole vocabulary for it is "Failed to fetch" — no status, no host, nothing a reader can act
-      // on. Say what actually happened instead of passing that through.
-      if (error instanceof DeadlineError) throw error;
-      const message = error instanceof Error ? error.message : String(error);
-      if (typeof navigator !== "undefined" && navigator.onLine === false) {
-        throw new Error(`${book} has to be listed from archive.org, and you are offline`);
-      }
-      if (/failed to fetch|networkerror|load failed|fetch failed|cors/i.test(message)) {
-        throw new Error(
-          `archive.org did not list the pages of ${book} — its file server refused the request (the item may be restricted), or answered with no permission for a browser to read it. Opening the item on archive.org shows which.`,
-        );
-      }
-      throw new Error(`archive.org failed while listing ${book}: ${message}`);
-    }
-    if (!response.ok) throw new Error(`archive.org listed no directory for ${book} (HTTP ${response.status})`);
-    const members = membersFromListing(await response.text(), identifier, book, base);
-    if (members.length === 0) throw new Error(`archive.org lists no pages inside ${book}`);
-    if (listingCache.size >= LISTING_CACHE_SIZE) {
-      const oldest = listingCache.keys().next().value;
-      if (oldest !== undefined) listingCache.delete(oldest);
-    }
-    listingCache.set(key, members);
-    return members;
   };
 
   return {
@@ -534,8 +572,17 @@ export function createArchiveProvider(options: ArchiveProviderOptions = {}): Sou
       if (parsed === null) throw new Error(`not an archive chapter id: ${chapterIdValue}`);
 
       if (parsed.book !== "") {
-        const members = await listing(parsed.identifier, parsed.book);
-        return members.slice(0, ARCHIVE_MAX_PAGES).map((url, index) => ({ index, url }));
+        // A volume is a file, not a directory: archive.org answers 404 for `/download/<id>/<book>/`
+        // today, so there is nothing to walk. It is downloaded once and opened like a file the user
+        // owns — pdf.js for a PDF, the zip reader for a CBZ — and each page is produced on demand by
+        // `pageSrc`, exactly as a local import's pages are.
+        const opened = await book(parsed.identifier, parsed.book);
+        return Array.from({ length: Math.min(opened.pageCount, ARCHIVE_MAX_PAGES) }, (_, index) => ({
+          index,
+          // A stable key rather than a URL: `pages.ts` keys its blob cache on it.
+          url: `book:${parsed.identifier}/${parsed.book}#${index}`,
+          open: () => opened.open(index),
+        }));
       }
 
       const meta = await item(parsed.identifier);

@@ -65,10 +65,19 @@
     const load = (): void => {
       if (started) return;
       started = true;
-      void pageSrc(page).then((src) => {
-        if (!live) return;
-        node.src = src;
-      });
+      void pageSrc(page)
+        .then((src) => {
+          if (!live) return;
+          node.src = src;
+        })
+        .catch((error: unknown) => {
+          // A page that cannot be produced here — a JPEG 2000 scan pdf.js takes minutes over, a file
+          // that went away — says so on its own box instead of leaving a blank the reader scrolls
+          // past wondering whether it is still loading.
+          if (!live) return;
+          const box = node.closest(".page");
+          if (box instanceof HTMLElement) box.dataset.note = error instanceof Error ? error.message : String(error);
+        });
     };
 
     const observer = new IntersectionObserver(
@@ -878,6 +887,19 @@
   .banner.note {
     color: var(--text-2);
     border-color: var(--line);
+  }
+
+  /* A page that failed to be produced keeps its box and explains itself. */
+  .page[data-note]::after {
+    content: attr(data-note);
+    grid-area: 1 / 1;
+    align-self: center;
+    justify-self: center;
+    max-width: 32ch;
+    padding: var(--s3);
+    color: var(--text-3);
+    font-size: var(--t-sm);
+    text-align: center;
   }
 
   .missing {

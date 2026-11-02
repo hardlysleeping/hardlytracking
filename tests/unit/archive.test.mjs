@@ -7,6 +7,7 @@
  * page index can answer.
  */
 import assert from "node:assert/strict";
+import { zipSync, strToU8 } from "fflate";
 import test from "node:test";
 
 import {
@@ -15,8 +16,6 @@ import {
   chapterNameOf,
   createArchiveProvider,
   firstOf,
-  memberUrl,
-  membersFromListing,
   metadataToItem,
   pageIndexCount,
   pageUrl,
@@ -78,11 +77,14 @@ function stubFetch(routes) {
     for (const [match, body] of routes) {
       if (String(url).includes(match)) {
         const isText = typeof body === "string";
+        const bytes = body instanceof Uint8Array ? body : undefined;
         return {
           ok: true,
           status: 200,
           json: async () => body,
           text: async () => (isText ? body : JSON.stringify(body)),
+          // A route can answer bytes — that is how a volume download is served here.
+          ...(bytes === undefined ? {} : { blob: async () => new Blob([bytes]) }),
         };
       }
     }
@@ -154,58 +156,6 @@ test("the page index is the fallback length, and a failed fetch is null", async 
   assert.equal(await pageIndexCount(missing.impl, "https://archive.org", "silent", []), null);
 });
 
-test("zip members become pages in listing order, and only images count", () => {
-  const pages = membersFromListing(LISTING_HTML, "berserk-bundle", "Berserk v01 (2003).cbz");
-  assert.equal(pages.length, 3);
-  assert.deepEqual(
-    pages.map((url) => url.split("/").pop()),
-    ["Berserk%20-%20p000.jpg", "Berserk%20-%20p001.jpg", "Berserk%20-%20p002.png"],
-  );
-  assert.ok(decodeURIComponent(pages[0]).startsWith("https://archive.org/download/berserk-bundle/Berserk v01 (2003).cbz/"));
-  assert.equal(memberUrl("id", "book.cbz", "p1.jpg"), "https://archive.org/download/id/book.cbz/p1.jpg");
-});
-
-test("a volume that keeps its pages in a folder is a volume, not 'no pages'", () => {
-  // archive.org writes the folder as %2F in the href, and the page URL that reads it back the same
-  // way is the one that answers 200 — so the parsed member keeps the folder in its path.
-  const html = `<!DOCTYPE html><html><body>
-    <a href="//archive.org/download/si/Sports%20Illustrated.cbz/Sports%20Illustrated%2Fpage001.jpg">p1</a>
-    <a href="//archive.org/download/si/Sports%20Illustrated.cbz/Sports%20Illustrated%2Fpage002.jpg">p2</a>
-    <a href="//archive.org/download/si/Sports%20Illustrated.cbz/Sports%20Illustrated%2Fpage003.png">p3</a>
-    <a href="//archive.org/download/si/Sports%20Illustrated.cbz/Sports%20Illustrated%2F">the folder</a>
-    <a href="//archive.org/download/si/Sports%20Illustrated.cbz/__MACOSX%2FSports%20Illustrated%2F._page001.jpg">stub</a>
-    <a href="//archive.org/download/si/Sports%20Illustrated.cbz/.DS_Store">junk</a>
-    <a href="//archive.org/download/si/Sports%20Illustrated.cbz/notes.txt">notes</a>
-  </body></html>`;
-  const pages = membersFromListing(html, "si", "Sports Illustrated.cbz");
-  assert.deepEqual(pages, [
-    "https://archive.org/download/si/Sports%20Illustrated.cbz/Sports%20Illustrated%2Fpage001.jpg",
-    "https://archive.org/download/si/Sports%20Illustrated.cbz/Sports%20Illustrated%2Fpage002.jpg",
-    "https://archive.org/download/si/Sports%20Illustrated.cbz/Sports%20Illustrated%2Fpage003.png",
-  ]);
-  assert.equal(memberUrl("si", "Sports Illustrated.cbz", "Sports Illustrated/page001.jpg"), pages[0]);
-});
-
-test("a listing the browser cannot read says so, instead of 'Failed to fetch'", async () => {
-  const refused = async () => {
-    // Exactly what Chromium throws: no status, no host, nothing to show a reader.
-    throw new TypeError("Failed to fetch");
-  };
-  const provider = createArchiveProvider({ fetchImpl: refused });
-  await assert.rejects(
-    () => provider.pages("archive:ch:restricted:Vol.cbz"),
-    /archive\.org did not list the pages of Vol\.cbz/,
-  );
-
-  // A deadline keeps its own sentence: it is already the honest one.
-  const { DeadlineError } = await import("../../src/lib/deadline.ts");
-  const slow = async () => {
-    throw new DeadlineError("the Internet Archive", 30_000);
-  };
-  const timed = createArchiveProvider({ fetchImpl: slow });
-  await assert.rejects(() => timed.pages("archive:ch:slow:Vol.cbz"), /did not answer within 30 s/);
-});
-
 test("page urls and chapter ids round-trip, including names with colons and spaces", () => {
   assert.equal(pageUrl("scanned-book", 0), "https://archive.org/download/scanned-book/page/n0_w1200.jpg");
   assert.equal(pageUrl("scanned-book", 7, 800), "https://archive.org/download/scanned-book/page/n7_w800.jpg");
@@ -216,21 +166,17 @@ test("page urls and chapter ids round-trip, including names with colons and spac
   assert.equal(parseChapterId("ch::x"), null);
 });
 
-test("a bundle lists one chapter per volume and reads the opened volume's members", async () => {
+test("a bundle's volumes are downloaded once and opened like a file on this device", async () => {
+  // archive.org serves no per-file directory today (`/download/<id>/<book>/` is a 404), so a volume
+  // cannot be walked page by page: it is fetched whole and opened locally, which is also the only
+  // thing that works for a PDF. The fixture is a real CBZ so the zip reader proves it.
+  const cbz = zipSync({ "page001.jpg": strToU8("one"), "page002.jpg": strToU8("two") }, { level: 0 });
   const { impl, calls } = stubFetch([
     ["advancedsearch.php", SEARCH_BODY],
     ["/metadata/berserk-bundle", BUNDLE_BODY],
-    ["/download/berserk-bundle/", LISTING_HTML],
+    ["/download/berserk-bundle/Berserk%20v01%20(2003).cbz", cbz],
   ]);
   const provider = createArchiveProvider({ fetchImpl: impl });
-
-  const sources = await provider.sources();
-  assert.equal(sources.length, 1);
-  assert.equal(sources[0].id, "archive:src:texts");
-
-  const popular = await provider.popular(sources[0].id, 1);
-  assert.equal(popular.items.length, 1);
-  assert.equal(popular.hasNext, false);
 
   const chapters = await provider.chapters("archive:berserk-bundle");
   assert.equal(chapters.length, 2, "one chapter per volume, not one for the item");
@@ -239,12 +185,16 @@ test("a bundle lists one chapter per volume and reads the opened volume's member
   assert.equal(chapters[1].number, 2);
 
   const pages = await provider.pages(chapters[0].id);
-  assert.equal(pages.length, 3);
+  assert.equal(pages.length, 2, "the volume's own page count, read from the file");
   assert.equal(pages[1].index, 1);
-  assert.match(pages[1].url, /Berserk%20-%20p001\.jpg$/);
+  assert.equal(pages[0].url, "book:berserk-bundle/Berserk v01 (2003).cbz#0");
+  assert.ok(pages[0].open !== undefined, "a page this device produces has no URL to point at");
+  const first = await pages[0].open();
+  assert.equal(first.size, 3);
 
-  // The listing is cached: opening the same volume twice costs one request.
-  await provider.pages(chapters[0].id);
+  // The bytes are kept for the session: opening the same volume twice costs one download.
+  const again = await provider.pages(chapters[0].id);
+  await again[0].open();
   assert.equal(calls.filter((url) => url.includes("/download/berserk-bundle/")).length, 1);
 });
 
@@ -279,11 +229,6 @@ test("a foreign id is refused, and read state is never faked", async () => {
   await assert.rejects(() => provider.setRead("archive:ch:x:", true), /local store owns/);
 });
 
-test("the page ceiling holds for a huge volume", () => {
-  const many = Array.from({ length: ARCHIVE_MAX_PAGES + 50 }, (_, i) => `<a href="/download/b/Big.cbz/p${i}.jpg">x</a>`).join("");
-  assert.equal(membersFromListing(many, "b", "Big.cbz").length, ARCHIVE_MAX_PAGES + 50);
-});
-
 test("a chapter is named from the file, not quoted as one", () => {
   // The archive's own separators become spaces, and the extension goes: a chapter list is the last
   // place that should look like a file path.
@@ -313,3 +258,4 @@ test("a bundle names its chapters in words, and keeps their ids keyed on the fil
   // The id still carries the file's own name: renaming a row must not change what it opens.
   assert.match(chapters[0].id, /Berserk%20v01%20\(2003\)\.cbz$/);
 });
+

@@ -14,6 +14,14 @@ export { kindOf, titleFromFile, extensionOf, naturalCompare, pageEntries } from 
 export type { ComicBook, PageRequest } from "./comic";
 export { coverFromBook, coverKey, isCoverKey, keepCover, shrinkToCover } from "./cover";
 
+/**
+ * The widest a PDF page is drawn, in pixels.
+ *
+ * A phone at 3x asks for about 1200 px of page; 2400 leaves room for a pinch without turning a
+ * full-page scan into a canvas the size of a small poster.
+ */
+const PAGE_MAX_WIDTH = 2400;
+
 /** A RAR of images — every `.cbr` — read one entry at a time through the wasm decoder. */
 async function openRarBook(blob: Blob, name: string, decoder?: () => Promise<ArrayBuffer>): Promise<ComicBook> {
   const bytes = new Uint8Array(await blob.arrayBuffer());
@@ -84,7 +92,12 @@ async function openPdfBook(blob: Blob, name: string): Promise<ComicBook> {
       // — but that is the reader's need. A cover asks for a cover's width, and a scan exported with
       // its page box in pixels would otherwise be drawn 5100 px wide to become a 400 px tile.
       const natural = page.getViewport({ scale: 1 });
-      const scale = request.maxWidth === undefined ? 2 : Math.min(2, request.maxWidth / natural.width);
+      // A page asked for by the reader is drawn at most `PAGE_MAX_WIDTH` px wide. Two things meet
+      // here: a scan whose page box is stated in points (`612 x 792`) needs more than 1:1 to be
+      // sharp on a 3x phone, and a scan whose page box is already in pixels (2550 x 3300) must not be
+      // doubled — that is a 33-megapixel canvas, which took over ninety seconds and drew nothing.
+      const wanted = request.maxWidth ?? PAGE_MAX_WIDTH;
+      const scale = Math.min(2, wanted / natural.width);
       const viewport = page.getViewport({ scale });
       const canvas = document.createElement("canvas");
       canvas.width = Math.ceil(viewport.width);

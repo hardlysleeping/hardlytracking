@@ -287,6 +287,23 @@ async function serveRepo(request, response) {
  * a proxy for the whole LAN.
  */
 const IMAGE_MAX_BYTES = 32 * 1024 * 1024;
+/**
+ * A scanned volume.
+ *
+ * Bigger than the image ceiling because a comic is one file: a 200-page scan lands between 10 and
+ * 60 MB, and archive.org's worst items run past 150. Still a ceiling — the largest real volume that
+ * is not a mistake is about this size.
+ */
+const FILE_MAX_BYTES = 192 * 1024 * 1024;
+
+/**
+ * What a book file may be.
+ *
+ * A CBR is a RAR with a different name, so both spellings arrive, and some storage nodes answer a
+ * generic binary type. A web page is the case this refuses: a 404 notice has to be an error, not an
+ * archive handed to the reader to fail on.
+ */
+const FILE_TYPES = /^(application\/(pdf|zip|x-cbz|vnd\.comicbook\+zip|x-rar-compressed|vnd\.rar|octet-stream)|image\/vnd\.rar)/i;
 const HEADER_ALLOW = new Set(["user-agent", "referer", "origin", "accept", "accept-language", "cookie"]);
 
 function privateHost(hostname) {
@@ -299,7 +316,16 @@ function privateHost(hostname) {
   return false;
 }
 
-async function serveImage(request, response) {
+/**
+ * Fetch one URL on the browser's behalf and hand back what it answered.
+ *
+ * Two routes use it, and each exists because a browser cannot make the request itself. `/api/img`
+ * is for page images that need a `Referer` a browser will not let us set. `/api/file` is for a
+ * scanned volume: a 10-60 MB PDF or CBR from archive.org, fetched through our own server so the page
+ * is not asked to download it cross-origin. Neither is a general proxy — private addresses are
+ * refused, each kind is capped, and both sit behind the same token.
+ */
+async function serveUpstream(request, response, kind) {
   const incoming = new URL(request.url ?? "/", "http://localhost");
   const target = incoming.searchParams.get("url");
   const encoded = incoming.searchParams.get("h");
@@ -349,13 +375,17 @@ async function serveImage(request, response) {
       return;
     }
     const type = upstream.headers.get("content-type") ?? "";
-    if (!type.startsWith("image/")) {
+    // Each route accepts one kind of answer and says so: an image route that returned HTML would
+    // draw a broken picture, and a file route that returned a web page would hand a comic reader a
+    // 404 notice to parse as an archive.
+    const wanted = kind === "file" ? FILE_TYPES : /^image\//i;
+    if (!wanted.test(type)) {
       response.writeHead(415, { "Content-Type": "text/plain" });
-      response.end("not an image");
+      response.end(kind === "file" ? "not a book file" : "not an image");
       return;
     }
     const bytes = Buffer.from(await upstream.arrayBuffer());
-    if (bytes.length > IMAGE_MAX_BYTES) {
+    if (bytes.length > (kind === "file" ? FILE_MAX_BYTES : IMAGE_MAX_BYTES)) {
       response.writeHead(413, { "Content-Type": "text/plain" });
       response.end("too large");
       return;
@@ -493,7 +523,9 @@ const server = createServer((request, response) => {
     : path === "/api/repo"
     ? serveRepo
     : path === "/api/img"
-    ? serveImage
+    ? (req, res) => serveUpstream(req, res, "image")
+    : path === "/api/file"
+    ? (req, res) => serveUpstream(req, res, "file")
     : path.startsWith("/api/dalvik/")
     ? serveDalvik
     : path.startsWith("/api/mihon/")

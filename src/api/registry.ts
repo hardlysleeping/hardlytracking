@@ -189,6 +189,9 @@ export async function createProviders(config: RegistryConfig): Promise<ProviderS
     createArchiveProvider({
       ...(config.fetchImpl === undefined ? {} : { fetchImpl: config.fetchImpl }),
       ...(config.archiveEnabled === undefined ? {} : { enabled: config.archiveEnabled }),
+      // Present so a downloaded volume is kept: the second read of a 40 MB scan must not be a
+      // second download, and a library that survives a reload should not forget a book it fetched.
+      ...(config.store === undefined ? {} : { store: config.store }),
     }),
   );
 
