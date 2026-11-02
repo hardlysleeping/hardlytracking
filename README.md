@@ -272,3 +272,12 @@ runs no extensions itself. Static files stay open (a browser navigation cannot s
 every `/api/*` call needs the token, as `x-hardlytracking-token` or `?token=`. Settings → Phone
 access shows the exact link to open on the phone, and a pairing link (`?host=…&token=…`) points a
 device at another desktop instead of itself.
+
+## Licence
+
+PolyForm Noncommercial 1.0.0 — read it, run it, change it, share it for any noncommercial purpose.
+Selling it, or shipping it as part of something you sell, is not permitted. The full text is in
+`LICENSE`.
+
+It is not GPL on purpose: this app is distributed through the App Store, and GPL-3.0's terms cannot
+be reconciled with the store's. PolyForm says plainly what GPL would have been standing in for here.
