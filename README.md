@@ -107,6 +107,11 @@ extension APKs run on the machine with nothing else to install. Builds come from
 | macOS 11+ | `..._macos-arm64.dmg` (Apple silicon) · `..._macos-x86_64.dmg` (Intel) | `..._macos-arm64-portable.zip` · `..._macos-x86_64-portable.zip` — a zipped `.app` |
 | Linux x64 | `.deb` (Debian/Ubuntu, glibc 2.35+) · `.AppImage` | `..._linux-x86_64-portable.tar.gz` — the binary and its `runtime/` folder |
 
+Releases are assembled by CI from a tag: `desktop.yml` publishes the installers and the IPA is attached
+by hand, because that workflow is manual-only and uploads an artifact rather than a release asset. The
+order of operations, the three files the version lives in, and the queue failure that skipped a release
+once are in `docs/releasing.md`.
+
 Every file carries the extension host — the server jar and a JVM for that platform — so nothing else
 has to be installed. The portable builds are the same tree the installers are built from, which means
 `runtime/` sits beside the executable exactly where the app looks for it: move the whole folder, keep
