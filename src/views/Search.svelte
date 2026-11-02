@@ -11,6 +11,7 @@
    * candidates is five clicks, not five round trips through the series page and Back. The series page
    * is still one button away inside the pane — it is where chapters live, not where you decide.
    */
+  import { tick } from "svelte";
   import { library } from "../state/library.svelte";
   import { providerFor } from "../api/registry";
   import type { Series, Source } from "../api/source";
@@ -274,10 +275,64 @@
 
   /** The pane's record: the fuller one when it has arrived, the search row until then. */
   const record = $derived(detailed ?? shown);
+
+  /**
+   * Bring the opened card into view, once, gently.
+   *
+   * The card is drawn after its own tile, so on a phone it can open just below the fold; jumping the
+   * whole page would lose the search box. `block: "nearest"` scrolls only as far as it must.
+   */
+  $effect(() => {
+    if (record === null) return;
+    void tick().then(() => {
+      const card = document.querySelector("[data-expanded]");
+      card?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    });
+  });
   const inLibrary = $derived(shown !== null && saved.has(shown.id));
 </script>
 
-<section class="view" class:split={shown !== null}>
+{#snippet detailCard()}
+  {#if record !== null}
+    <div class="detail" aria-label={`${record.title} details`}>
+        <div class="dhead">
+        <span class="dkind">{record.provider}</span>
+        <span class="sp"></span>
+        <button class="dclose" onclick={close} title="Close" aria-label="Close">✕</button>
+      </div>
+      <div class="dscroll">
+        <div class="dcover"><Cover series={record} size="hero" /></div>
+        <h3>{record.title}</h3>
+        <div class="dmeta">
+          {#if record.author}<span>{record.author}</span>{/if}
+          {#if record.status}<span class="pill">{record.status}</span>{/if}
+          {#if inLibrary}<span class="pill saved">In your library</span>{/if}
+        </div>
+        {#if record.description !== undefined && record.description !== ""}
+          <p class="ddesc">{record.description}</p>
+        {:else if detailState === "loading"}
+          <p class="ddesc muted">Reading the description from the source…</p>
+        {:else if detailState === "error"}
+          <p class="ddesc muted">The source did not answer with a description ({detailError}).</p>
+        {:else}
+          <p class="ddesc muted">This source gives no description for this title.</p>
+        {/if}
+        <div class="dact">
+          <button class="btn ghost" onclick={() => (actions = record)}>Read, keep, download…</button>
+          {#if inLibrary}
+            <button class="btn" onclick={() => go(pathTo("series", record.id))}>Open</button>
+            <button class="btn ghost" onclick={() => void library.unsave(record.id)}>Remove from library</button>
+          {:else}
+            <button class="btn primary" onclick={() => void library.save(record)}>Save to library</button>
+            <button class="btn ghost" onclick={() => go(pathTo("series", record.id))}>Open chapters</button>
+          {/if}
+        </div>
+      </div>
+    </div>
+  {/if}
+{/snippet}
+
+<section class="view">
   <header class="bar">
     <h1>Search</h1>
     <button
@@ -348,7 +403,7 @@
     </div>
   </div>
 
-  <div class="stage" class:split={shown !== null}>
+  <div class="stage">
     <div class="results">
       {#if notice !== ""}
         <p class="notice" role="status">{notice}</p>
@@ -389,6 +444,8 @@
               onpick={(series) => show(series)}
               onlongpress={(series) => (actions = series)}
               onselect={(series) => toggleSelect(series.id)}
+              expandAfter={record !== null && block.items.some((item) => item.id === record.id) ? record.id : null}
+              expanded={record !== null ? detailCard : null}
             />
           {/if}
           {#if block.hasNext}
@@ -398,43 +455,6 @@
       {/each}
     </div>
 
-    {#if record !== null}
-      <aside class="detail" aria-label={`${record.title} details`}>
-        <div class="dhead">
-          <span class="dkind">{record.provider}</span>
-          <span class="sp"></span>
-          <button class="dclose" onclick={close} title="Close" aria-label="Close">✕</button>
-        </div>
-        <div class="dscroll">
-          <div class="dcover"><Cover series={record} size="hero" /></div>
-          <h3>{record.title}</h3>
-          <div class="dmeta">
-            {#if record.author}<span>{record.author}</span>{/if}
-            {#if record.status}<span class="pill">{record.status}</span>{/if}
-            {#if inLibrary}<span class="pill saved">In your library</span>{/if}
-          </div>
-          {#if record.description !== undefined && record.description !== ""}
-            <p class="ddesc">{record.description}</p>
-          {:else if detailState === "loading"}
-            <p class="ddesc muted">Reading the description from the source…</p>
-          {:else if detailState === "error"}
-            <p class="ddesc muted">The source did not answer with a description ({detailError}).</p>
-          {:else}
-            <p class="ddesc muted">This source gives no description for this title.</p>
-          {/if}
-          <div class="dact">
-            <button class="btn ghost" onclick={() => (actions = record)}>Read, keep, download…</button>
-            {#if inLibrary}
-              <button class="btn" onclick={() => go(pathTo("series", record.id))}>Open</button>
-              <button class="btn ghost" onclick={() => void library.unsave(record.id)}>Remove from library</button>
-            {:else}
-              <button class="btn primary" onclick={() => void library.save(record)}>Save to library</button>
-              <button class="btn ghost" onclick={() => go(pathTo("series", record.id))}>Open chapters</button>
-            {/if}
-          </div>
-        </div>
-      </aside>
-    {/if}
   </div>
 
   <SeriesActions
@@ -462,10 +482,6 @@
   .view {
     padding: var(--s4) var(--s4) var(--s7);
     max-width: 1100px;
-  }
-
-  .view.split {
-    max-width: 1400px;
   }
 
   .bar {
@@ -549,15 +565,9 @@
     color: var(--text-2);
   }
 
-  /* The split: the grid narrows and the pane sits beside it, so choosing between results never
-     leaves the search. Below 940px there is no room for two columns and the pane becomes the
-     screen instead — same idea, phone shape. */
-  .stage.split {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(320px, 380px);
-    gap: var(--s4);
-    align-items: start;
-  }
+  /* The opened card is drawn *inside* the result grid, in the row after its own tile, so the tiles
+     after it move down and the search stays where it was. Nothing is covered by a pane and nothing
+     is replaced by a full screen. */
 
   .block {
     margin-bottom: var(--s6);
@@ -592,15 +602,38 @@
   }
 
   .detail {
-    position: sticky;
-    top: var(--s3);
     display: grid;
     grid-template-rows: auto minmax(0, 1fr);
-    max-height: calc(100dvh - var(--s7));
-    border: 1px solid var(--line);
+    border: 1px solid var(--line-strong);
     border-radius: var(--r3);
     background: var(--surface);
     overflow: hidden;
+    /* It grows where the tile was; a still grid with the answer drawn somewhere else is the thing
+       this replaced. Reduced motion gets the card without the movement. */
+    animation: open-card 160ms ease-out;
+  }
+
+  @keyframes open-card {
+    from {
+      opacity: 0;
+      transform: translateY(-6px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .detail {
+      animation: none;
+    }
+  }
+
+  /* A long description scrolls inside the card rather than making the grid a mile long. */
+  .dscroll {
+    max-height: 70dvh;
+    overflow: auto;
   }
 
   .dhead {
@@ -714,22 +747,15 @@
   }
 
   @media (max-width: 939px) {
-    .stage.split {
-      display: block;
-    }
-
+    /* On a phone the card is still in the grid — it *is* the tile that opened, grown — so the
+       results above and below it stay on screen instead of being covered. */
     .detail {
-      position: fixed;
-      inset: 0;
-      z-index: 40;
-      max-height: none;
-      border: 0;
-      border-radius: 0;
-      padding-top: var(--safe-t);
+      border-radius: var(--r2);
     }
 
     .dscroll {
-      padding-bottom: calc(var(--s6) + var(--safe-b));
+      max-height: 76dvh;
+      padding-bottom: var(--s3);
     }
   }
 </style>

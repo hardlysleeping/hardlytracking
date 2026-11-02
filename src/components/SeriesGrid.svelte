@@ -6,6 +6,7 @@
    * space — never "two columns on a phone". The same component draws a source's results, the
    * library, and the left pane of a desktop split.
    */
+  import type { Snippet } from "svelte";
   import type { Series } from "../api/source";
   import type { Badge } from "../lib/library/badges";
   import Cover from "./Cover.svelte";
@@ -52,6 +53,16 @@
     badges?: Map<string, Badge[]>;
     /** Where a resume would go, per series: a `▶` is drawn only when this has a chapter. */
     resume?: Map<string, string>;
+    /**
+     * A card that opens *in the grid*, after the tile with this id.
+     *
+     * The tile stays where it is and the opened card takes the whole next row, so the rest of the
+     * grid moves down around it — the thing he asked for: "the card expands and everything shifts
+     * away". A pane beside the grid keeps the grid still and puts the answer somewhere else.
+     */
+    expandAfter?: string | null;
+    /** What to draw in that row. Ignored unless `expandAfter` matches a tile in this grid. */
+    expanded?: Snippet | null;
   }
   let {
     series,
@@ -68,6 +79,8 @@
     onmove,
     badges = new Map(),
     resume = new Map(),
+    expandAfter = null,
+    expanded = null,
   }: Props = $props();
 
   /**
@@ -248,6 +261,13 @@
           {/if}
         </span>
       </button>
+      {#if expanded !== null && expandAfter === item.id}
+        <!-- The opened card takes the next whole row: the tiles after it move down, so nothing is
+             hidden behind it and the grid stays where the user was reading. -->
+        <div class="expand" data-expanded="true">
+          {@render expanded()}
+        </div>
+      {/if}
     {/each}
   </div>
 {/if}
@@ -267,6 +287,13 @@
     display: flex;
     flex-direction: column;
     gap: 2px;
+  }
+
+  /* The opened card spans the grid it opened in. In a list it is one more row, which is already
+     full width. */
+  .expand {
+    grid-column: 1 / -1;
+    min-width: 0;
   }
 
   .tile {
