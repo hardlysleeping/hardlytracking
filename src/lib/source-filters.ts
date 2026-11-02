@@ -36,6 +36,8 @@ export interface RawFilter {
   textDefault?: unknown;
   triDefault?: unknown;
   sortDefault?: { index?: number | null; ascending?: boolean | null } | null;
+  /** The group this row belongs to, when the host declares one (see `dalvikFilters`). */
+  group?: string;
 }
 
 const TRI_STATES: TriState[] = ["IGNORE", "INCLUDE", "EXCLUDE"];
@@ -67,41 +69,49 @@ export function triStateOr(value: unknown, fallback: TriState = "IGNORE"): TriSt
  * also `unknown`, because a dropdown with nothing in it is not a control.
  */
 export function mapFilters(raw: readonly RawFilter[] | null | undefined): SourceFilter[] {
-  return (raw ?? []).map((filter): SourceFilter => {
-    const name = text(filter.name);
-    switch (filter.__typename) {
-      case "HeaderFilter":
-        return { kind: "header", name };
-      case "SeparatorFilter":
-        return { kind: "separator", name };
-      case "SelectFilter": {
-        const list = values(filter.values);
-        if (list.length === 0) return { kind: "unknown", name };
-        return { kind: "select", name, values: list, default: indexIn(filter.selectDefault, list) };
-      }
-      case "CheckBoxFilter":
-        return { kind: "checkbox", name, default: filter.checkDefault === true };
-      case "TextFilter":
-        return { kind: "text", name, default: text(filter.textDefault) };
-      case "SortFilter": {
-        const list = values(filter.values);
-        if (list.length === 0) return { kind: "unknown", name };
-        return {
-          kind: "sort",
-          name,
-          values: list,
-          default: {
-            index: indexIn(filter.sortDefault?.index, list),
-            ascending: filter.sortDefault?.ascending !== false,
-          },
-        };
-      }
-      case "TriStateFilter":
-        return { kind: "tristate", name, default: triStateOr(filter.triDefault) };
-      default:
-        return { kind: "unknown", name };
+  return (raw ?? []).map((filter): SourceFilter => withGroup(oneFilter(filter), filter));
+}
+
+/** One raw entry as the sheet's row. Group markers are attached by `mapFilters`. */
+function oneFilter(filter: RawFilter): SourceFilter {
+  const name = text(filter.name);
+  switch (filter.__typename) {
+    case "HeaderFilter":
+      return { kind: "header", name };
+    case "SeparatorFilter":
+      return { kind: "separator", name };
+    case "SelectFilter": {
+      const list = values(filter.values);
+      if (list.length === 0) return { kind: "unknown", name };
+      return { kind: "select", name, values: list, default: indexIn(filter.selectDefault, list) };
     }
-  });
+    case "CheckBoxFilter":
+      return { kind: "checkbox", name, default: filter.checkDefault === true };
+    case "TextFilter":
+      return { kind: "text", name, default: text(filter.textDefault) };
+    case "SortFilter": {
+      const list = values(filter.values);
+      if (list.length === 0) return { kind: "unknown", name };
+      return {
+        kind: "sort",
+        name,
+        values: list,
+        default: {
+          index: indexIn(filter.sortDefault?.index, list),
+          ascending: filter.sortDefault?.ascending !== false,
+        },
+      };
+    }
+    case "TriStateFilter":
+      return { kind: "tristate", name, default: triStateOr(filter.triDefault) };
+    default:
+      return { kind: "unknown", name };
+  }
+}
+
+/** Attach the parent group's name, when the host declared one. A blank name is not a group. */
+function withGroup(row: SourceFilter, filter: RawFilter): SourceFilter {
+  return filter.group === undefined || filter.group === "" ? row : { ...row, group: filter.group };
 }
 
 /** Whether this entry can carry a choice. A header, a rule and an unknown filter cannot. */
@@ -249,4 +259,192 @@ export function describeSelection(filters: readonly SourceFilter[], selection: S
     }
   });
   return bits.join(" · ");
+}
+
+// ---- the dalvik host: reading its dump, writing its list ---------------------
+
+/**
+ * One filter as an M-Extension-Server answers `filtersManga`.
+ *
+ * The host does not answer a typed tree. It serialises the extension's own Java objects with
+ * Jackson, so what arrives is **fields, not a class name**: `state` is the only clue to the kind —
+ * a boolean is a checkbox, a string text, a number a select or a tri-state, `{index, ascending}` a
+ * sort, an array a group. An extension's own subclasses add their own fields (`a`, `b`, …), which
+ * is why this type is open: nothing here may treat the runtime's field names as the whole story.
+ */
+export interface DalvikRawFilter {
+  name?: unknown;
+  state?: unknown;
+  values?: unknown;
+  a?: unknown;
+  [field: string]: unknown;
+}
+
+/** A label out of a value list that may hold strings or the extension's own option objects. */
+function labelsOf(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const out: string[] = [];
+  for (const value of raw) {
+    if (typeof value === "string") {
+      out.push(value);
+      continue;
+    }
+    if (value === null || typeof value !== "object") continue;
+    const entry = value as { a?: unknown; b?: unknown; name?: unknown };
+    // Mihon's own `Sort` option is a pair (`{a: label, b: value}`); a Select's is usually a string.
+    const label = typeof entry.a === "string" ? entry.a : typeof entry.name === "string" ? entry.name : null;
+    if (label !== null) out.push(label);
+  }
+  return out;
+}
+
+/**
+ * The host's dump as the one list `mapFilters` reads.
+ *
+ * **A group is flattened**: the group's name becomes a `header` row and each child a row of its own
+ * carrying `group`, because the sheet draws flat rows and the host addresses a change by name, not
+ * by position. Positions in the answer are this client's own, which is safe here and nowhere else —
+ * the Suwayomi path sends positions back on the wire, and this one does not.
+ *
+ * Two shapes cannot be honoured and become `unknown` (kept visible, and no state can be sent):
+ * a text child of a group — the host assigns `state = child.name` for those, so whatever is sent is
+ * ignored — and a group inside a group. `unknown` is the honest answer: it says the row exists and
+ * this build cannot set it, rather than drawing a control whose Apply is a no-op.
+ */
+export function dalvikFilters(raw: readonly DalvikRawFilter[] | null | undefined): RawFilter[] {
+  const rows: RawFilter[] = [];
+  for (const filter of raw ?? []) {
+    if (filter === null || typeof filter !== "object") continue;
+    const name = typeof filter.name === "string" ? filter.name : "";
+    if (!Array.isArray(filter.state)) {
+      rows.push(dalvikOne(filter));
+      continue;
+    }
+    // A group: its own name as a label, then its children, each marked with the parent.
+    rows.push({ __typename: "HeaderFilter", name });
+    for (const child of filter.state) {
+      if (child === null || typeof child !== "object") continue;
+      const childRow = dalvikOne(child as DalvikRawFilter);
+      const settable = childRow.__typename !== "TextFilter" && childRow.__typename !== "HeaderFilter" && childRow.__typename !== "UnknownFilter";
+      rows.push(settable ? { ...childRow, group: name } : { __typename: "UnknownFilter", name: typeof childRow.name === "string" ? childRow.name : "" });
+    }
+  }
+  return rows;
+}
+
+/** One dump entry as a raw row. The kind is inferred from the *shape* of `state`, and nothing else. */
+function dalvikOne(filter: DalvikRawFilter): RawFilter {
+  const name = typeof filter.name === "string" ? filter.name : "";
+  const state = filter.state;
+  if (state === undefined || state === null) {
+    // No state at all is a Header or a Separator — the host serialises both as `{name}` and there is
+    // no field that tells them apart. A label is the honest reading of either.
+    return { __typename: "HeaderFilter", name };
+  }
+  if (typeof state === "boolean") return { __typename: "CheckBoxFilter", name, checkDefault: state };
+  if (typeof state === "string") return { __typename: "TextFilter", name, textDefault: state };
+  if (typeof state === "number") {
+    const list = labelsOf(filter.values);
+    if (list.length === 0) return { __typename: "TriStateFilter", name, triDefault: TRI_STATES[indexIn(state, TRI_STATES)] };
+    return { __typename: "SelectFilter", name, values: list, selectDefault: indexIn(state, list) };
+  }
+  if (typeof state === "object") {
+    const sort = state as { index?: unknown; ascending?: unknown };
+    if (typeof sort.index !== "number") return { __typename: "UnknownFilter", name };
+    // `values` is the class's own label array; `a` is what some extensions declare instead.
+    const list = labelsOf(filter.values).length > 0 ? labelsOf(filter.values) : labelsOf(filter.a);
+    return {
+      __typename: "SortFilter",
+      name,
+      values: list,
+      sortDefault: { index: indexIn(sort.index, list), ascending: sort.ascending !== false },
+    };
+  }
+  return { __typename: "UnknownFilter", name };
+}
+
+/** One entry of the `filterList` a search carries. */
+export interface DalvikFilterChange {
+  name: string;
+  type: "select" | "checkbox" | "text" | "tristate" | "sort" | "group";
+  stateString?: string;
+  stateInt?: number;
+  stateList?: DalvikChildChange[];
+  stateSort?: { index: number; ascending: boolean };
+}
+
+/** One changed child of a group. The host's child type has no field for text. */
+export interface DalvikChildChange {
+  name: string;
+  type: "select" | "checkbox" | "tristate";
+  stateBoolean?: boolean;
+  stateInt?: number;
+}
+
+/**
+ * The selection as the host's `filterList`: name-keyed, one entry per filter the user changed.
+ *
+ * Three quirks of the host's reader, all measured against the running runtime rather than guessed:
+ *
+ * 1. **It matches by name**, so a stored position is resolved against the form this client just
+ *    read. A position the source no longer has is dropped by `cleanSelection` before it gets here.
+ * 2. **A top-level checkbox's state arrives in `stateList[0].stateBoolean`**, not in a field of its
+ *    own — its reader asks the first child of a list for a checkbox that has none.
+ * 3. **A group change carries only the children that changed**; the host starts from the source's
+ *    own defaults and applies what is named, so an untouched sibling keeps its default.
+ */
+export function dalvikChanges(filters: readonly SourceFilter[], selection: SourceFilterSelection): DalvikFilterChange[] {
+  const changes: DalvikFilterChange[] = [];
+  const groups = new Map<string, DalvikChildChange[]>();
+  for (const change of wireChanges(cleanSelection(filters, selection))) {
+    const filter = filters[change.position];
+    if (filter === undefined) continue;
+    const group = filter.group;
+    if (group === undefined) {
+      const entry = dalvikTopLevel(filter, change);
+      if (entry !== null) changes.push(entry);
+      continue;
+    }
+    const child = dalvikChild(filter, change);
+    if (child === null) continue;
+    const bucket = groups.get(group);
+    if (bucket === undefined) groups.set(group, [child]);
+    else bucket.push(child);
+  }
+  for (const [name, stateList] of groups) changes.push({ name, type: "group", stateList });
+  return changes;
+}
+
+function dalvikTopLevel(filter: SourceFilter, state: FilterState): DalvikFilterChange | null {
+  switch (filter.kind) {
+    case "select":
+      return "selectState" in state ? { name: filter.name, type: "select", stateInt: state.selectState } : null;
+    case "checkbox":
+      // Quirk 2: the host reads a checkbox's state off a one-entry list.
+      return "checkBoxState" in state
+        ? { name: filter.name, type: "checkbox", stateList: [{ name: filter.name, type: "checkbox", stateBoolean: state.checkBoxState }] }
+        : null;
+    case "text":
+      return "textState" in state ? { name: filter.name, type: "text", stateString: state.textState } : null;
+    case "sort":
+      return "sortState" in state ? { name: filter.name, type: "sort", stateSort: { index: state.sortState.index, ascending: state.sortState.ascending } } : null;
+    case "tristate":
+      return "triState" in state ? { name: filter.name, type: "tristate", stateInt: TRI_STATES.indexOf(state.triState) } : null;
+    default:
+      return null;
+  }
+}
+
+function dalvikChild(filter: SourceFilter, state: FilterState): DalvikChildChange | null {
+  const name = filter.name;
+  switch (filter.kind) {
+    case "select":
+      return "selectState" in state ? { name, type: "select", stateInt: state.selectState } : null;
+    case "checkbox":
+      return "checkBoxState" in state ? { name, type: "checkbox", stateBoolean: state.checkBoxState } : null;
+    case "tristate":
+      return "triState" in state ? { name, type: "tristate", stateInt: TRI_STATES.indexOf(state.triState) } : null;
+    default:
+      return null;
+  }
 }

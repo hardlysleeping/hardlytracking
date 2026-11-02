@@ -477,3 +477,126 @@ test("the index parses to the same extension as the host it installs into", asyn
     assert.deepEqual(mock.sources().map((s) => s.id), entry.sources.map((s) => s.id));
   });
 });
+
+// ---- a source's own filters, over the wire --------------------------------
+
+test("the host's own form arrives as the sheet's list; a source with none answers an empty one", async () => {
+  await withMock({}, async (mock) => {
+    const { provider } = wire(mock);
+
+    const form = await provider.filters(sourceId("json"));
+    assert.deepEqual(
+      form.map((row) => `${row.kind}:${row.name}`),
+      [
+        "checkbox:Has available chapters",
+        "header:Content rating",
+        "checkbox:Safe",
+        "checkbox:Suggestive",
+        "checkbox:Pornographic",
+        "sort:Sort",
+        "select:Created within last",
+        "header:Genre",
+        "tristate:Action",
+        "tristate:Horror",
+      ],
+      "a group is flattened into a header and its children, and each child keeps the group's name",
+    );
+    assert.deepEqual(
+      form.filter((row) => row.group !== undefined).map((row) => row.group),
+      ["Content rating", "Content rating", "Content rating", "Genre", "Genre"],
+    );
+    assert.equal(mock.state.calls.at(-1).method, "filtersManga");
+    assert.equal(mock.state.calls.at(-1).body.extensionId, mock.extensionId);
+
+    assert.deepEqual(await provider.filters(sourceId("cookie")), [], "no form is no button, not an error");
+
+    const html = await provider.filters(sourceId("html"));
+    assert.deepEqual(html.map((row) => row.kind), ["header", "text", "checkbox"], "two sources answer different forms");
+  });
+});
+
+test("a searched choice travels as the host's own filterList, and changes the answer", async () => {
+  await withMock({}, async (mock) => {
+    const { provider } = wire(mock);
+
+    const plain = await provider.search(sourceId("json"), "", 1);
+    assert.deepEqual(plain.items.map((s) => s.title), ["Fixture Title 1", "Fixture Title 2", "Fixture Title 3", "Fixture Title 4"]);
+    assert.equal(mock.state.calls.at(-1).body.filterList, undefined, "no choice means no filterList at all");
+
+    // "Has available chapters" is a top-level checkbox: the host reads its state off its first child.
+    const filtered = await provider.search(sourceId("json"), "", 1, { "0": { checkBoxState: true } });
+    assert.deepEqual(filtered.items.map((s) => s.title), ["Fixture Title 1", "Fixture Title 3"]);
+    assert.deepEqual(mock.state.calls.at(-1).body.filterList, [
+      {
+        name: "Has available chapters",
+        type: "checkbox",
+        stateList: [{ name: "Has available chapters", type: "checkbox", stateBoolean: true }],
+      },
+    ]);
+  });
+});
+
+test("a sort and a group child change the result set, not only the payload", async () => {
+  await withMock({}, async (mock) => {
+    const { provider } = wire(mock);
+
+    const sorted = await provider.search(sourceId("json"), "", 1, { "5": { sortState: { index: 0, ascending: false } } });
+    assert.deepEqual(sorted.items.map((s) => s.title), ["Fixture Title 4", "Fixture Title 3", "Fixture Title 2", "Fixture Title 1"]);
+
+    // One rating checkbox turned off is a group change carrying that child alone: the other two keep
+    // the source's own defaults.
+    const rated = await provider.search(sourceId("json"), "", 1, { "2": { checkBoxState: false }, "3": { checkBoxState: false } });
+    // Safe off, Suggestive off, Pornographic left at its default (off): nothing on page 1 survives.
+    assert.deepEqual(rated.items, []);
+    assert.deepEqual(mock.state.calls.at(-1).body.filterList, [
+      {
+        name: "Content rating",
+        type: "group",
+        stateList: [
+          { name: "Safe", type: "checkbox", stateBoolean: false },
+          { name: "Suggestive", type: "checkbox", stateBoolean: false },
+        ],
+      },
+    ]);
+
+    // Naming the one rating the page does hold is a filter that keeps exactly it: Safe off leaves
+    // Suggestive (the form's other default) and nothing else.
+    const suggestive = await provider.search(sourceId("json"), "", 1, { "2": { checkBoxState: false } });
+    assert.deepEqual(suggestive.items.map((s) => s.title), ["Fixture Title 3"], "only one title on the page is suggestive");
+  });
+});
+
+test("a group tri-state includes and excludes; a text field narrows the html source", async () => {
+  await withMock({}, async (mock) => {
+    const { provider } = wire(mock);
+
+    const action = await provider.search(sourceId("json"), "", 1, { "8": { triState: "INCLUDE" } });
+    assert.deepEqual(action.items.map((s) => s.title), ["Fixture Title 1", "Fixture Title 2", "Fixture Title 4"], "title 3 is the horror one");
+
+    const horror = await provider.search(sourceId("json"), "", 1, { "9": { triState: "INCLUDE" } });
+    assert.deepEqual(horror.items.map((s) => s.title), ["Fixture Title 3"]);
+
+    const authored = await provider.search(sourceId("html"), "", 1, { "1": { textState: "Other" } });
+    assert.deepEqual(authored.items.map((s) => s.title), ["Fixture Title 1", "Fixture Title 3"], "odd titles are by Other Scribe");
+
+    const finished = await provider.search(sourceId("html"), "", 1, { "2": { checkBoxState: true } });
+    assert.deepEqual(finished.items.map((s) => s.title), ["Fixture Title 2", "Fixture Title 4"]);
+  });
+});
+
+test("the form is read once and the search that carries choices reuses it", async () => {
+  await withMock({}, async (mock) => {
+    const { provider } = wire(mock);
+    await provider.filters(sourceId("json"));
+    await provider.search(sourceId("json"), "", 1, { "0": { checkBoxState: true } });
+    assert.equal(mock.state.calls.filter((call) => call.method === "filtersManga").length, 1, "the sheet's answer is the one the search uses");
+
+    // A search that carries a choice with no form read yet asks for it itself, rather than sending a
+    // change against names it does not know.
+    await mock.reset();
+    const fresh = wire(mock);
+    await fresh.provider.search(sourceId("json"), "", 1, { "0": { checkBoxState: true } });
+    assert.equal(mock.state.calls.filter((call) => call.method === "filtersManga").length, 1);
+    assert.equal(mock.state.calls.at(-1).body.filterList[0].name, "Has available chapters");
+  });
+});

@@ -25,6 +25,10 @@
  *   GET  /image/<encoded>?headers=→ image bytes, with the headers the page declared
  *   POST /stop                    → { stopped: true }
  *
+ * Two of the `/dalvik` methods carry a source's own filter form: `filtersManga` answers the dump a
+ * real host answers (see `FILTER_FORMS`), and `getSearchManga` reads `filterList` back the way the
+ * host reads it and applies it — so a client whose payload is wrong fails here.
+ *
  * plus what the app needs around it: `/site/<source>/…` (a source's own site, so a *relative*
  * image URL has somewhere real to resolve to), `/login` (the WebView login the runtime would
  * show) and `/repo/…` (the static repository in `fixtures/repo/`).
@@ -108,6 +112,62 @@ const TRAITS = [
 /** The two cookies the fixture sets. Values are fixed so a test can assert the round trip. */
 export const SESSION_COOKIE = { name: "fixture_session", value: "s3ss10n" };
 export const LOGIN_COOKIE = { name: "fixture_login", value: "logged-in" };
+
+/**
+ * The forms `filtersManga` answers, in the host's own shape.
+ *
+ * This is not a typed tree: the runtime serialises the extension's Java filter objects with
+ * Jackson, so a filter is whatever fields its class exposes — `state` is the only clue to its kind
+ * (see `dalvikFilters` in `src/lib/source-filters.ts`), a group's state is a list of its children,
+ * and an extension's own subclasses add their own fields (`a`, `b`, …). These forms are copied from
+ * the measured MangaDex answer, because a fixture that is tidier than the real thing proves nothing.
+ *
+ * `json` has a form, `html` has a different one (so two sources can be seen to answer differently),
+ * and `login`/`cookie` have none — a source with nothing to filter must draw no Filters button.
+ */
+export const FILTER_FORMS = {
+  json: [
+    // A top-level checkbox: its state is a boolean, and a change comes back on `stateList[0]`.
+    { name: "Has available chapters", state: false },
+    // A group of checkboxes (a rating).
+    {
+      name: "Content rating",
+      a: 0,
+      state: [
+        { name: "Safe", state: true, a: "safe" },
+        { name: "Suggestive", state: true, a: "suggestive" },
+        { name: "Pornographic", state: false, a: "pornographic" },
+      ],
+    },
+    // A sort: `state` is a selection, `values` its labels.
+    {
+      name: "Sort",
+      state: { index: 0, ascending: true },
+      values: ["Title", "Number"],
+      a: [
+        { a: "Title", b: "title" },
+        { a: "Number", b: "number" },
+      ],
+    },
+    // A select: a number into `values`.
+    { name: "Created within last", state: 0, values: ["Any", "Day", "Week"] },
+    // A group of tri-states: 0 ignore, 1 include, 2 exclude.
+    {
+      name: "Genre",
+      a: 4,
+      state: [
+        { name: "Action", state: 0, a: "action" },
+        { name: "Horror", state: 0, a: "horror" },
+      ],
+    },
+  ],
+  html: [
+    // A filter with no state at all: a header or a separator, indistinguishable on the wire.
+    { name: "Narrow it down" },
+    { name: "Author", state: "" },
+    { name: "Finished only", state: false },
+  ],
+};
 
 /** A 1×1 PNG: enough to be an honest `image/png` with real bytes. */
 const PNG = Buffer.from(
@@ -264,9 +324,10 @@ export function createDalvikMock(options = {}) {
       url,
       title: `Fixture Title ${n}`,
       artist: "Fixture Artist",
-      author: "Fixture Author",
+      // Two authors and two genres, so the fixture's own filters have something to bite on.
+      author: n % 2 === 0 ? "Fixture Author" : "Other Scribe",
       description: `Fixture description for ${n}.`,
-      genre: "Action, Slice of Life",
+      genre: n % 3 === 0 ? "Horror, Slice of Life" : "Action, Slice of Life",
       status: 1,
       thumbnail_url: cover,
       initialized: true,
@@ -321,6 +382,126 @@ export function createDalvikMock(options = {}) {
       mangas.push(manga);
     }
     return { mangas, hasNextPage: page < settings.maxPage };
+  }
+
+  // ------------------------------------------------------------ a source's own filter form
+
+  /**
+   * How this fixture applies a `filterList`, which is how the real host applies one.
+   *
+   * The contract, measured against M-Extension-Server rather than guessed:
+   *
+   * - an entry is matched **by name**, never by position;
+   * - a top-level checkbox's value arrives on its first child (`stateList[0].stateBoolean`) — the
+   *   host's reader asks a one-entry list for a filter that has no children of its own;
+   * - a select and a tri-state arrive as `stateInt`, text as `stateString`, a sort as `stateSort`;
+   * - a group carries only the children that changed, each `stateBoolean` or `stateInt`;
+   * - an entry that does not arrive keeps the form's own default, which is why an untouched
+   *   sibling is not sent at all.
+   *
+   * The forms below are the fixture's own invention — it is not a Mihon implementation — but the
+   * *reading* of the payload is the host's, so a client whose payload is wrong fails here too.
+   */
+  function changeFor(filterList, name) {
+    if (!Array.isArray(filterList)) return undefined;
+    return filterList.find((entry) => entry !== null && typeof entry === "object" && entry.name === name);
+  }
+
+  function flagOf(entry) {
+    const first = Array.isArray(entry?.stateList) ? entry.stateList[0] : undefined;
+    return typeof first?.stateBoolean === "boolean" ? first.stateBoolean : undefined;
+  }
+
+  function intOf(entry) {
+    return typeof entry?.stateInt === "number" ? entry.stateInt : undefined;
+  }
+
+  /** `Fixture Title 7` -> 7, from the url the fixture minted (`/api/v1/manga/7`, `/manga/fixture-7`). */
+  function numberOf(manga) {
+    const match = /(\d+)$/.exec(String(manga.url));
+    const n = match === null ? NaN : Number(match[1]);
+    return Number.isFinite(n) && n > 0 ? n : 1;
+  }
+
+  /** The rating the fixture gives a title: one of the form's three checkboxes. */
+  function ratingOf(n) {
+    if (n % 5 === 0) return "Pornographic";
+    return n % 3 === 0 ? "Suggestive" : "Safe";
+  }
+
+  function genreOf(n) {
+    return n % 3 === 0 ? "Horror" : "Action";
+  }
+
+  /**
+   * A group's effective child states: the form's own defaults, then whatever the payload names.
+   *
+   * This is the host's behaviour and the reason a change only has to carry the children that
+   * changed — an unmentioned sibling keeps the default the source declared.
+   */
+  function groupState(name, filterList) {
+    const form = FILTER_FORMS.json.find((filter) => filter.name === name);
+    const values = new Map(Array.isArray(form?.state) ? form.state.map((child) => [String(child.name), child.state]) : []);
+    const sent = changeFor(filterList, name);
+    for (const child of Array.isArray(sent?.stateList) ? sent.stateList : []) {
+      const value = typeof child?.stateBoolean === "boolean" ? child.stateBoolean : child?.stateInt;
+      if (value !== undefined) values.set(String(child.name), value);
+    }
+    return values;
+  }
+
+  function applyJsonForm(rows, filterList) {
+    const chapters = changeFor(filterList, "Has available chapters");
+    const ratings = groupState("Content rating", filterList);
+    const allowed = new Set([...ratings].filter(([, on]) => on === true).map(([name]) => name));
+    const since = intOf(changeFor(filterList, "Created within last")) ?? 0;
+    const genres = groupState("Genre", filterList);
+    const sort = changeFor(filterList, "Sort")?.stateSort;
+
+    let out = rows.filter((manga) => {
+      const n = numberOf(manga);
+      // A title the fixture says has no available chapters is an even one.
+      if (flagOf(chapters) === true && n % 2 === 0) return false;
+      if (!allowed.has(ratingOf(n))) return false;
+      if (since === 1 && n > 1) return false;
+      if (since === 2 && n > 2) return false;
+      for (const [name, state] of genres) {
+        const mode = typeof state === "number" ? state : 0;
+        if (mode === 0) continue;
+        const matches = genreOf(n) === name;
+        if (mode === 1 && !matches) return false;
+        if (mode === 2 && matches) return false;
+      }
+      return true;
+    });
+
+    if (sort !== undefined && typeof sort.index === "number") {
+      const key = sort.index === 1 ? (manga) => numberOf(manga) : (manga) => String(manga.title).toLowerCase();
+      out = [...out].sort((a, b) => (key(a) < key(b) ? -1 : key(a) > key(b) ? 1 : 0) * (sort.ascending === false ? -1 : 1));
+    }
+    return out;
+  }
+
+  function applyHtmlForm(rows, filterList) {
+    const author = changeFor(filterList, "Author");
+    const wanted = typeof author?.stateString === "string" ? author.stateString.trim().toLowerCase() : "";
+    const finished = flagOf(changeFor(filterList, "Finished only"));
+    return rows.filter((manga) => {
+      if (wanted !== "" && !String(manga.author).toLowerCase().includes(wanted)) return false;
+      // Even titles are the finished ones.
+      if (finished === true && numberOf(manga) % 2 !== 0) return false;
+      return true;
+    });
+  }
+
+  function applyFilters(trait, rows, filterList) {
+    if (!Array.isArray(filterList) || filterList.length === 0) return rows;
+    // A filter sent to a source that declares no form changes nothing — the host's own reader
+    // finds no filter by that name and leaves the list alone.
+    if (!Array.isArray(FILTER_FORMS[trait.key])) return rows;
+    if (trait.key === "json") return applyJsonForm(rows, filterList);
+    if (trait.key === "html") return applyHtmlForm(rows, filterList);
+    return rows;
   }
 
   // ------------------------------------------------------------------------------- the routes
@@ -379,6 +560,7 @@ export function createDalvikMock(options = {}) {
       "getChapterList",
       "getPageList",
       "headersManga",
+      "filtersManga",
       "preferencesManga",
     ]);
     if (sourceMethods.has(method) && trait === undefined) {
@@ -444,7 +626,8 @@ export function createDalvikMock(options = {}) {
       case "supportLatestManga":
         return true;
       case "filtersManga":
-        return [];
+        // The source's own form, in the host's own shape: a dump of its filter objects.
+        return FILTER_FORMS[trait.key] ?? [];
       case "preferencesManga":
         return [];
       case "headersManga":
@@ -452,8 +635,12 @@ export function createDalvikMock(options = {}) {
       case "getPopularManga":
       case "getLatestManga":
         return listPage(trait, page, settings);
-      case "getSearchManga":
-        return listPage(trait, page, settings, String(body.search ?? ""));
+      case "getSearchManga": {
+        // `filterList` is applied the way the real host applies it — a filtered answer is the only
+        // proof a filter sheet works.
+        const listed = listPage(trait, page, settings, String(body.search ?? ""));
+        return { ...listed, mangas: applyFilters(trait, listed.mangas, body.filterList) };
+      }
       case "getDetailsManga": {
         const url = String(body.mangaData?.url ?? "");
         const n = Number(url.split("-").pop() ?? 1) || 1;
@@ -652,13 +839,15 @@ export function createDalvikMock(options = {}) {
       await fetch(`${baseUrl}/__reset`, { method: "POST" });
       return mock;
     },
-    async listen() {
+    async listen(port = 0) {
       const apk = await readFile(`${REPO_DIR}${APK_FILE}`).catch(() => Buffer.from(""));
       state.apkBytes = apk;
       state.extensionId = createHash("sha256").update(apk).digest("hex");
-      await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-      const { port } = server.address();
-      baseUrl = `http://127.0.0.1:${port}`;
+      // Port 0 is what every test wants (an ephemeral port); a manual run names one so the app can
+      // be pointed at it.
+      await new Promise((resolve) => server.listen(port, "127.0.0.1", resolve));
+      const address = server.address();
+      baseUrl = `http://127.0.0.1:${typeof address === "object" && address !== null ? address.port : port}`;
       return mock;
     },
     async close() {

@@ -27,7 +27,8 @@
 import { apiHeaders } from "../lib/host";
 import type { CookieJar } from "../lib/webview/store";
 import { hostOf } from "../lib/webview/cookies";
-import { joinId, nativeId, paged, providerLabel, type Chapter, type Page, type Paged, type ProviderKind, type Series, type Source, type SourceProvider } from "./source";
+import { dalvikChanges, dalvikFilters, mapFilters, type DalvikRawFilter } from "../lib/source-filters";
+import { joinId, nativeId, paged, providerLabel, type Chapter, type Page, type Paged, type ProviderKind, type Series, type Source, type SourceFilter, type SourceFilterSelection, type SourceProvider } from "./source";
 
 export type DalvikMethod =
   | "sourcesManga"
@@ -711,6 +712,40 @@ export function createDalvikProvider(options: DalvikProviderOptions): SourceProv
     return { url, initialized: true, ...(title === undefined ? {} : { title }) };
   }
 
+  /** The forms read for this session, keyed by bare source id. Empty is a real answer. */
+  const forms = new Map<string, SourceFilter[]>();
+
+  /**
+   * The host's filter form, read once and remembered.
+   *
+   * A search that carries choices needs the *names* those choices belong to, and the UI has already
+   * asked for the form when it drew the sheet — so a remembered answer is the one the user is
+   * looking at, not a second take on it.
+   */
+  async function formFor(sourceId: string): Promise<SourceFilter[]> {
+    const remembered = forms.get(sourceId);
+    return remembered ?? readFilters(sourceId);
+  }
+
+  /**
+   * `filtersManga`, as the sheet's list.
+   *
+   * The host answers the extension's own objects, untyped and group-shaped (`dalvikFilters`
+   * normalises them); a source with no filters answers `[]`, which is the same answer as "nothing to
+   * show" and draws no Filters button. The empty answer is remembered too, so a source that has none
+   * is not asked again on every search.
+   */
+  async function readFilters(sourceId: string): Promise<SourceFilter[]> {
+    const extension = extensionFor(sourceId);
+    const result = await invoke<DalvikRawFilter[]>(
+      { method: "filtersManga", extensionId: extension.extensionId, sourceId },
+      baseUrlForSourceId(sourceId),
+    );
+    const rows = mapFilters(dalvikFilters(Array.isArray(result.body) ? result.body : []));
+    forms.set(sourceId, rows);
+    return rows;
+  }
+
   function toChapter(sourceId: string, chapter: DalvikChapter): Chapter {
     const number = typeof chapter.chapter_number === "number" && chapter.chapter_number > 0 ? chapter.chapter_number : 0;
     return {
@@ -775,18 +810,44 @@ export function createDalvikProvider(options: DalvikProviderOptions): SourceProv
       );
     },
 
-    async search(namespaced: string, query: string, page: number): Promise<Paged<Series>> {
+    async search(namespaced: string, query: string, page: number, filters?: SourceFilterSelection): Promise<Paged<Series>> {
       const sourceId = bareSourceId(namespaced, kind);
       const extension = extensionFor(sourceId);
       const sourceBaseUrl = baseUrlForSourceId(sourceId);
+      // The host matches a change by **name**, so the stored selection (which is keyed by position,
+      // like every provider's) is resolved here against the form this client read for the source. No
+      // changes means no `filterList` at all: the source's own defaults are then exactly what it gets.
+      const changes = filters === undefined ? [] : dalvikChanges(await formFor(sourceId), filters);
       const result = await invoke<{ mangas: DalvikManga[]; hasNextPage: boolean }>(
-        { method: "getSearchManga", extensionId: extension.extensionId, sourceId, page, search: query },
+        {
+          method: "getSearchManga",
+          extensionId: extension.extensionId,
+          sourceId,
+          page,
+          search: query,
+          ...(changes.length === 0 ? {} : { filterList: changes }),
+        },
         sourceBaseUrl,
       );
       return paged(
         (result.body.mangas ?? []).map((manga) => toSeries(sourceId, manga, sourceBaseUrl)),
         result.body.hasNextPage === true,
       );
+    },
+
+    /**
+     * The source's own form, or an empty list.
+     *
+     * The host answers `filtersManga` with a serialisation of the extension's Java filter objects —
+     * untyped, group-shaped, with the extension's own fields mixed in. `dalvikFilters` turns that
+     * into the same normalised list the Suwayomi path reads, so `mapFilters` stays the only mapper
+     * and the sheet draws a dalvik source exactly like any other.
+     *
+     * The answer is kept for this session: a search needs the *names* to send a choice back, and
+     * asking the host twice for a form the UI already asked for would cost a round trip per search.
+     */
+    async filters(namespaced: string): Promise<SourceFilter[]> {
+      return readFilters(bareSourceId(namespaced, kind));
     },
 
     async details(seriesId: string): Promise<Series> {

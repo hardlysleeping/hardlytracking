@@ -39,6 +39,20 @@ upstream ObjC++ bridge lives in a Flutter plugin whose repository has no licence
 vendored; the host here was written against the server's published entry point
 (`mextensionserver.EmbeddedBridge`) and the JVM's JNI interface.
 
+## What the jar answers, and the floor it sets
+
+Every `/dalvik` method — `sourcesManga`, `filtersManga`, `getSearchManga`, the image proxy — is the
+jar's, not this app's: the ObjC++ host only starts the VM and pauses/resumes it. So a capability the
+server jar has is available on the phone without touching native code, and a capability it lacks cannot
+be added here at all.
+
+That is why a source's own filters work on the iPhone with no ObjC++ change: `MExtensionServer.jar`
+implements `filtersManga` **and** reads a `filterList` back (`MihonInvoker.convertFilterList`). The
+pinned `ios-runtime-v9` release has both, as does the Linux jar pinned for the desktop and the HT-Server
+(`plugins/mihon-runtime/linux/runner.jar`). Pinning a different release must keep `convertFilterList`
+in `MihonInvoker` — the app cannot ask (no capability flag advertises it), so an older jar would draw a
+Filters sheet whose Apply changes nothing. `docs/source-filters.md` has the shapes and the measurements.
+
 ## Why the constraints are not preferences
 
 - **The plugin is a local npm package, and its podspec sits at the package root.** `cap sync` builds the app's

@@ -127,7 +127,17 @@ export interface Page {
  */
 export type TriState = "IGNORE" | "INCLUDE" | "EXCLUDE";
 
-export type SourceFilter =
+/**
+ * A row that belongs to a group the source declares.
+ *
+ * Suwayomi's GraphQL flattens a group away; an M-Extension-Server hands back the extension's own
+ * Java object graph, where a group is a filter whose state is a list of children. The row is drawn
+ * as a plain control either way, and `group` carries the parent's name so a host that addresses a
+ * filter by name (rather than by position) can send the change back inside its group.
+ */
+export type Grouped<T> = T & { group?: string };
+
+export type SourceFilter = Grouped<
   | { kind: "header"; name: string }
   | { kind: "separator"; name: string }
   | { kind: "select"; name: string; values: string[]; default: number }
@@ -135,7 +145,8 @@ export type SourceFilter =
   | { kind: "text"; name: string; default: string }
   | { kind: "sort"; name: string; values: string[]; default: { index: number; ascending: boolean } }
   | { kind: "tristate"; name: string; default: TriState }
-  | { kind: "unknown"; name: string };
+  | { kind: "unknown"; name: string }
+>;
 
 /**
  * What the user chose for one filter, in the wire shape the runtime reads.
