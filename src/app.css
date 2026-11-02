@@ -294,6 +294,19 @@ button {
   color: var(--text-1);
 }
 
+/* A chip that cannot do anything yet says so instead of looking pressed and doing nothing. */
+.chip:disabled,
+.chip[disabled] {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.chip:disabled:hover,
+.chip[disabled]:hover {
+  border-color: var(--line);
+  color: var(--text-2);
+}
+
 .field {
   background: var(--surface);
   border: 1px solid var(--line);

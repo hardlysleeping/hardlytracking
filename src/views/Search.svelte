@@ -19,7 +19,7 @@
   import Cover from "../components/Cover.svelte";
   import { settings } from "../state/settings.svelte";
   import { isFresh, searchCacheKey, type CachedSearch } from "../lib/search/index";
-  import { pinnedSources, togglePin } from "../lib/pinned";
+  import { orderForPicker, pinnedSources, pruneSelection, seedSelection, togglePin } from "../lib/pinned";
   import { go, pathTo } from "../lib/nav";
   import { filterByLevel, levelOfSource } from "../lib/content/levels";
   import { languageLabel } from "../lib/language";
@@ -71,19 +71,32 @@
   /** Pinned sources, in the order the user pinned them, limited to what is actually installed. */
   const pinned = $derived(pinnedSources(sources, settings.pinnedSources));
 
+  /** What the selector draws: the user's pinned sources first, then the rest by name. */
+  const pickerOrder = $derived(orderForPicker(sources, settings.pinnedSources));
+
   /** What this device already has. A search result is a proposal; the library is the decision. */
   const saved = $derived(new Set(library.library.map((row) => row.id)));
 
   const rows = $derived(blocks.flatMap((block) => block.items));
 
   $effect(() => {
-    // First visit: pinned sources when the user has any (Komikku's rule), otherwise the first dozen —
-    // sixty sources at once is a hammer, not a search.
-    if (picked || sources.length === 0) return;
-    picked = true;
-    chosen = new Set(
-      settings.searchPinnedOnly && pinned.length > 0 ? pinned.map((source) => source.id) : sources.slice(0, 12).map((source) => source.id),
-    );
+    // Sources arrive after the first render (an extension has to be read, a server has to answer), and
+    // one can also leave — the content level raised, an extension uninstalled. Ticking once and never
+    // again left the selector showing chips with nothing chosen and no sentence saying why, which is
+    // exactly what "poorly done" looks like.
+    if (sources.length === 0) return;
+    const kept = pruneSelection(chosen, sources);
+    if (!picked) {
+      picked = true;
+      chosen = new Set(seedSelection(sources, settings.pinnedSources, settings.searchPinnedOnly));
+      return;
+    }
+    // Only a *prune* rewrites the selection. When every ticked source has disappeared, fall back to
+    // what a first visit would have picked; when the user pressed None, an empty selection is exactly
+    // what they asked for and re-seeding it would be the app arguing with its own button.
+    if (kept.size !== chosen.size) {
+      chosen = kept.size === 0 ? new Set(seedSelection(sources, settings.pinnedSources, settings.searchPinnedOnly)) : kept;
+    }
   });
 
   function pin(id: string): void {
@@ -280,14 +293,17 @@
       class="chip pinnedonly"
       class:on={settings.searchPinnedOnly}
       aria-pressed={settings.searchPinnedOnly}
-      title="New searches start with your pinned sources"
+      disabled={pinned.length === 0}
+      title={pinned.length === 0
+        ? "Pin a source in the list below and a new search will start with it"
+        : "New searches start with your pinned sources, not all sixty"}
       onclick={() => {
         const next = !settings.searchPinnedOnly;
         settings.set("searchPinnedOnly", next);
-        if (next && pinned.length > 0) chosen = new Set(pinned.map((source) => source.id));
+        if (next) chosen = new Set(pinned.map((source) => source.id));
       }}
     >
-      Pinned only
+      Start with pinned{pinned.length > 0 ? ` (${pinned.length})` : ""}
     </button>
   </header>
 
@@ -303,7 +319,7 @@
   </form>
 
   <div class="picker">
-    <span class="label">Sources ({chosen.size})</span>
+    <span class="label">Sources · {chosen.size} of {sources.length} selected</span>
     <button class="chip" onclick={() => (chosen = new Set(sources.map((source) => source.id)))}>All</button>
     <button class="chip" onclick={() => (chosen = new Set())}>None</button>
     {#if pinned.length > 0}
@@ -312,7 +328,7 @@
       </button>
     {/if}
     <div class="chips">
-      {#each sources as source (source.id)}
+      {#each pickerOrder as source (source.id)}
         <span class="pick" class:on={chosen.has(source.id)}>
           <button class="chip" class:on={chosen.has(source.id)} aria-pressed={chosen.has(source.id)} onclick={() => toggle(source.id)}>
             {source.name}{#if languageLabel(source.lang)}<span class="lang">{languageLabel(source.lang)}</span>{/if}
@@ -340,10 +356,12 @@
 
       {#if blocks.length === 0}
         <p class="empty">
-          {#if settings.searchPinnedOnly && pinned.length > 0}
+          {#if chosen.size === 0}
+            No sources selected. Tap a source above — or All — and every one you tick answers on its own.
+          {:else if settings.searchPinnedOnly && chosen.size === pinned.length && pinned.every((source) => chosen.has(source.id))}
             Searching your {pinned.length} pinned source{pinned.length === 1 ? "" : "s"}. Pin more, or tap All to widen it.
           {:else}
-            Pick sources and search. Each one answers on its own.
+            {chosen.size} of {sources.length} sources selected. Type a title and press Search.
           {/if}
         </p>
       {:else if !running}
