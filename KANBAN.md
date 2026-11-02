@@ -157,8 +157,21 @@ Landed in three commits:
   draws it and only Apply writes, and the `Filters (n)` chip appears only for a source that declares
   one. Measured live through the shipped provider: 8Muses SEARCH 26 rows unfiltered → 19 / 72 / 21 for
   three filters; Local source's SortFilter reversing three titles by date. Filters are a **search**
-  thing (the same form on Popular changes nothing), and no `filters?` on the dalvik/iOS host because
-  its `filtersManga` is an untyped dump and `filterList` is ignored. `docs/source-filters.md`.
+  thing (the same form on Popular changes nothing). `docs/source-filters.md`.
+- `f6af016` — **The phone's extension host answers its own filters too.** T49 left `filters?` off the
+  dalvik/iOS host because its `filterList` had been measured as accepted-and-ignored; that measurement
+  was a payload-shape mistake. The pinned `MExtensionServer.jar` has `MihonInvoker.convertFilterList`
+  (checked with `javap` on `ios-runtime-v9`, `ios-runtime-v10` and the pinned Linux jar), and it reads
+  a **name-keyed** list — `stateInt` / `stateBoolean` / `stateString` / `stateSort` / `stateList`, with a
+  top-level checkbox's value on its first child. `dalvikFilters` reads the host's Jackson dump by the
+  shape of `state` and flattens groups (`group` on the row); `dalvikChanges` turns the stored selection
+  into that list; `dalvik.ts` sends it and nothing else. Measured against the real host with MangaDex:
+  106 rows from its 12-entry dump, and a sort or a rating choice each changing the set (0 of 20 shared,
+  stable when repeated); with a query, `Content rating: Safe` shared 0 of 20 with the base. Live in the
+  app at 440×956 against `tests/manual/stub-dalvik-filters.mjs`: button on the two sources that declare
+  a form, none on the one that does not; Apply took the search from four titles to two and the chip to
+  `Filters (1)`. 870/870 tests, `tsc` clean, `svelte-check` 0 errors. No native change was needed.
+  `docs/source-filters.md`, `docs/ios-embedded-runtime.md`.
 
 Not ported, with reasons in the plan file: archive.org's Lucene advanced search (its query language,
 not ours — a source's own form is our answer, now built), the password gate and `local_only` (this
