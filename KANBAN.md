@@ -152,7 +152,16 @@ Landed in three commits:
   "Check for updates" asks **every** repository, not only the open one — pure `planUpdates()` with three
   tests (built-ins skipped, no version code skipped, downgrades refused).
 
-Not ported, with reasons in the plan file: archive.org's Lucene advanced search (our equivalent is a
-source's filters — needs `SourceProvider.filters?`), the password gate and `local_only` (this app's
-server already takes `HARDLYTRACKING_TOKEN`), the support pill (archive.org-specific), and the autostart
-toggle (exists as a user unit + `scripts/service.sh`; a webview would need a new Tauri command).
+- `bbf2ce2` — **A source's own filters** (the "advanced search"): `SourceProvider.filters?` answers a
+  position-aligned form, `search()` carries `settings.sourceFilters[sourceId]`, `SourceFilterSheet`
+  draws it and only Apply writes, and the `Filters (n)` chip appears only for a source that declares
+  one. Measured live through the shipped provider: 8Muses SEARCH 26 rows unfiltered → 19 / 72 / 21 for
+  three filters; Local source's SortFilter reversing three titles by date. Filters are a **search**
+  thing (the same form on Popular changes nothing), and no `filters?` on the dalvik/iOS host because
+  its `filtersManga` is an untyped dump and `filterList` is ignored. `docs/source-filters.md`.
+
+Not ported, with reasons in the plan file: archive.org's Lucene advanced search (its query language,
+not ours — a source's own form is our answer, now built), the password gate and `local_only` (this
+app's server already takes `HARDLYTRACKING_TOKEN`), the support pill (archive.org-specific), and the
+autostart toggle (exists as a user unit + `scripts/service.sh`; a webview would need a new Tauri
+command).
