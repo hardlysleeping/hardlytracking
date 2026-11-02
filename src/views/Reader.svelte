@@ -54,6 +54,9 @@
    * with every page blank, however long it waited, and one frame later it was fine. So the page the
    * reader is on is fetched by itself; the observer stays for the neighbours it is meant to prefetch.
    */
+  /** Width over height of a page in this book, from the first page that loaded. */
+  let pageAspect = $state(0);
+
   function lazyPage(
     node: HTMLImageElement,
     params: { page: Page; now: boolean },
@@ -69,6 +72,16 @@
         .then((src) => {
           if (!live) return;
           node.src = src;
+          // The first page that arrives says how tall every page in this book is, which is what the
+          // boxes outside the window need: an empty box with only a viewport's height makes the
+          // document shorter than the book, so the scroll position maps to the wrong page.
+          node.addEventListener(
+            "load",
+            () => {
+              if (pageAspect === 0 && node.naturalHeight > 0) pageAspect = node.naturalWidth / node.naturalHeight;
+            },
+            { once: true },
+          );
         })
         .catch((error: unknown) => {
           // A page that cannot be produced here — a JPEG 2000 scan pdf.js takes minutes over, a file
@@ -543,7 +556,11 @@
       style:--fit={settings.readerFit}
     >
       {#each pages as page (page.index)}
-        <div class="page" data-page={page.index}>
+        <div
+          class="page"
+          data-page={page.index}
+          style:min-height={!horizontal && pageAspect > 0 ? `calc(min(100vw, 900px) / ${pageAspect})` : null}
+        >
           {#if Math.abs(page.index - index) > WINDOW}
             <!-- Outside the window: the box holds the scroll position, the bytes are not loaded. A
                  214-page chapter used to fetch every page at once because a zero-height page is

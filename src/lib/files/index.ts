@@ -70,6 +70,70 @@ async function openZipBook(blob: Blob, name: string): Promise<ComicBook> {
 }
 
 /**
+ * Draw a page that is one image and nothing else; say whether it did.
+ *
+ * Every scanned comic PDF is this shape: `save`, `transform`, `dependency`, `paintImageXObject`,
+ * `restore`. Drawing that image is a `drawImage` onto the canvas — milliseconds. pdf.js's renderer
+ * does the same work but does not *finish* on these documents in WebKit, so the image is taken from
+ * the page's own object cache and drawn here. A page with text, paths or several images answers
+ * `false` and is left to the renderer, which is what knows how to draw those.
+ */
+async function drawSingleImagePage(
+  pdfjs: { OPS: Record<string, number> },
+  page: { getOperatorList(): Promise<{ fnArray: number[]; argsArray: unknown[][] }>; objs: { get(name: string, cb: (value: unknown) => void): void } },
+  context: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+): Promise<boolean> {
+  const { fnArray, argsArray } = await page.getOperatorList();
+  const OPS = pdfjs.OPS;
+  // What a single-image page is allowed to contain besides the image itself.
+  const allowed = new Set([
+    OPS.save,
+    OPS.restore,
+    OPS.transform,
+    OPS.setLineWidth,
+    OPS.setHScale,
+    OPS.setLeading,
+    OPS.dependency,
+    OPS.beginMarkedContent,
+    OPS.beginMarkedContentProps,
+    OPS.endMarkedContent,
+  ]);
+  let painted: string | null = null;
+  for (let i = 0; i < fnArray.length; i += 1) {
+    const fn = fnArray[i];
+    if (fn === OPS.paintImageXObject) {
+      if (painted !== null) return false;
+      const args = argsArray[i] as [string, number, number];
+      painted = args[0];
+      continue;
+    }
+    if (!allowed.has(fn)) return false;
+  }
+  if (painted === null) return false;
+
+  const image = await new Promise<{ bitmap?: ImageBitmap; data?: Uint8ClampedArray } | null>((resolve) => {
+    page.objs.get(painted, (value: unknown) => resolve(value as { bitmap?: ImageBitmap; data?: Uint8ClampedArray } | null));
+  });
+  if (image === null) return false;
+  let source: ImageBitmap | null = image.bitmap ?? null;
+  if (source === null && image.data !== undefined) {
+    // A JPEG's own bytes are a picture already; copy them into a fresh buffer so the Blob owns what
+    // it reads — pdf.js hands back a view into a buffer it may reuse.
+    const bytes = new Uint8Array(image.data.length);
+    bytes.set(image.data);
+    source = await createImageBitmap(new Blob([bytes], { type: "image/jpeg" })).catch(() => null);
+  }
+  if (source === null) return false;
+
+  const ratio = source.width / source.height;
+  if (Math.abs(ratio - width / height) > 0.06) return false;
+  context.drawImage(source, 0, 0, width, height);
+  return true;
+}
+
+/**
  * A PDF, drawn page by page.
  *
  * pdf.js is imported lazily: it is over a megabyte and a comic that is a CBZ must never pay for it.
@@ -104,7 +168,12 @@ async function openPdfBook(blob: Blob, name: string): Promise<ComicBook> {
       canvas.height = Math.ceil(viewport.height);
       const context = canvas.getContext("2d");
       if (context === null) throw new Error("this browser cannot draw a PDF page");
-      await page.render({ canvas, canvasContext: context, viewport }).promise;
+      // A scanned page is one image and nothing else, and pdf.js's own renderer does not finish on
+      // those in WebKit — measured: the operator list resolves, the page image is in hand, drawing it
+      // takes 8 ms, and `page.render().promise` never settles. So a page that is a single image is
+      // drawn here, and only a page with text or paths is handed to the renderer.
+      const drawn = await drawSingleImagePage(pdfjs, page, context, canvas.width, canvas.height);
+      if (drawn === false) await page.render({ canvas, viewport }).promise;
       page.cleanup();
       const image = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.92));
       if (image === null) throw new Error(`page ${index + 1} of ${name} could not be drawn`);
