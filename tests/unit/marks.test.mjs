@@ -8,7 +8,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-const { applyMarks, isHidden, isPinned, contextOf, sourceKeyOf, visibleSources, normaliseSourceMarks } = await import(
+const { applyMarks, isHidden, isPinned, contextOf, sourceKeyOf, visibleSources, visibleRows, normaliseSourceMarks } = await import(
   "../../src/lib/marks.ts"
 );
 
@@ -28,6 +28,26 @@ const sourceOf = (seriesId) => sourceKeyOf(seriesId);
 function context(overrides = {}) {
   return contextOf({ categories, sources: marks, sourceOf, ...overrides });
 }
+
+/**
+ * A rail row carries only a series id — that is what `continueReading` and `refreshUpdates` hand
+ * back — so the categories come from the library on the side, exactly as the views do it.
+ */
+test("a rail row from a hidden source or a hidden shelf is not in the strip", () => {
+  const rail = [
+    { seriesId: "dalvik:1:a" },
+    { seriesId: "dalvik:2:c" },
+    { seriesId: "dalvik:3:d" },
+    { seriesId: "dalvik:3:e" },
+  ];
+  const categoryOf = (seriesId) => rows.find((row) => row.id === seriesId)?.categoryIds;
+  const kept = visibleRows(rail, context(), categoryOf);
+  assert.deepEqual(
+    kept.map((row) => row.seriesId),
+    ["dalvik:2:c", "dalvik:3:e"],
+    "source 1 is hidden, and dalvik:3:d is only in the hidden shelf",
+  );
+});
 
 const rows = [
   { id: "dalvik:1:a", categoryIds: ["cat:keep"] },

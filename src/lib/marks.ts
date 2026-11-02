@@ -153,6 +153,25 @@ export function isPinned(row: Marked, context: MarkContext): boolean {
 }
 
 /**
+ * The rows of a rail or a list whose title is not hidden.
+ *
+ * Continue Reading and Updates are built from positions and chapter lists, not from the library
+ * grid, so they never went through `applyMarks` and a hidden source kept filling them — a shelf that
+ * still shows its comics on two other screens has been labelled, not hidden. One call, so the three
+ * lists and the grid cannot drift apart.
+ *
+ * `categoryOf` reads a title's categories from wherever the caller has them: a rail row carries only
+ * a series id, and the library grid already holds the categories.
+ */
+export function visibleRows<T extends { seriesId: string }>(
+  rows: T[],
+  context: MarkContext,
+  categoryOf: (seriesId: string) => string[] | undefined,
+): T[] {
+  return rows.filter((row) => !isHidden({ id: row.seriesId, categoryIds: categoryOf(row.seriesId) }, context));
+}
+
+/**
  * The rows a view shows, and in what order. Takes a prepared `MarkContext`, so a view that redraws
  * on every keystroke is not re-indexing the categories each time.
  *

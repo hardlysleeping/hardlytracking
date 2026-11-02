@@ -11,6 +11,9 @@
   import { downloads } from "../state/downloads.svelte";
   import Cover from "../components/Cover.svelte";
   import { go, pathTo } from "../lib/nav";
+  import { categories } from "../state/categories.svelte";
+  import { sourceMarks } from "../state/source-marks.svelte";
+  import { contextOf, sourceKeyOf, visibleRows } from "../lib/marks";
 
   let rows = $state<UpdateRow[]>([]);
   let asked = $state(0);
@@ -44,6 +47,34 @@
     if (library.ready && !checked && !loading && library.library.length > 0) void refresh();
   });
 
+  /**
+   * Updates only shows titles the library would show.
+   *
+   * This screen builds its rows from each source's chapter list, so it never passed through the
+   * grid's marks: a hidden source kept announcing new chapters here, which is the loudest way to
+   * fail at hiding something.
+   */
+  let mappedSource = $state<Map<string, { provider: string; sourceId: string }>>(new Map());
+  $effect(() => {
+    const store = library.profile?.store;
+    if (store === undefined) return;
+    void store.listMappings().then((mappings) => {
+      mappedSource = new Map(mappings.map((row) => [row.seriesId, { provider: row.provider, sourceId: row.sourceId }]));
+    });
+  });
+
+  const shown = $derived(
+    visibleRows(
+      rows,
+      contextOf({
+        categories: categories.items,
+        sources: sourceMarks.marks,
+        sourceOf: (seriesId: string) => sourceKeyOf(seriesId, mappedSource.get(seriesId)),
+      }),
+      (seriesId: string) => library.library.find((series) => series.id === seriesId)?.categoryIds,
+    ),
+  );
+
   const groups = $derived.by(() => {
     const startOfToday = new Date();
     startOfToday.setHours(0, 0, 0, 0);
@@ -54,7 +85,7 @@
       { label: "This week", rows: [] },
       { label: "Earlier", rows: [] },
     ];
-    for (const row of rows) {
+    for (const row of shown) {
       const at = row.chapter.uploadedAt ?? 0;
       if (at >= today) buckets[0].rows.push(row);
       else if (at >= today - 86_400_000) buckets[1].rows.push(row);
@@ -89,8 +120,14 @@
     </div>
   {:else if loading && rows.length === 0}
     <p class="empty">Asking {asked || library.library.length} titles for their chapters…</p>
-  {:else if rows.length === 0 && checked}
-    <p class="empty">Nothing new. {asked} titles checked, and none of their sources returned a dated chapter.</p>
+  {:else if shown.length === 0 && checked}
+    <p class="empty">
+      {#if rows.length > 0}
+        Nothing to show. {rows.length} new {rows.length === 1 ? "chapter belongs" : "chapters belong"} to titles you have hidden.
+      {:else}
+        Nothing new. {asked} titles checked, and none of their sources returned a dated chapter.
+      {/if}
+    </p>
   {:else}
     {#each groups as group (group.label)}
       <section class="group">

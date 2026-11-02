@@ -31,7 +31,7 @@
   import SortSheet from "../components/SortSheet.svelte";
   import { go, pathTo } from "../lib/nav";
   import { visibleCategories } from "../lib/categories";
-  import { sourceKeyOf } from "../lib/marks";
+  import { contextOf, sourceKeyOf, visibleRows } from "../lib/marks";
   import { sourceMarks } from "../state/source-marks.svelte";
   import { coverWidth, libraryLayout } from "../lib/layout-modes";
   import { viewport } from "../lib/layout.svelte";
@@ -368,8 +368,27 @@
     void library.continueReading(20).then((rows) => (continuing = rows));
   });
 
-  /** The strip's rows: dismissed titles dropped, capped at the setting, order kept. */
-  const continueRows = $derived(eligible(continuing, new Set(settings.continueDismissed), settings.continueMax));
+  /**
+   * The strip's rows: hidden titles gone, dismissed titles dropped, capped at the setting.
+   *
+   * Hiding a category or a source has to empty this strip too — it is the second place a comic can
+   * reappear after being hidden, and a hidden shelf that still reads here has not been hidden.
+   */
+  const continueRows = $derived(
+    eligible(
+      visibleRows(
+        continuing,
+        contextOf({
+          categories: categories.items,
+          sources: sourceMarks.marks,
+          sourceOf: (seriesId: string) => sourceKeyOf(seriesId, mappedSource.get(seriesId)),
+        }),
+        (seriesId: string) => library.library.find((series) => series.id === seriesId)?.categoryIds,
+      ),
+      new Set(settings.continueDismissed),
+      settings.continueMax,
+    ),
+  );
 
   /** Drawn only on the whole shelf, with nothing typed, when the setting is on. */
   const continueVisible = $derived(
