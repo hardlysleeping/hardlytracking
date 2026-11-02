@@ -108,6 +108,15 @@ export interface ImportOptions {
   openDeadlineMs?: number;
   /** How long a cover may take. `COVER_DEADLINE_MS` by default; tests pass their own. */
   coverDeadlineMs?: number;
+  /**
+   * What identifies one picked file, when the file name alone is not enough.
+   *
+   * A picked folder arrives as plain `File`s whose `name` is only the basename, so two books called
+   * `vol 1.cbz` in different subfolders would fight over one id and the second would be skipped as a
+   * duplicate. The folder path is the identity, and it also keeps a re-pick of the same folder a
+   * skip. Single-file picks keep the name, so ids already in a library do not change.
+   */
+  idOf?: (file: File) => string;
 }
 
 /** A stable id from the file name, so re-importing the same book is a skip rather than a duplicate. */
@@ -175,7 +184,7 @@ export async function importComicFiles(
       result.skipped.push(name);
       continue;
     }
-    const seriesId = fileSeriesId(name, file.size);
+    const seriesId = fileSeriesId((options.idOf ?? ((picked: File) => picked.name))(file), file.size);
     if ((await store.getBook(seriesId)) !== undefined) {
       result.skipped.push(name);
       continue;

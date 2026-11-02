@@ -39,6 +39,37 @@ function freshStore() {
 
 const file = (name, bytes) => new File([bytes], name, { type: "application/octet-stream" });
 
+/** A `File` as a directory picker hands it over: a basename, plus the path it was found at. */
+function inFolder(path, bytes) {
+  const name = path.split("/").pop();
+  const row = new File([bytes], name, { type: "application/octet-stream" });
+  Object.defineProperty(row, "webkitRelativePath", { value: path });
+  return row;
+}
+
+test("two books with one name in a picked folder are two books, not one and a skip", async () => {
+  const store = freshStore();
+  // The same file name in two subfolders of one folder is two different books, and the folder path is
+  // the only thing that says so. Without it the second is skipped as a duplicate of the first.
+  const result = await importComicFiles(
+    store,
+    [inFolder("Saga/Saga v01.cbr", RAR5_CBR), inFolder("Saga (2012)/Saga v01.cbr", RAR5_CBR)],
+    { wasm: wasmBinary, cover: async () => picture(), idOf: (row) => row.webkitRelativePath || row.name },
+  );
+  assert.deepEqual(result, { added: 2, skipped: [], errors: [] });
+  const titles = (await store.listSeries()).map((row) => row.title).sort();
+  assert.deepEqual(titles, ["Saga v01", "Saga v01"], "both are titles; the path only tells the ids apart");
+
+  // Re-picking the same folder is a skip, not a second copy of everything.
+  const again = await importComicFiles(
+    store,
+    [inFolder("Saga/Saga v01.cbr", RAR5_CBR), inFolder("Saga (2012)/Saga v01.cbr", RAR5_CBR)],
+    { wasm: wasmBinary, cover: async () => picture(), idOf: (row) => row.webkitRelativePath || row.name },
+  );
+  assert.equal(again.added, 0);
+  assert.equal(again.skipped.length, 2);
+});
+
 test("a .cbr becomes a title, a chapter and a cover, and says it is a RAR", async () => {
   const store = freshStore();
   const result = await importComicFiles(store, [file("Saga v01.cbr", RAR5_CBR)], {
