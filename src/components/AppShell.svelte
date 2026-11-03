@@ -11,6 +11,7 @@
   import { viewport } from "../lib/layout.svelte";
   import { deviceClass } from "../lib/layout-modes";
   import { go } from "../lib/nav";
+  import { navHistory } from "../lib/nav-history.svelte";
 
   let { active, routeKey = "", children }: { active: string; routeKey?: string; children: Snippet } = $props();
 
@@ -129,6 +130,21 @@
     {@render children()}
   </main>
 
+  {#if device === "phone" && (navHistory.depth > 0 || navHistory.canForward)}
+    <div class="history-nav">
+      {#if navHistory.depth > 0}
+        <button class="hbtn" aria-label="Back" title="Back" onclick={() => history.back()}>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7" /></svg>
+        </button>
+      {/if}
+      {#if navHistory.canForward}
+        <button class="hbtn" aria-label="Forward" title="Forward" onclick={() => history.forward()}>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7" /></svg>
+        </button>
+      {/if}
+    </div>
+  {/if}
+
   {#if device === "phone"}
     <nav class="bar" aria-label="Main">
       {#each DESTINATIONS as destination (destination.id)}
@@ -190,6 +206,48 @@
 
   nav {
     display: flex;
+  }
+
+  /* Floating back/forward, tucked above the phone bar's left corner. Sits over
+   * the content rather than in the scroll flow, so a long page keeps its room. */
+  .history-nav {
+    position: fixed;
+    left: var(--s3);
+    bottom: calc(var(--nav-h) + var(--safe-b) + var(--s2));
+    display: flex;
+    gap: var(--s2);
+    z-index: 40;
+  }
+
+  .hbtn {
+    all: unset;
+    box-sizing: border-box;
+    width: 40px;
+    height: 40px;
+    display: grid;
+    place-items: center;
+    border-radius: var(--r-pill);
+    background: color-mix(in srgb, var(--surface) 88%, transparent);
+    border: 1px solid var(--line-strong);
+    color: var(--text-1);
+    cursor: pointer;
+    -webkit-backdrop-filter: blur(10px);
+    backdrop-filter: blur(10px);
+    box-shadow: 0 6px 18px rgb(0 0 0 / 35%);
+  }
+
+  .hbtn:active {
+    transform: scale(0.94);
+  }
+
+  .hbtn svg {
+    width: 20px;
+    height: 20px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
   }
 
   .item {

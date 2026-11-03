@@ -64,7 +64,6 @@
   <header class="top">
     <h1>Browse</h1>
     <div class="acts">
-      <button class="btn ghost" onclick={() => go("/search")}>Search all</button>
       <button class="btn" onclick={() => go("/extensions")}>Extensions{installed > 0 ? ` · ${installed}` : ""}</button>
     </div>
   </header>
