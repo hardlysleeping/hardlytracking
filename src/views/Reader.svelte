@@ -43,6 +43,7 @@
   const jobs = new Map<number, ReaderJob>();
   let pageAspect = $state(0);
   let aspects = $state<Record<number, number>>({});
+  let notes = $state<Record<number, string>>({});
   let generation = 0;
 
   function schedulePages(): void {
@@ -56,7 +57,10 @@
     // Actions register after the DOM flush. No observer races or browser eager-image fan-out.
     void tick().then(schedulePages);
   });
-  $effect(() => () => { generation++; queue.cancel(); });
+  $effect(() => () => {
+    generation++; queue.cancel();
+    if (saveTimer !== null) clearTimeout(saveTimer);
+  });
 
   function lazyPage(node: HTMLImageElement, page: Page): { destroy: () => void } {
     let live = true;
@@ -68,10 +72,14 @@
         if (!live || signal.aborted) return;
         await new Promise<void>((resolve, reject) => {
           const cleanup = () => {
+            clearTimeout(timer);
             node.onload = null; node.onerror = null;
             signal.removeEventListener('abort', abort);
           };
           const abort = () => { cleanup(); node.removeAttribute('src'); resolve(); };
+          const timer = setTimeout(() => {
+            cleanup(); node.removeAttribute('src'); reject(new Error(`Page ${page.index + 1} timed out after 45 s`));
+          }, 45_000);
           node.onload = () => { cleanup(); resolve(); };
           node.onerror = () => { cleanup(); reject(new Error(`Page ${page.index + 1} could not load`)); };
           signal.addEventListener('abort', abort, {once:true});
@@ -79,10 +87,19 @@
         });
         if (!live || signal.aborted) return;
         if (node.naturalHeight > 0) {
+          const anchor = scroller?.querySelector<HTMLElement>(`[data-page="${index}"]`);
+          const before = anchor?.getBoundingClientRect();
           aspects[page.index] = node.naturalWidth / node.naturalHeight;
           if (pageAspect === 0) pageAspect = aspects[page.index];
+          await tick();
+          // Unknown page sizes become measured sizes. Keep the reader's actual anchor, including
+          // its within-page offset, rather than jumping a resumed chapter toward page one.
+          if (before && anchor?.isConnected && live && !signal.aborted) {
+            const after = anchor.getBoundingClientRect();
+            scroller?.scrollBy(horizontal ? {left: after.left - before.left, behavior:'instant'} : {top: after.top - before.top, behavior:'instant'});
+          }
         }
-        await node.decode();
+        await withDeadline(node.decode(), 45_000, `decoding page ${page.index + 1}`);
         // Two frames: the first commits layout, the second runs after that frame was painted.
         // Background tabs deliberately do not start more page work until painting resumes.
         await new Promise<void>(resolve => {
@@ -94,8 +111,8 @@
         });
       } catch (error) {
         if (!live || signal.aborted) return;
-        const box = node.closest<HTMLElement>('.page');
-        if (box) box.dataset.note = error instanceof Error ? error.message : String(error);
+        node.removeAttribute('src');
+        notes[page.index] = error instanceof Error ? error.message : String(error);
       }
     }};
     jobs.set(page.index, job);
@@ -183,7 +200,8 @@
   const rtl = $derived(settings.readerMode === "rtl");
 
   $effect(() => {
-    void load(chapterId);
+    const id = chapterId;
+    if (library.profile !== null) untrack(() => { void load(id); });
   });
 
   /**
@@ -278,9 +296,8 @@
   /**
    * Show the device's copy of a chapter.
    *
-   * The URLs are already object URLs for the pages that are here; a page the device does not have
-   * stays empty rather than pointing at the network, because this path exists precisely for the
-   * case where the network is not available. A chapter that is only partly here says so.
+   * Local URLs paint without waiting on missing pages. Gaps join the sequential queue and report
+   * their own failure when offline, while the available pages remain readable.
    */
   function openLocal(local: LocalChapter): void {
     // Local bytes paint immediately. Only a missing page asks for remote metadata/bytes, inside
@@ -338,6 +355,7 @@
     jobs.clear();
     pageAspect = 0;
     aspects = {};
+    notes = {};
     busy = true;
     error = null;
     index = 0;
@@ -347,6 +365,10 @@
     pages = [];
 
     chapterName = "";
+    chapters = [];
+    read = false;
+    owner = seriesId;
+    fromDownload = false;
     try {
       // Every step below can wait on something outside this screen — a download row, the database,
       // a book being unpacked, the source that owns the chapter — and none of them used to have a
@@ -516,8 +538,14 @@
 
   function mode(next: typeof settings.readerMode): void {
     settings.set("readerMode", next);
-    requestAnimationFrame(() => scrollToPage(index, "auto"));
   }
+  $effect(() => {
+    settings.readerMode; settings.readerFit;
+    untrack(() => {
+      const target = index;
+      void tick().then(() => scrollToPage(target, 'auto'));
+    });
+  });
 </script>
 
 <svelte:window onkeydown={onKey} />
@@ -565,6 +593,7 @@
       onpointermove={(event) => tap.move(event.pointerId, event.clientX, event.clientY)}
       onpointerup={surfaceUp}
       onpointercancel={() => tap.cancel()}
+      onpointerleave={(event) => { if (event.pointerType === 'mouse') tap.cancel(); }}
       role="region"
       aria-label="Reading surface"
       style:--gap="{settings.pageGap}px"
@@ -573,6 +602,7 @@
         <div
           class="page"
           data-page={page.index}
+          data-note={notes[page.index]}
           style:--aspect={aspects[page.index] ?? (pageAspect || .7)}
         >
           {#if Math.abs(page.index - index) > WINDOW}
@@ -755,6 +785,7 @@
     scrollbar-width: none;
     touch-action: pan-x pan-y pinch-zoom;
     overscroll-behavior: contain;
+    overflow-anchor: none;
   }
   .scroller::-webkit-scrollbar { display: none; }
   .scroller.webtoon { gap: 0; }
@@ -766,6 +797,7 @@
   }
   .scroller.horizontal.rtl { direction: rtl; }
   .page {
+    position: relative;
     flex: none;
     display: flex;
     align-items: flex-start;
@@ -785,6 +817,7 @@
     -webkit-user-select: none;
     -webkit-touch-callout: none;
   }
+  img:not([src]) { visibility: hidden; }
   /* object-fit cannot resize an auto-sized image, and width/height are not valid values.
      Give each fit actual dimensions. Height may pan horizontally; Whole page never clips. */
   .scroller[data-fit='height'] .page { min-height: 100dvh; }
@@ -894,9 +927,10 @@
   /* A page that failed to be produced keeps its box and explains itself. */
   .page[data-note]::after {
     content: attr(data-note);
-    grid-area: 1 / 1;
-    align-self: center;
-    justify-self: center;
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
     max-width: 32ch;
     padding: var(--s3);
     color: var(--text-3);
