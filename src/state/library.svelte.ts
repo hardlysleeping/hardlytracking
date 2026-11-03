@@ -68,9 +68,34 @@ export interface UpdateRow {
  * boot screen says which pump was dry rather than "something failed".
  */
 const BOOT_STEP_DEADLINE_MS = 20_000;
+/** The whole open, not one step. Said as a sentence; nothing is cancelled by it. */
+const BOOT_OVERALL_DEADLINE_MS = 60_000;
 
 /** The steps are named the way a person reads them, because that name is shown. */
+/**
+ * The step the boot is in right now.
+ *
+ * "Opening the library…" is a sentence that cannot be diagnosed: it is the same words whether the
+ * database is busy, the extension host is wedged, or nothing was ever called. Printing the step by
+ * name, with the build and the seconds spent, is what makes one screenshot enough to say where it
+ * stopped — and it costs a phone user nothing to ignore.
+ */
+let runningStep = $state<string | null>(null);
+let bootStartedAt = $state(0);
+
+export const bootReport = {
+  /** The step now running, or null between steps and after the open settles. */
+  get step(): string | null {
+    return runningStep;
+  },
+  /** When `open()` began, so a screen can count from there rather than from its own mount. */
+  get startedAt(): number {
+    return bootStartedAt;
+  },
+};
+
 async function bootStep<T>(label: string, work: () => Promise<T>, ms = BOOT_STEP_DEADLINE_MS): Promise<T> {
+  runningStep = label;
   let timer: ReturnType<typeof setTimeout> | undefined;
   const deadline = new Promise<never>((_, reject) => {
     timer = setTimeout(() => reject(new Error(`${label} did not answer in ${Math.round(ms / 1000)} s.`)), ms);
@@ -79,6 +104,7 @@ async function bootStep<T>(label: string, work: () => Promise<T>, ms = BOOT_STEP
     return await Promise.race([work(), deadline]);
   } finally {
     if (timer !== undefined) clearTimeout(timer);
+    if (runningStep === label) runningStep = null;
   }
 }
 
@@ -130,8 +156,52 @@ class LibraryState {
   /** Indexes read this session, by repository URL — one fetch per repository per run. */
   private indexes = new Map<string, ExtensionEntry[]>();
 
-  async open(): Promise<void> {
+  /** The open in flight, so a second call joins it instead of starting a second boot. */
+  private opening: Promise<void> | null = null;
+
+  open(): Promise<void> {
+    if (this.profile !== null) return Promise.resolve();
+    if (this.opening !== null) return this.opening;
+    this.opening = this.runOpen().finally(() => {
+      this.opening = null;
+    });
+    return this.opening;
+  }
+
+  /**
+   * Try again from the boot screen.
+   *
+   * A wedged start used to be terminal for the session: the only cure was killing the app, which on a
+   * sideloaded IPA means re-installing it. Clearing the state and running the same path again is the
+   * whole retry — the extension host is asked again, and the database is asked again.
+   */
+  async retry(): Promise<void> {
+    if (this.opening !== null) return;
+    this.profile = null;
+    this.ready = false;
+    this.openError = null;
+    this.storageFallback = false;
+    this.error = null;
+    await this.open();
+  }
+
+  private async runOpen(): Promise<void> {
     if (this.profile !== null) return;
+    bootStartedAt = Date.now();
+    /**
+     * An overall ceiling, above the per-step ones.
+     *
+     * Each step has its own deadline, but a step that never starts — an `await` before the first
+     * `bootStep` that the native bridge never answers — has nobody watching it. This one only
+     * speaks: it names how long it has been and which step was running, and leaves the work alone.
+     */
+    const watchdog = setTimeout(() => {
+      if (this.ready) return;
+      const step = runningStep;
+      this.openError =
+        `The library did not finish opening in ${Math.round(BOOT_OVERALL_DEADLINE_MS / 1000)} s` +
+        `${step === null ? "" : ` — it was stuck at “${step}”`}.`;
+    }, BOOT_OVERALL_DEADLINE_MS);
     try {
       // On the iPhone shell the extension host is inside this process, so it has to be serving
       // before the providers are built. Everywhere else this resolves to `null` without doing any
@@ -198,6 +268,9 @@ class LibraryState {
       plugins.attach(this.profile);
     } catch (error) {
       this.openError = message(error);
+    } finally {
+      clearTimeout(watchdog);
+      runningStep = null;
     }
   }
 

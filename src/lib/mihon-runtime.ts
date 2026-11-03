@@ -38,6 +38,8 @@ export const NATIVE_RUNTIME_PORT = 8747;
  */
 export const RUNTIME_STATUS_DEADLINE_MS = 5_000;
 export const RUNTIME_START_DEADLINE_MS = 45_000;
+/** Loading the bridge is a dynamic import, and an import that never resolves is not a slow start. */
+export const RUNTIME_LOAD_DEADLINE_MS = 10_000;
 
 const TIMED_OUT: unique symbol = Symbol("timed out");
 
@@ -139,13 +141,15 @@ async function loadNativePlugin(): Promise<MihonRuntimePlugin | null> {
 export async function startNativeRuntime(
   port = NATIVE_RUNTIME_PORT,
   load: () => Promise<MihonRuntimePlugin | null> = loadNativePlugin,
-  deadlines: { status: number; start: number } = {
+  deadlines: { status: number; start: number; load?: number } = {
     status: RUNTIME_STATUS_DEADLINE_MS,
     start: RUNTIME_START_DEADLINE_MS,
   },
 ): Promise<string | null> {
-  const plugin = await load();
-  if (plugin === null) return null;
+  // The one await in this function that used to have nobody watching it: on a phone whose webview
+  // never finishes the bridge import, the whole boot would wait here, before any step was named.
+  const plugin = await within(load(), deadlines.load ?? RUNTIME_LOAD_DEADLINE_MS);
+  if (plugin === null || plugin === TIMED_OUT) return null;
   try {
     const before = await within(plugin.status(), deadlines.status);
     if (before === TIMED_OUT) return null;

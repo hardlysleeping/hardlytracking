@@ -26,7 +26,8 @@
   import Welcome from "./components/Welcome.svelte";
   import SlowNotice from "./components/SlowNotice.svelte";
 
-  import { library } from "./state/library.svelte";
+  import { bootReport, library } from "./state/library.svelte";
+  import { appVersion } from "./lib/app-info";
   import { categories } from "./state/categories.svelte";
 import { sourceMarks } from "./state/source-marks.svelte";
   import { settings } from "./state/settings.svelte";
@@ -43,6 +44,24 @@ import { sourceMarks } from "./state/source-marks.svelte";
   let route = $state(parseRoute(location.hash));
 
   const active = $derived(destinationOf(route));
+
+  /**
+   * Seconds spent opening, counted only while it is still opening.
+   *
+   * A clock that stops when the library is ready is not decoration: "Opening the library… 0 s" and
+   * "… 47 s" are different bugs, and the number is the only part of the screen that says which.
+   */
+  let now = $state(Date.now());
+  $effect(() => {
+    if (library.ready) return;
+    const tick = setInterval(() => {
+      now = Date.now();
+    }, 1000);
+    return () => clearInterval(tick);
+  });
+  const elapsed = $derived(
+    bootReport.startedAt === 0 ? null : Math.max(0, Math.round((now - bootReport.startedAt) / 1000)),
+  );
 
   /**
    * An install link opened this app: `?repo=…`, `#/extensions?repo=…`, or a packaged build handing us
@@ -138,11 +157,24 @@ import { sourceMarks } from "./state/source-marks.svelte";
         tabs looked broken, and a library that never finished left the whole app looking dead. Other
         destinations read the same state and render their own empty case, so they keep working.
       -->
-      <p class="boot">Opening the library…</p>
+      <!--
+        The words alone were undiagnosable: the same sentence appeared whether a step was slow, the
+        extension host was wedged, or nothing had been called at all. The build and the running step
+        are printed with it, so one screenshot says where it stopped — and "Try again" is the way out
+        of a start that will never answer, without reinstalling the app.
+      -->
+      <div class="boot">
+        <p class="bootline">Opening the library…{elapsed === null ? "" : ` ${elapsed} s`}</p>
+        <p class="bootmeta">
+          HardlyTracking {appVersion()}{bootReport.step === null ? "" : ` · ${bootReport.step}`}
+        </p>
+        <button class="btn ghost" onclick={() => void library.retry()}>Try again</button>
+      </div>
     {:else if library.openError !== null && active === "library"}
       <div class="boot">
         <p class="banner">{library.openError}</p>
         <p class="muted">The library could not be opened. Reload once the extension host is running.</p>
+        <p><button class="btn ghost" onclick={() => void library.retry()}>Try again</button></p>
       </div>
     {:else if route.name === "updates"}
       <Updates />
@@ -188,6 +220,16 @@ import { sourceMarks } from "./state/source-marks.svelte";
     padding: var(--s5) var(--s4);
     color: var(--text-2);
     font-size: var(--t-sm);
+  }
+
+  .boot .bootline {
+    margin: 0;
+  }
+
+  .boot .bootmeta {
+    margin: var(--s1) 0 var(--s3);
+    color: var(--text-3);
+    font-size: var(--t-xs);
   }
 
   .nostore {
