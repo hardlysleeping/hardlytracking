@@ -12,7 +12,7 @@
   import { deviceClass } from "../lib/layout-modes";
   import { go } from "../lib/nav";
 
-  let { active, children }: { active: string; children: Snippet } = $props();
+  let { active, routeKey = "", children }: { active: string; routeKey?: string; children: Snippet } = $props();
 
   /** The scroller. Bound so the shell can decide whether this screen needs one at all. */
   let frame = $state<HTMLElement | null>(null);
@@ -29,6 +29,21 @@
    * Watched rather than measured once, because the answer changes as covers load, a list fills in,
    * a banner appears and the window is resized.
    */
+  /**
+   * A new screen starts at the top.
+   *
+   * The scroller is one element for every destination, so its `scrollTop` used to survive a route
+   * change: leaving a long page half-way down arrived at the next one already partially scrolled, and
+   * on a page that fits it looked stuck — partly down, with no way back up, because the shell had
+   * switched the overflow off. Reset before the first paint of the new screen, not after a timer.
+   */
+  $effect(() => {
+    void routeKey;
+    const el = frame;
+    if (el === null) return;
+    el.scrollTop = 0;
+  });
+
   $effect(() => {
     const el = frame;
     if (el === null) return;

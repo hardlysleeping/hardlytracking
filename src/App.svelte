@@ -122,7 +122,7 @@ import { sourceMarks } from "./state/source-marks.svelte";
 {:else if route.name === "read" && route.id !== null && route.chapterId !== null}
   <Reader seriesId={route.id} chapterId={route.chapterId} />
 {:else}
-  <AppShell {active}>
+  <AppShell {active} routeKey={`${route.name}:${route.id ?? ""}:${route.chapterId ?? ""}`}>
     {#if library.storageFallback}
       <!--
         Device-level, so it belongs above every destination: a library running in memory looks
