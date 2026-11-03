@@ -57,6 +57,33 @@ export interface UpdateRow {
   chapter: Chapter;
 }
 
+/**
+ * How long a boot step may take before the app stops waiting for it.
+ *
+ * Every one of these is a database or in-process call on a device, so minutes are not a plausible
+ * duration for any of them — and a step that never answers is what "Opening the library…" forever
+ * looked like on an iPhone. A timeout is reported with the step's own name, so the sentence on the
+ * boot screen says which pump was dry rather than "something failed".
+ */
+const BOOT_STEP_DEADLINE_MS = 20_000;
+
+/** The steps are named the way a person reads them, because that name is shown. */
+async function bootStep<T>(label: string, work: () => Promise<T>, ms = BOOT_STEP_DEADLINE_MS): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} did not answer in ${Math.round(ms / 1000)} s.`)), ms);
+  });
+  try {
+    return await Promise.race([work(), deadline]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
+/** Said when the library never opened, in the words of the thing that is actually missing. */
+const NOT_OPEN_MESSAGE =
+  "The library has not finished opening, so nothing can be saved yet. If this message stays, the boot screen names the step that is stuck.";
+
 class LibraryState {
   /**
    * The open profile, as an opaque handle: replaced wholesale, never mutated through this field.
@@ -109,15 +136,17 @@ class LibraryState {
       // The desktop shell needs Rust's HTTP client for loopback (CORS), and that same client is what
       // makes a repository index reachable with no `/api/repo` proxy in the app.
       const fetchImpl = await shellFetch();
-      this.profile = await openLibraryProfile({
-        ...(nativeBase === null ? {} : { dalvikBase: nativeBase }),
-        ...(fetchImpl === undefined ? {} : { fetchImpl }),
-      });
-      this.library = await this.profile.store.listSeries();
-      this.extensions = await this.profile.listExtensions();
+      this.profile = await bootStep("Opening the library database", () =>
+        openLibraryProfile({
+          ...(nativeBase === null ? {} : { dalvikBase: nativeBase }),
+          ...(fetchImpl === undefined ? {} : { fetchImpl }),
+        }),
+      );
+      this.library = await bootStep("Reading the saved titles", () => this.profile!.store.listSeries());
+      this.extensions = await bootStep("Listing extensions", () => this.profile!.listExtensions());
       this.htServer = this.profile.htServer;
       this.hostExtensions = [...(this.profile.htServer?.extensions ?? [])];
-      this.repos = await this.profile.store.listRepos();
+      this.repos = await bootStep("Listing repositories", () => this.profile!.store.listRepos());
       this.ready = true;
       // Covers and page images live in the same database, behind the user's ceiling.
       imageCache.attach(this.profile.store.database);
@@ -266,8 +295,13 @@ class LibraryState {
     await this.refreshHost();
   }
 
+  /** The library-less refusal, said once so every write path reads the same. */
+  private get notOpenMessage(): string {
+    return this.openError === null ? NOT_OPEN_MESSAGE : `${NOT_OPEN_MESSAGE} (${this.openError})`;
+  }
+
   async installApk(file: File): Promise<InstalledExtension> {
-    if (this.profile === null) throw new Error("the library is not open yet");
+    if (this.profile === null) throw new Error(this.notOpenMessage);
     const apk = new Uint8Array(await file.arrayBuffer());
     const installed = await this.profile.installApk(apk, packageIdFromApkName(file.name));
     this.extensions = await this.profile.listExtensions();
@@ -290,7 +324,7 @@ class LibraryState {
    * without a panel (none, today) leave it out and the index is fetched here.
    */
   async addRepository(url: string, preloaded?: Repository): Promise<Repository> {
-    if (this.profile === null) throw new Error("the library is not open yet");
+    if (this.profile === null) throw new Error(this.notOpenMessage);
     const repository = preloaded ?? (await loadRepository(url));
     const row: RepoRow = { url: repository.url, indexUrl: repository.indexUrl, name: repository.name, at: Date.now() };
     await this.profile.store.putRepo(row);
@@ -321,7 +355,7 @@ class LibraryState {
    * rather than a guess.
    */
   async installEntry(entry: ExtensionEntry, repoUrl: string): Promise<InstalledExtension> {
-    if (this.profile === null) throw new Error("the library is not open yet");
+    if (this.profile === null) throw new Error(this.notOpenMessage);
     const apk = await downloadApk(entry);
     const installed = await this.profile.installApk(apk, entry.pkg, {
       name: entry.name,

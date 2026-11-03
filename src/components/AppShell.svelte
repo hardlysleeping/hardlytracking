@@ -14,6 +14,60 @@
 
   let { active, children }: { active: string; children: Snippet } = $props();
 
+  /** The scroller. Bound so the shell can decide whether this screen needs one at all. */
+  let frame = $state<HTMLElement | null>(null);
+
+  /**
+   * A screen that fits does not scroll.
+   *
+   * `overflow-y: auto` is still a scroll container when its content is shorter than the box, and iOS
+   * rubber-bands every scroll container it is given — so an empty Library, a three-line Settings
+   * page and every other short screen could be dragged up and down like a page with content. The
+   * shell turns the overflow off when the content fits and back on when it does not, which is the
+   * only switch that exists: a scroll container cannot be told "bounce only if I overflow".
+   *
+   * Watched rather than measured once, because the answer changes as covers load, a list fills in,
+   * a banner appears and the window is resized.
+   */
+  $effect(() => {
+    const el = frame;
+    if (el === null) return;
+    let queued = false;
+    let watched: Element | null = null;
+    const measure = () => {
+      queued = false;
+      const overflows = el.scrollHeight > el.clientHeight + 2;
+      el.style.overflowY = overflows ? "auto" : "hidden";
+      if (!overflows && el.scrollTop !== 0) el.scrollTop = 0;
+      // A screen's height is usually its single content element's height (a grid, a form, a
+      // message), so that element is watched too — otherwise a view that grows without resizing
+      // the frame would keep a stale answer.
+      const inner = el.firstElementChild;
+      if (watched !== inner) {
+        if (watched !== null) observer.unobserve(watched);
+        if (inner !== null) observer.observe(inner);
+        watched = inner;
+      }
+    };
+    const schedule = () => {
+      if (queued) return;
+      queued = true;
+      requestAnimationFrame(measure);
+    };
+    const observer = new ResizeObserver(schedule);
+    observer.observe(el);
+    const mutations = new MutationObserver(schedule);
+    mutations.observe(el, { childList: true, subtree: true, characterData: true });
+    // Covers and page images settle after the frame is laid out.
+    el.addEventListener("load", schedule, true);
+    schedule();
+    return () => {
+      observer.disconnect();
+      mutations.disconnect();
+      el.removeEventListener("load", schedule, true);
+    };
+  });
+
   /**
    * The chrome is the library's device class, from the same module the library's own layout comes
    * from — a rail the shell draws is a width the library may not use for a grid.
@@ -56,7 +110,7 @@
     </nav>
   {/if}
 
-  <main>
+  <main bind:this={frame}>
     {@render children()}
   </main>
 
