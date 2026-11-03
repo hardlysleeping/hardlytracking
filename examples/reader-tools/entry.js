@@ -5,9 +5,30 @@
  * dialog, and one registered menu action. Everything it does is something a plugin author will do
  * first, so it is the smallest honest proof that the host, the bridge and the permissions work.
  */
+/*
+ * One callback, three menus: the same question asked from wherever a person happens to be. The host
+ * refuses an action the manifest did not declare, so each of these is also a check that the manifest
+ * and the code agree.
+ */
 ht.actions.registerSeriesAction({
   id: "show-info",
   title: "Show Extra Info",
+  callback() {
+    void run();
+  },
+});
+
+ht.actions.registerLibraryAction({
+  id: "library-info",
+  title: "Reader Tools",
+  callback() {
+    void run();
+  },
+});
+
+ht.actions.registerReaderAction({
+  id: "reader-info",
+  title: "Series details",
   callback() {
     void run();
   },

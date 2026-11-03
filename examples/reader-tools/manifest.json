@@ -6,10 +6,12 @@
   "apiVersion": 1,
   "minAppVersion": "0.5.8",
   "entry": "entry.js",
-  "permissions": ["library.read", "plugin.storage", "ui.series"],
+  "permissions": ["library.read", "plugin.storage", "ui.series", "ui.reader", "ui.library"],
   "networkHosts": [],
   "description": "Adds a Show Extra Info entry to a series page, and remembers what you asked for last time.",
   "contributes": {
-    "seriesActions": [{ "id": "show-info", "title": "Show Extra Info" }]
+    "seriesActions": [{ "id": "show-info", "title": "Show Extra Info" }],
+    "libraryActions": [{ "id": "library-info", "title": "Reader Tools" }],
+    "readerActions": [{ "id": "reader-info", "title": "Series details" }]
   }
 }

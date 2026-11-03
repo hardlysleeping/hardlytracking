@@ -27,7 +27,21 @@ test("the example plugin package is in the repository and unpacks cleanly", asyn
   assert.deepEqual(manifest.manifest.contributes.seriesActions, [
     { id: "show-info", title: "Show Extra Info" },
   ]);
-  assert.deepEqual([...manifest.manifest.permissions], ["library.read", "plugin.storage", "ui.series"]);
+  // All three menus are declared, because all three slots exist and the host refuses an action the
+  // manifest did not name — the example is the only thing that proves each slot end to end.
+  assert.deepEqual(manifest.manifest.contributes.libraryActions, [
+    { id: "library-info", title: "Reader Tools" },
+  ]);
+  assert.deepEqual(manifest.manifest.contributes.readerActions, [
+    { id: "reader-info", title: "Series details" },
+  ]);
+  assert.deepEqual([...manifest.manifest.permissions], [
+    "library.read",
+    "plugin.storage",
+    "ui.series",
+    "ui.reader",
+    "ui.library",
+  ]);
 
   const entry = entryOf(read.files, manifest.manifest);
   assert.ok(entry instanceof Uint8Array);
@@ -52,7 +66,13 @@ test("installing the example plugin records it, enabled, with its grant", async 
   assert.equal(plugin.name, "Reader Tools");
   assert.equal(plugin.version, "1.0.0");
   assert.equal(plugin.enabled, true);
-  assert.deepEqual([...plugin.grantedPermissions], ["library.read", "plugin.storage", "ui.series"]);
+  assert.deepEqual([...plugin.grantedPermissions], [
+    "library.read",
+    "plugin.storage",
+    "ui.series",
+    "ui.reader",
+    "ui.library",
+  ]);
 });
 
 test("the example's own source runs in a document that cannot reach the network", async () => {

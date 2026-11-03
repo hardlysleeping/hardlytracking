@@ -7,6 +7,7 @@
    * a second overlay, so only one thing is ever open.
    */
   import Sheet from "./Sheet.svelte";
+  import { plugins } from "../state/plugins.svelte";
 
   export interface LibraryStats {
     series: number;
@@ -28,6 +29,9 @@
 
   let page = $state<"menu" | "stats">("menu");
 
+  /** Plugin entries for this menu. A plugin declares them; a grant puts them here. */
+  const pluginActions = $derived(plugins.actionsFor("library"));
+
   // Reopening always lands on the menu: a sheet that remembers "statistics" reads as a bug.
   $effect(() => {
     if (!open) page = "menu";
@@ -47,6 +51,18 @@
       <button class="menu-item" onclick={() => run(oncategories)}><span>Edit categories</span></button>
       <button class="menu-item" onclick={() => run(onsettings)}><span>Library settings</span></button>
       <button class="menu-item" onclick={() => (page = "stats")}><span>Statistics</span><span aria-hidden="true">›</span></button>
+      {#if pluginActions.length > 0}
+        <!--
+          Plugin entries come last and name their plugin: an action someone else wrote must never be
+          mistaken for the app's own, and the manifest is what decided it may be here at all.
+        -->
+        {#each pluginActions as action (action.pluginId + action.id)}
+          <button class="menu-item" onclick={() => run(() => plugins.invoke(action.pluginId, action.id))}>
+            <span>{action.title}</span>
+            <span class="plugin" aria-hidden="true">{action.pluginId}</span>
+          </button>
+        {/each}
+      {/if}
     </div>
   {:else}
     <dl class="facts">
@@ -88,6 +104,11 @@
 
   .menu-item:hover {
     background: var(--surface-2);
+  }
+
+  .plugin {
+    color: var(--text-3);
+    font-size: var(--t-xs);
   }
 
   .facts {

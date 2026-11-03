@@ -26,6 +26,7 @@
   import { RUNTIME_DEADLINE_MS, withDeadline } from "../lib/deadline";
   import { INACTIVITY_TIMEOUT_MS, shouldEndForBackground } from "../lib/history";
   import Sheet from "../components/Sheet.svelte";
+  import { plugins } from "../state/plugins.svelte";
 
   interface Props {
     seriesId: string;
@@ -177,6 +178,8 @@
     { id: "contain", label: "Whole page" },
   ] as const;
 
+  /** Plugin reader entries. Empty unless a plugin declared one and the user granted ui.reader. */
+  const pluginActions = $derived(plugins.actionsFor("reader"));
   const horizontal = $derived(settings.readerMode === "paged" || settings.readerMode === "ltr" || settings.readerMode === "rtl");
   const rtl = $derived(settings.readerMode === "rtl");
 
@@ -651,6 +654,20 @@
     <span>Keep the screen awake</span>
     <input type="checkbox" checked={settings.keepAwake} onchange={(event) => settings.set("keepAwake", event.currentTarget.checked)} />
   </label>
+  {#if pluginActions.length > 0}
+    <!--
+      A plugin's reader entry, in the sheet the reader already opens. It cannot draw over the page:
+      the host gives a plugin no DOM, only calls — so an action opens the app's own panel or dialog.
+    -->
+    <div class="group">
+      <span class="label">Plugins</span>
+      <div class="chips">
+        {#each pluginActions as action (action.pluginId + action.id)}
+          <button class="chip" onclick={() => plugins.invoke(action.pluginId, action.id)}>{action.title}</button>
+        {/each}
+      </div>
+    </div>
+  {/if}
   <p class="hint">Keys: ← → turn pages, J/K change chapter, F fullscreen, R mark read, Esc back.</p>
 </Sheet>
 
