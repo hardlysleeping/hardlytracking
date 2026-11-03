@@ -1,0 +1,10 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>More appearance live QA</title><style>.app{height:100dvh;background:var(--bg)}main{height:100%;overflow-y:auto}</style></head>
+<body><div class="app"><main id="fixture"></main></div><script type="module">
+import { mount } from 'svelte';
+import More from '../../src/views/More.svelte';
+import { appearance } from '../../src/lib/theme.svelte';
+import '../../src/app.css';
+appearance.start();
+mount(More,{target:document.querySelector('#fixture')});
+</script></body></html>

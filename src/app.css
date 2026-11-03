@@ -18,8 +18,19 @@
   --surface: #15151b;
   --surface-2: #1b1b23;
   --elevated: #20202a;
-  --line: #262630;
-  --line-strong: #3a3a48;
+  --base-line: #262630;
+  --base-line-strong: #3a3a48;
+  --line: var(--edge, var(--base-line));
+  --line-strong: var(--edge-strong, var(--base-line-strong));
+  --page-bg: var(--bg);
+  --bg-image: none;
+  --bg-blur: 0px;
+  --bg-dim: 0;
+  --glass: 100%;
+  /* Selection material is opt-in per selected card, never a persistent item fill. */
+  --selected-card-bg: color-mix(in srgb, var(--surface) 90%, transparent);
+  --selected-card-edge: color-mix(in srgb, var(--accent) 50%, var(--line));
+  --selected-card-blur: 14px;
 
   --text-1: #e8e8f0;
   --text-2: #a8a8b8;
@@ -99,8 +110,8 @@
   --surface: #ffffff;
   --surface-2: #f0f0f4;
   --elevated: #ffffff;
-  --line: #e2e2e8;
-  --line-strong: #c8c8d2;
+  --base-line: #e2e2e8;
+  --base-line-strong: #c8c8d2;
   --text-1: #14141a;
   --text-2: #55555f;
   /* 3.4:1 on white was too faint for a nav label; this is 5.25:1 and still
@@ -122,8 +133,8 @@
   --surface: #0a0a0c;
   --surface-2: #101014;
   --elevated: #16161c;
-  --line: #1d1d24;
-  --line-strong: #33333e;
+  --base-line: #1d1d24;
+  --base-line-strong: #33333e;
 }
 
 @media (prefers-color-scheme: light) {
@@ -133,8 +144,8 @@
     --surface: #ffffff;
     --surface-2: #f0f0f4;
     --elevated: #ffffff;
-    --line: #e2e2e8;
-    --line-strong: #c8c8d2;
+    --base-line: #e2e2e8;
+    --base-line-strong: #c8c8d2;
     --text-1: #14141a;
     --text-2: #55555f;
     /* 3.4:1 on white was too faint for a nav label; this is 5.25:1 and still
@@ -521,3 +532,45 @@ button.ghost:disabled {
     font-size: max(16px, var(--t-md)) !important;
   }
 }
+
+/* Device appearance: the photograph/page is separate from safe ink surfaces.
+   Do not repurpose --bg: existing controls use it as ink on inverse buttons. */
+body { background: var(--page-bg); isolation: isolate; }
+:root[data-background="custom"] .app { background: transparent; }
+body::before, body::after {
+  content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none;
+}
+body::before {
+  background-image: var(--bg-image); background-size: cover; background-position: center;
+  filter: blur(var(--bg-blur)); transform: scale(1.08);
+}
+body::after { background: var(--page-bg); opacity: var(--bg-dim); }
+/* Reading content gets its own neutral scrim, never unprotected ink on a photo.
+   Navigation and fields remain solid unless glass was explicitly requested. */
+:root[data-background="custom"] main > .view {
+  background: color-mix(in srgb, var(--bg) 94%, transparent);
+  min-height: 100%;
+}
+:root[data-glass="true"] .app > :is(.sidebar, .rail, .bar) {
+  background: color-mix(in srgb, var(--surface) var(--glass), transparent);
+  -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px);
+}
+:root .btn.primary { background: var(--accent); color: var(--accent-ink); }
+:root .chip.on { border-color: var(--accent-text); background: color-mix(in srgb, var(--accent) 12%, var(--surface)); }
+:root .theme-action-star { color: var(--act-star); }
+:root .theme-action-read { color: var(--act-read); }
+:root .theme-action-link { color: var(--act-link); }
+/* Stable semantic hook for controls and the panel's live preview. Pins/eyes never
+   borrow the accent or the optional monotone action palette. */
+:root [data-tone="hidden"] { color: var(--tone-hidden-text); }
+:root [data-tone="pinned"] { color: var(--tone-pinned-text); }
+:root [data-tone="lock-open"] { color: var(--tone-lock-open-text); }
+:root [data-tone="lock-closed"] { color: var(--tone-lock-closed-text); }
+:root [data-tone="unlock"] { color: var(--tone-unlock-text); }
+:root [data-tone="sync"] { color: var(--tone-sync-text); }
+:root [data-tone="trim"] { color: var(--tone-trim-text); }
+:root [data-tone="link"] { color: var(--tone-link-text); }
+:root [data-tone="star"] { color: var(--tone-star-text); }
+/* Existing category controls predate data-tone; preserve their semantic color. */
+:root aside.rail .eye { color: var(--tone-hidden-text); }
+

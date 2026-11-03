@@ -8,7 +8,7 @@
    */
   import { library } from "../state/library.svelte";
   import { downloads } from "../state/downloads.svelte";
-  import { appearance, THEME_OPTIONS } from "../lib/theme.svelte";
+  import ThemePanel from "../components/ThemePanel.svelte";
   import { go } from "../lib/nav";
   import { plugins } from "../state/plugins.svelte";
 
@@ -36,6 +36,10 @@
       <span class="s">{counts.downloads} chapter{counts.downloads === 1 ? "" : "s"}</span>
       <span class="chev">›</span>
     </button>
+    <button class="row sync" onclick={() => go("/sync")}>
+      <span class="t">Sync<span class="s">Optional cloud sync · account and subscription</span></span>
+      <span class="chev" aria-hidden="true">›</span>
+    </button>
     <button class="row" onclick={() => go("/backup")}>
       <span class="t">Backup &amp; restore</span>
       <span class="s">Export or import a file — always free</span>
@@ -55,13 +59,7 @@
 
   <section class="block">
     <h2>Appearance</h2>
-    <div class="chips">
-      {#each THEME_OPTIONS as option (option.id)}
-        <button class="chip" class:on={appearance.theme === option.id} aria-pressed={appearance.theme === option.id} onclick={() => appearance.apply(option.id)}>
-          {option.label}
-        </button>
-      {/each}
-    </div>
+    <ThemePanel />
   </section>
 
   <p class="about">
@@ -103,6 +101,9 @@
     border-bottom: 1px solid var(--line);
   }
 
+  .row.sync { grid-template-columns: minmax(0, 1fr) auto; }
+  .row.sync .s { display: block; margin-top: var(--s1); overflow-wrap: anywhere; }
+
   .row:hover {
     background: var(--surface-2);
   }
@@ -131,12 +132,6 @@
     letter-spacing: 0.08em;
     color: var(--text-3);
     margin-bottom: var(--s2);
-  }
-
-  .chips {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--s2);
   }
 
   .about {
