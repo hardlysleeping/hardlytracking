@@ -1,0 +1,20 @@
+{
+  "$comment": [
+    "Resolution settings for the functions in this directory.",
+    "",
+    "'imports' maps the two bare specifiers the app's own modules use. src/plugins/validate.ts",
+    "imports 'fflate' for the ZIP reader, and no Edge Function runtime has it otherwise.",
+    "",
+    "'sloppy-imports' is what lets these functions import the app's own TypeScript sources:",
+    "every module under src/ imports its siblings without a file extension (Vite and tsc",
+    "both resolve that; Deno does not by default), and duplicating those files here to add",
+    "'.ts' would defeat the point of importing them at all. If the deployment's Deno version",
+    "does not honour this key, see docs/community-backend.md — the fallback is to vendor the",
+    "two modules at deploy time, not to re-implement them."
+  ],
+  "imports": {
+    "fflate": "npm:fflate@0.8.3"
+  },
+  "unstable": ["sloppy-imports"],
+  "nodeModulesDir": "none"
+}
