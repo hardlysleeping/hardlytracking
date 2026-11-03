@@ -10,11 +10,13 @@
   import { downloads } from "../state/downloads.svelte";
   import { appearance, THEME_OPTIONS } from "../lib/theme.svelte";
   import { go } from "../lib/nav";
+  import { plugins } from "../state/plugins.svelte";
 
   const counts = $derived({
     library: library.library.length,
     downloads: downloads.rows.length,
     extensions: library.extensions.length,
+    plugins: plugins.list.length,
   });
 </script>
 
@@ -24,6 +26,11 @@
   </header>
 
   <nav class="list" aria-label="More">
+    <button class="row" onclick={() => go("/plugins")}>
+      <span class="t">Plugins</span>
+      <span class="s">{counts.plugins} installed</span>
+      <span class="chev">›</span>
+    </button>
     <button class="row" onclick={() => go("/downloads")}>
       <span class="t">Downloads</span>
       <span class="s">{counts.downloads} chapter{counts.downloads === 1 ? "" : "s"}</span>

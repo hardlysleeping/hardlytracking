@@ -37,6 +37,12 @@ export const STORES = [
   "trackerAccounts",
   /** A comic file this device holds: the bytes, the page count, nothing decoded. */
   "books",
+  /** An installed community plugin: its manifest, its grant and its failure count. */
+  "plugins",
+  /** The plugin's own package bytes, keyed `<id>@<version>` so a rollback needs no download. */
+  "pluginPackages",
+  /** A plugin's own key/value space. Namespaced by plugin id in the row key. */
+  "pluginStorage",
 ] as const;
 export type StoreName = (typeof STORES)[number];
 
@@ -64,6 +70,9 @@ const KEY_PATH: Record<StoreName, string> = {
   mappings: "seriesId",
   repos: "url",
   books: "seriesId",
+  plugins: "id",
+  pluginPackages: "id",
+  pluginStorage: "key",
   downloads: "chapterId",
   downloadPages: "id",
   viewState: "key",
@@ -89,7 +98,7 @@ export interface Database {
 }
 
 const DB_NAME = "hardlytracking";
-const DB_VERSION = 15;
+const DB_VERSION = 16;
 
 function wrap<T>(request: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => {

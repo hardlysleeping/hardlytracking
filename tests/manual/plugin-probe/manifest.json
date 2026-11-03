@@ -1,0 +1,12 @@
+{
+  "manifestVersion": 1,
+  "id": "dev.hardlytracking.probe",
+  "name": "Probe",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "minAppVersion": "0.5.8",
+  "entry": "entry.js",
+  "permissions": ["library.read", "plugin.storage"],
+  "contributes": {},
+  "description": "Writes what the host answered into its own storage, so a browser check can read the host's side of the wire."
+}

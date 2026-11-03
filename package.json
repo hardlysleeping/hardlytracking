@@ -18,7 +18,8 @@
     "serve:lan": "HOST=0.0.0.0 node server/proxy.mjs",
     "runtime:prepare": "node scripts/prepare-runtime.mjs",
     "desktop": "node scripts/prepare-runtime.mjs && tauri build",
-    "perf": "node --experimental-strip-types --import ./tests/unit/register-ts.mjs scripts/library-perf.mjs"
+    "perf": "node --experimental-strip-types --import ./tests/unit/register-ts.mjs scripts/library-perf.mjs",
+    "plugin:example": "node scripts/build-example-plugin.mjs"
   },
   "devDependencies": {
     "@capacitor/cli": "^7.6.10",

@@ -32,6 +32,7 @@ import {
 } from "../lib/migrate";
 import { startNativeRuntime, shellFetch } from "../lib/mihon-runtime";
 import { detectPlatform } from "../lib/webview/index";
+import { plugins } from "./plugins.svelte";
 import { watchOpenedFiles } from "../lib/files/opened";
 import { imageCache } from "../lib/cache/images";
 import type { Chapter, Page, Series, Source } from "../api/source";
@@ -164,6 +165,9 @@ class LibraryState {
         this.stopOpenedFiles = stop ?? null;
       });
       void this.loadSources();
+      // Plugins come last: they read the library through the profile, so nothing of theirs runs
+      // before there is a library to read. A build with none installed starts no frame at all.
+      plugins.attach(this.profile);
     } catch (error) {
       this.openError = message(error);
     }

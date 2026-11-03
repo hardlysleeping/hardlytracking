@@ -18,6 +18,7 @@
   import { library } from "../state/library.svelte";
   import { categories } from "../state/categories.svelte";
   import { downloads } from "../state/downloads.svelte";
+  import { plugins } from "../state/plugins.svelte";
   import Sheet from "./Sheet.svelte";
   import Cover from "./Cover.svelte";
   import {
@@ -54,6 +55,8 @@
   let noticeTimer: ReturnType<typeof setTimeout> | null = null;
 
   const id = $derived(series?.id ?? "");
+  /** The plugin entries this sheet shows: series-page actions, from plugins that are running. */
+  const pluginActions = $derived(plugins.actionsFor("series"));
 
   const model = $derived(pickerModel(categories.items, { categoryIds }, library.library));
   const names = $derived(
@@ -255,6 +258,24 @@
           <span class="chev" aria-hidden="true">›</span>
         </button>
       </div>
+
+      {#if pluginActions.length > 0}
+        <!--
+          A plugin's own entry, in the same sheet as the app's own verbs — the manifest declared it,
+          the user granted the permission, and it is dispatched by `<plugin>:<action>` so two plugins
+          cannot shadow each other.
+        -->
+        <div class="acts">
+          {#each pluginActions as action (action.pluginId + action.id)}
+            <button class="act" onclick={() => { plugins.invoke(action.pluginId, action.id); onclose(); }}>
+              <span class="glyph" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M12 3l2.5 5.5L20 11l-5.5 2.5L12 19l-2.5-5.5L4 11l5.5-2.5z" /></svg>
+              </span>
+              <span class="words"><strong>{action.title}</strong><em>{action.pluginId}</em></span>
+            </button>
+          {/each}
+        </div>
+      {/if}
 
       {#if notice !== ""}<p class="notice" role="status">{notice}</p>{/if}
     {:else}

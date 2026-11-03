@@ -13,6 +13,7 @@
   import Browse from "./views/Browse.svelte";
   import History from "./views/History.svelte";
   import More from "./views/More.svelte";
+  import Plugins from "./views/Plugins.svelte";
   import Series from "./views/Series.svelte";
   import Source from "./views/Source.svelte";
   import Search from "./views/Search.svelte";
@@ -147,6 +148,8 @@ import { sourceMarks } from "./state/source-marks.svelte";
       <Extensions repo={pendingRepo} />
     {:else if route.name === "software" && route.id !== null}
       <Software pkg={route.id} repo={route.repo} />
+    {:else if route.name === "plugins"}
+      <Plugins />
     {:else if route.name === "settings"}
       <Settings />
     {:else if route.name === "downloads"}
