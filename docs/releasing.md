@@ -7,7 +7,11 @@ the numbers are from that release.
 
     package.json                       "version"
     src-tauri/tauri.conf.json          "version"          (the desktop installers)
+    src-tauri/Cargo.toml               version            (the crate; the installers ignore it)
     ios/App/App.xcodeproj/project.pbxproj   MARKETING_VERSION, twice (Debug and Release)
+
+`Cargo.toml` drifted to 0.5.1 while 0.5.4 shipped, because nothing builds from it directly — bump it
+with the rest so `grep 0.5.` does not tell two stories.
 
 `CFBundleVersion` is not among them: the IPA workflow sets the build number itself, which is why the
 same release can be build 24, 25 or 26 while the marketing version stays put.

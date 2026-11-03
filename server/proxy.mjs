@@ -71,11 +71,15 @@ const MIME = {
 const HOP_BY_HOP = new Set(["connection", "keep-alive", "transfer-encoding", "upgrade", "host", "content-length"]);
 
 /**
- * `content-encoding` is dropped because Node's `fetch` decodes gzip/deflate/br for us: the
- * bytes we forward are already plain, so passing the header on makes the browser try to
- * gunzip plain text — a 200 whose body cannot be read ("TypeError: Failed to fetch"), which
- * is what the dalvik host's gzipped `/capabilities` did. We also ask upstream for identity,
- * so there is nothing to decode in the first place.
+ * `content-encoding` is dropped, and the reason is now the *request*, not the client library.
+ *
+ * `forwardHeaders` asks every upstream for `accept-encoding: identity`, so the bytes that come
+ * back are plain; passing a stale `content-encoding` on would make the browser try to gunzip
+ * plain text — a 200 whose body cannot be read ("TypeError: Failed to fetch"), which is what the
+ * dalvik host's gzipped `/capabilities` did. The dalvik hop no longer goes through `fetch`
+ * (`serveDalvik` uses `node:http` so an absent user-agent stays absent), and `node:http` does
+ * **not** decode, so this drop depends on the runtime honouring `identity` — measured to do so,
+ * but it is an assumption about the runtime rather than a property of Node.
  */
 const RESPONSE_DROP = new Set([...HOP_BY_HOP, "content-encoding"]);
 
@@ -216,6 +220,8 @@ async function serveDalvik(request, response) {
   if (typeof appUserAgent === "string" && appUserAgent !== "") headers["user-agent"] = appUserAgent;
   // `node:http` (unlike `fetch`) forwards `host` verbatim, and this one names the proxy's own port.
   delete headers["host"];
+  // The LAN token is this app's secret, not the runtime's; the Komga hop already strips it.
+  delete headers["x-hardlytracking-token"];
   const payload = await body(request);
   const isCall = request.method === "POST" && incoming.pathname === "/api/dalvik/dalvik";
 
@@ -564,7 +570,7 @@ const server = createServer((request, response) => {
     // "Failed to fetch", with nothing in the server log.
     response.setHeader(
       "Access-Control-Allow-Headers",
-      "content-type, x-hardlytracking-token, x-hardlytracking-cookies, source-base-url, x-mangayomi-webview-port",
+      "content-type, x-hardlytracking-token, x-hardlytracking-cookies, x-hardlytracking-user-agent, source-base-url, x-mangayomi-webview-port",
     );
     // DELETE and PATCH are how a phone uninstalls and disables a PC's extension; a preflight that
     // does not list them is a request the browser never sends.

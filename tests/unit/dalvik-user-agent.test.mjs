@@ -24,13 +24,17 @@ import { setTimeout as sleep } from "node:timers/promises";
 const BROWSER_UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
 const APP_UA = "Tachiyomi Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36";
 
-/** A runtime that answers every `/dalvik` call with the headers it saw. */
+/** A runtime that records what it received, headers and body. */
 async function recordingRuntime() {
   const seen = [];
   const server = createServer((request, response) => {
-    seen.push({ url: request.url, headers: request.headers });
-    response.writeHead(200, { "content-type": "application/json" });
-    response.end("{}");
+    const chunks = [];
+    request.on("data", (chunk) => chunks.push(chunk));
+    request.on("end", () => {
+      seen.push({ url: request.url, headers: request.headers, body: Buffer.concat(chunks).toString("utf8") });
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end("{}");
+    });
   });
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
@@ -38,25 +42,53 @@ async function recordingRuntime() {
   return { baseUrl: `http://127.0.0.1:${port}`, seen, close: () => new Promise((done) => server.close(done)) };
 }
 
-/** The proxy, on its own port, pointed at that runtime. */
+/**
+ * The proxy, on a port of its own, pointed at that runtime.
+ *
+ * The port is drawn well above the developer's own services: the first version of this test drew
+ * 8400–8799, which contains the real `:8460`. On a collision the proxy exits with `EADDRINUSE`, the
+ * readiness loop gave up quietly, and the assertions either ran against the live app or against
+ * nothing — a test that can pass by talking to the wrong process is worse than no test. Collisions
+ * now fail loudly, with the child's stderr, and `stop()` waits for the process to be gone.
+ */
 async function startProxy(runtimeUrl) {
-  const port = 8400 + Math.floor(Math.random() * 400);
-  const child = spawn(process.execPath, ["server/proxy.mjs"], {
-    cwd: new URL("../..", import.meta.url).pathname,
-    env: { ...process.env, PORT: String(port), HOST: "127.0.0.1", DALVIK_URL: runtimeUrl },
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  const base = `http://127.0.0.1:${port}`;
-  for (let attempt = 0; attempt < 100; attempt += 1) {
-    try {
-      const answer = await fetch(`${base}/api/health`).catch(() => null);
-      if (answer !== null) break;
-    } catch {
-      /* not listening yet */
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const port = 18000 + Math.floor(Math.random() * 1000);
+    const child = spawn(process.execPath, ["server/proxy.mjs"], {
+      cwd: new URL("../..", import.meta.url).pathname,
+      env: { ...process.env, PORT: String(port), HOST: "127.0.0.1", DALVIK_URL: runtimeUrl },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stderr = "";
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk;
+    });
+    const base = `http://127.0.0.1:${port}`;
+    let ready = false;
+    for (let tick = 0; tick < 100 && !ready; tick += 1) {
+      if (child.exitCode !== null) break;
+      ready = await fetch(`${base}/api/health`).then(
+        (answer) => answer !== null,
+        () => false,
+      );
+      if (!ready) await sleep(100);
     }
-    await sleep(100);
+    if (ready) {
+      return {
+        base,
+        stop: async () => {
+          child.kill("SIGTERM");
+          await Promise.race([once(child, "exit"), sleep(5000)]);
+        },
+      };
+    }
+    child.kill("SIGKILL");
+    await Promise.race([once(child, "exit"), sleep(2000)]);
+    if (!/EADDRINUSE/.test(stderr)) {
+      throw new Error(`the proxy never answered on ${base}: ${stderr.trim().slice(0, 400)}`);
+    }
   }
-  return { base, stop: () => child.kill("SIGTERM") };
+  throw new Error("no free port for the proxy after eight attempts");
 }
 
 test("the runtime never inherits the browser's user-agent", async () => {
@@ -74,7 +106,7 @@ test("the runtime never inherits the browser's user-agent", async () => {
     assert.equal(call.headers["user-agent"], undefined, "a forwarded browser UA makes the extension browse as Chrome");
     assert.equal(call.headers.host, new URL(runtime.baseUrl).host, "the runtime is addressed by its own host, not the proxy's port");
   } finally {
-    proxy.stop();
+    await proxy.stop();
     await runtime.close();
   }
 });
@@ -96,7 +128,29 @@ test("a user-agent the app means to send is the one that arrives", async () => {
     assert.equal(call.headers["user-agent"], APP_UA);
     assert.equal(call.headers["x-hardlytracking-user-agent"], undefined, "the private header is plumbing, not a header the runtime sees");
   } finally {
-    proxy.stop();
+    await proxy.stop();
+    await runtime.close();
+  }
+});
+
+test("the call body crosses the hop intact, and the app's own token does not", async () => {
+  const runtime = await recordingRuntime();
+  const proxy = await startProxy(runtime.baseUrl);
+  const payload = JSON.stringify({ method: "getPopularManga", extensionId: "deadbeef", sourceId: "1", page: 2 });
+  try {
+    await fetch(`${proxy.base}/api/dalvik/dalvik`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-hardlytracking-token": "lan-secret" },
+      body: payload,
+    });
+    const call = runtime.seen.at(-1);
+    // `node:http` does not set `content-length` for us (it is hop-by-hop here), so the body arrives
+    // chunked — and a transport change that silently dropped the body would look like an empty
+    // source, which is the bug this whole file exists for.
+    assert.equal(call.body, payload);
+    assert.equal(call.headers["x-hardlytracking-token"], undefined, "the LAN token is the app's secret, not the runtime's");
+  } finally {
+    await proxy.stop();
     await runtime.close();
   }
 });
