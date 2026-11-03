@@ -7,7 +7,7 @@
  * local and whose providers are whatever the build configured.
  */
 import { apiUrl } from "../lib/host";
-import { createProviders, openHtServer, type DalvikHost, type RegistryConfig } from "./registry";
+import { createProviders, openDalvik, openHtServer, type DalvikHost, type RegistryConfig } from "./registry";
 import { BUILTIN_ARCHIVE_ID, BUILTIN_HT_SERVER_ID, ensureBuiltinExtensions, isBuiltin } from "./builtin";
 import { htServerEnabled, setHtServerEnabled } from "../lib/host";
 import type { InstalledExtension } from "./dalvik";
@@ -34,8 +34,8 @@ export interface LibraryProfile {
   readonly label: string;
   readonly store: LibraryStore;
   readonly providers: SourceProvider[];
-  /** The extension host, when one answered `/capabilities`. */
-  readonly dalvik: DalvikHost | null;
+  /** The extension host, when one answered `/capabilities`. Assigned again by `attachDalvik`. */
+  dalvik: DalvikHost | null;
   /**
    * The paired HT-Server, when one answered.
    *
@@ -56,6 +56,16 @@ export interface LibraryProfile {
   listExtensions(): Promise<InstalledExtension[]>;
   /** Re-probe the paired HT-Server. Resolves to a warning line, or `null` when it answered. */
   refreshHtServer(): Promise<string | null>;
+  /**
+   * Add this device's extension host after the library is already open.
+   *
+   * The host has to be started by someone — on a phone that is a JVM inside the app, which takes as
+   * long as it takes. Opening the library must not wait for it: the database, the titles, the reading
+   * history and the files are all this device's own, and a host that never answers used to hold all of
+   * them behind one sentence. Called in the background; resolves to a warning line, or `null` when the
+   * host answered and its sources are live.
+   */
+  attachDalvik(baseUrl: string): Promise<string | null>;
   /**
    * Rebuild the Komga provider from the saved address and login.
    *
@@ -155,7 +165,7 @@ export async function openLibraryProfile(options: OpenProfileOptions = {}): Prom
   };
   const registry = await createProviders(config);
 
-  const dalvik = registry.dalvik;
+  let dalvik = registry.dalvik;
   const providers = registry.providers;
 
   /** The built-ins are this device's — the archive switch and the HT-Server pairing — so they never
@@ -234,6 +244,17 @@ export async function openLibraryProfile(options: OpenProfileOptions = {}): Prom
       } catch (error) {
         return `${saved.url}: ${error instanceof Error ? error.message : String(error)}`;
       }
+    },
+    async attachDalvik(baseUrl: string): Promise<string | null> {
+      const next = await openDalvik(config, baseUrl, listExtensions);
+      const at = providers.findIndex((provider) => provider.kind === "dalvik");
+      if (at >= 0) providers.splice(at, 1);
+      if (next.provider !== null) providers.push(next.provider);
+      // The closure's `dalvik` is what `installApk` and the sources read, so both have to move.
+      dalvik = next.dalvik;
+      profile.dalvik = next.dalvik;
+      if (next.warning !== null) registry.warnings.push(next.warning);
+      return next.warning;
     },
     async refreshHtServer(): Promise<string | null> {
       const next = await openHtServer(config);

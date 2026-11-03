@@ -169,6 +169,30 @@ class LibraryState {
   }
 
   /**
+   * Start this device's extension host and fold it into an already-open library.
+   *
+   * Every failure here is a sentence, not a boot screen: the library is open either way. A host that
+   * never answers costs the extensions and their sources this session, which is exactly what the
+   * message says.
+   */
+  private async attachHost(ownHost: boolean): Promise<void> {
+    if (!ownHost) return;
+    const base = await startNativeRuntime();
+    const profile = this.profile;
+    if (profile === null) return;
+    if (base === null) {
+      this.error =
+        "The on-device extension host did not start. Extensions and their sources are unavailable this session; your library still opens.";
+      return;
+    }
+    const warning = await profile.attachDalvik(base);
+    if (warning !== null) this.error = warning;
+    // The provider list grew, so the chips and the extension rows have to be read again.
+    await this.loadSources();
+    this.extensions = await profile.listExtensions();
+  }
+
+  /**
    * Try again from the boot screen.
    *
    * A wedged start used to be terminal for the session: the only cure was killing the app, which on a
@@ -203,21 +227,25 @@ class LibraryState {
         `${step === null ? "" : ` — it was stuck at “${step}”`}.`;
     }, BOOT_OVERALL_DEADLINE_MS);
     try {
-      // On the iPhone shell the extension host is inside this process, so it has to be serving
-      // before the providers are built. Everywhere else this resolves to `null` without doing any
-      // work, and the app's own `/api/dalvik` proxy stays the default host.
-      const nativeBase = await startNativeRuntime();
-      // A phone that could not start its own extension host still has a library — files, Komga,
-      // the Archive — so this is said, not fatal. Silence is what made the iPhone look broken: the
-      // host never answered and nothing on screen named it.
-      if (nativeBase === null && detectPlatform() === "capacitor") {
-        this.error = "The on-device extension host did not start. Extensions and their sources are unavailable this session; your library still opens.";
-      }
+      /**
+       * The library opens from its own database, and the extension host joins afterwards.
+       *
+       * It used to be the other way round: this process started the host, waited for it, and only then
+       * opened the database and built the providers — so a phone whose embedded JVM was slow, wedged
+       * or never registered held every saved title, every file and the whole reading history behind
+       * "Opening the library…". The host is one *source*; the library is not its property.
+       *
+       * A shell with a host of its own (iPhone, desktop) therefore opens with `dalvikBase: null` and
+       * attaches the host in the background, once it answers. A browser build keeps its own fast
+       * `/api/dalvik` proxy in the open path: it is local and answers immediately.
+       */
+      const shell = detectPlatform();
+      const ownHost = shell === "capacitor" || shell === "tauri";
       // The desktop shell needs Rust's HTTP client for loopback (CORS), and that same client is what
       // makes a repository index reachable with no `/api/repo` proxy in the app.
       const fetchImpl = await shellFetch();
       const options = {
-        ...(nativeBase === null ? {} : { dalvikBase: nativeBase }),
+        ...(ownHost ? { dalvikBase: null } : {}),
         ...(fetchImpl === undefined ? {} : { fetchImpl }),
       };
 
@@ -247,6 +275,10 @@ class LibraryState {
       this.hostExtensions = [...(this.profile.htServer?.extensions ?? [])];
       this.repos = await bootStep("Listing repositories", () => this.profile!.store.listRepos());
       this.ready = true;
+      // Started, not awaited: the screen is usable from here on, and the host's arrival only adds
+      // sources to it. On a phone the JVM may take a minute or never come up; neither is the library's
+      // business any more.
+      void this.attachHost(ownHost);
       // Covers and page images live in the same database, behind the user's ceiling.
       imageCache.attach(this.profile.store.database);
       void imageCache.prune();

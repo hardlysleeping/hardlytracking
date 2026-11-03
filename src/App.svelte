@@ -59,6 +59,8 @@ import { sourceMarks } from "./state/source-marks.svelte";
     }, 1000);
     return () => clearInterval(tick);
   });
+  /** The warning strip is dismissed by text, so a *new* warning is shown again. */
+  let dismissedWarning = $state<string | null>(null);
   const elapsed = $derived(
     bootReport.startedAt === 0 ? null : Math.max(0, Math.round((now - bootReport.startedAt) / 1000)),
   );
@@ -149,6 +151,16 @@ import { sourceMarks } from "./state/source-marks.svelte";
         sentence, dismissible by fixing the cause, not by tapping an X.
       -->
       <p class="nostore" role="status">{library.error}</p>
+    {:else if library.error !== null && library.error !== dismissedWarning}
+      <!--
+        A host that did not start is not silence. It used to be written into `library.error` and drawn
+        nowhere, so the phone looked like it had simply lost the feature. One line, dismissible —
+        the same sentence on every launch until the host works is still worth a tap.
+      -->
+      <p class="nostore" role="status">
+        {library.error}
+        <button class="dismiss" onclick={() => (dismissedWarning = library.error)} aria-label="Dismiss">×</button>
+      </p>
     {/if}
     {#if !library.ready && library.openError === null && active === "library"}
       <!--
@@ -220,6 +232,17 @@ import { sourceMarks } from "./state/source-marks.svelte";
     padding: var(--s5) var(--s4);
     color: var(--text-2);
     font-size: var(--t-sm);
+  }
+
+  .nostore .dismiss {
+    float: right;
+    margin-left: var(--s3);
+    padding: 0 var(--s2);
+    border: 0;
+    background: none;
+    color: inherit;
+    font-size: var(--t-md);
+    cursor: pointer;
   }
 
   .boot .bootline {

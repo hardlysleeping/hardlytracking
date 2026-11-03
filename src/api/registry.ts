@@ -88,6 +88,31 @@ export interface DalvikHost {
   extensions: InstalledExtension[];
 }
 
+/**
+ * How long a host may take to answer a probe.
+ *
+ * `/capabilities` is the handshake that turns an address into a provider. A runtime that has bound its
+ * port but wedged — a JVM stopped mid-start — accepts the connection and then says nothing, and a
+ * request with no deadline waits for the session. That is how the *library* became hostage to the
+ * *extension host*: the provider set was built before a single title was read.
+ */
+export const NET_PROBE_DEADLINE_MS = 8_000;
+
+/** `work`, or a rejection naming `what` once `ms` pass. The timer never outlives the race. */
+export async function withinDeadline<T>(work: Promise<T>, ms: number, what: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      work,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`${what} did not answer in ${Math.round(ms / 1000)} s`)), ms);
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
 export interface ProviderSet {
   providers: SourceProvider[];
   /** `null` when no host answered `/capabilities`. */
@@ -237,30 +262,10 @@ export async function createProviders(config: RegistryConfig): Promise<ProviderS
   let dalvik: DalvikHost | null = null;
   const dalvikBase = config.dalvikBase === undefined ? apiUrl("/api/dalvik") : config.dalvikBase;
   if (dalvikBase !== null) {
-    const client = new DalvikClient({ baseUrl: dalvikBase, ...(config.fetchImpl === undefined ? {} : { fetchImpl: config.fetchImpl }) });
-    try {
-      const capabilities = await client.capabilities();
-      // Read once at boot so the sources of an APK installed last launch are there before the
-      // first paint; the array stays live afterwards. Built-ins are excluded: they have no APK and
-      // no runtime handle, so feeding one to the host would ask it to run a package it never saw.
-      const extensions = (await extensionList()).filter((row) => row.builtin !== true);
-      providers.push(
-        createDalvikProvider({
-          client,
-          extensions,
-          // The session travels on every call: cookies from this device's jar, the UA the webview
-          // used, and — when this build hosts one — the port of the app's own webview bridge.
-          ...(config.cookies === undefined ? {} : { cookies: config.cookies }),
-          ...(config.userAgent === undefined ? {} : { userAgent: config.userAgent }),
-          ...(config.webviewPort === undefined ? {} : { webviewPort: config.webviewPort }),
-          preferences: preferencesFor(config.store),
-          readState: readStateFor(config.store),
-        }),
-      );
-      dalvik = { baseUrl: dalvikBase, client, capabilities, extensions };
-    } catch (error) {
-      warnings.push(`dalvik: ${error instanceof Error ? error.message : String(error)}`);
-    }
+    const attached = await openDalvik(config, dalvikBase, extensionList);
+    if (attached.provider !== null) providers.push(attached.provider);
+    if (attached.warning !== null) warnings.push(attached.warning);
+    dalvik = attached.dalvik;
   }
 
   const htServer = await openHtServer(config);
@@ -268,6 +273,50 @@ export async function createProviders(config: RegistryConfig): Promise<ProviderS
   if (htServer.warning !== null) warnings.push(htServer.warning);
 
   return { providers, dalvik, htServer: htServer.host, warnings };
+}
+
+/**
+ * Turn an address into the extension host, with a deadline on the handshake.
+ *
+ * Exported because the same step runs twice: at open, when a proxy answers immediately, and later in
+ * the background, when an on-device runtime has finished starting. The library never waits on it.
+ */
+export async function openDalvik(
+  config: RegistryConfig,
+  baseUrl: string,
+  extensionList: () => Promise<InstalledExtension[]> = () => config.store.listExtensions(),
+  /** Overridable so a test can prove the deadline without waiting eight seconds. */
+  deadlineMs = NET_PROBE_DEADLINE_MS,
+): Promise<{ dalvik: DalvikHost | null; provider: SourceProvider | null; warning: string | null }> {
+  const client = new DalvikClient({
+    baseUrl,
+    ...(config.fetchImpl === undefined ? {} : { fetchImpl: config.fetchImpl }),
+  });
+  try {
+    const capabilities = await withinDeadline(client.capabilities(), deadlineMs, `the extension host at ${baseUrl}`);
+    // Read once so the sources of an APK installed last launch are there before the first paint; the
+    // array stays live afterwards. Built-ins are excluded: they have no APK and no runtime handle, so
+    // feeding one to the host would ask it to run a package it never saw.
+    const extensions = (await extensionList()).filter((row) => row.builtin !== true);
+    const provider = createDalvikProvider({
+      client,
+      extensions,
+      // The session travels on every call: cookies from this device's jar, the UA the webview used,
+      // and — when this build hosts one — the port of the app's own webview bridge.
+      ...(config.cookies === undefined ? {} : { cookies: config.cookies }),
+      ...(config.userAgent === undefined ? {} : { userAgent: config.userAgent }),
+      ...(config.webviewPort === undefined ? {} : { webviewPort: config.webviewPort }),
+      preferences: preferencesFor(config.store),
+      readState: readStateFor(config.store),
+    });
+    return { dalvik: { baseUrl, client, capabilities, extensions }, provider, warning: null };
+  } catch (error) {
+    return {
+      dalvik: null,
+      provider: null,
+      warning: `dalvik: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
 }
 
 export function providerFor(providers: SourceProvider[], id: string): SourceProvider {
