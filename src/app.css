@@ -134,6 +134,15 @@ html,
 body {
   margin: 0;
   height: 100%;
+  /**
+   * The frame is the screen. `main` is the only scroller, and a page that fits does not move at all.
+   *
+   * Without this the document itself is a scroll container: on iOS the webview rubber-bands it even
+   * when every element inside is `overflow: hidden`, so a screen with three lines could still be
+   * dragged up far enough to hide its own title. `scrollEnabled: false` in `capacitor.config.ts` shuts
+   * the webview's scroll view; this shuts the document's, for every shell including a plain browser.
+   */
+  overflow: hidden;
   overscroll-behavior: none;
   background: var(--bg);
   color: var(--text-1);

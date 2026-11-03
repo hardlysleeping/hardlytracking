@@ -16,6 +16,15 @@ const config: CapacitorConfig = {
     // "always" insets the webview a second time, which is the band of dead space under the bar.
     contentInset: "never",
     limitsNavigationsToAppBoundDomains: false,
+    /**
+     * The document does not scroll; `main` does.
+     *
+     * WKWebView gives its own `UIScrollView` a rubber band regardless of what the DOM says: on a page
+     * whose content fits, dragging still lifted the title and let it spring back, which reads as "I can
+     * scroll past the title on every page" — on screens with nothing to scroll. CSS cannot reach that
+     * scroll view; this can. Inner scrollers are rendered by the web process and keep working.
+     */
+    scrollEnabled: false,
   },
   server: {
     iosScheme: "capacitor",

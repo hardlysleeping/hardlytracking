@@ -165,7 +165,11 @@
     min-height: 0;
     overflow-y: auto;
     overscroll-behavior-y: contain;
-    -webkit-overflow-scrolling: touch;
+    /*
+     * No `-webkit-overflow-scrolling: touch`. It is legacy (iOS 13 scrolls this way anyway) and in
+     * WKWebView it hands the frame to a separate momentum scroller that `position: sticky` headings do
+     * not stick to — the title rides up with the content during a flick and snaps back at the end.
+     */
   }
 
   .app.large main {
