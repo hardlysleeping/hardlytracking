@@ -243,6 +243,8 @@ button {
 /* Shared controls: the three that appear on every screen and must look identical. */
 .btn {
   all: unset;
+  /* all:unset resets the global border-box rule; width:100% must include padding/borders. */
+  box-sizing: border-box;
   cursor: pointer;
   display: inline-flex;
   align-items: center;

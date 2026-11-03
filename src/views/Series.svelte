@@ -411,6 +411,8 @@
 
   .meta {
     display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    flex: 1;
     gap: var(--s2);
     align-content: start;
     min-width: 0;
@@ -444,11 +446,15 @@
   /* One primary action, full width; the secondary pair shares the next row evenly. */
   .actions .btn {
     min-height: 44px;
+    min-width: 0;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    text-align: center;
   }
 
   .pair {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 8rem), 1fr));
     gap: var(--s2);
   }
 
