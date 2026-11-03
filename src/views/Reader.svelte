@@ -27,6 +27,7 @@
   import { INACTIVITY_TIMEOUT_MS, shouldEndForBackground } from "../lib/history";
   import Sheet from "../components/Sheet.svelte";
   import { plugins } from "../state/plugins.svelte";
+  import { ReaderQueue, ReaderTap, readerOrder, type ReaderJob } from "../lib/reader";
 
   interface Props {
     seriesId: string;
@@ -35,92 +36,90 @@
   let { seriesId, chapterId }: Props = $props();
 
   let pages = $state<Page[]>([]);
-  let urls = $state<string[]>([]);
 
-  /**
-   * How many pages either side of the current one are actually loaded.
-   *
-   * Four each way is a screen and a half of scrolling in either direction: enough that a flick never
-   * lands on a blank page, and small enough that a 214-page chapter holds nine images, not 214.
-   */
+
   const WINDOW = 4;
-
-  /**
-   * A page that needs bytes we do not have a URL for: fetch them when it is near the viewport — and
-   * the moment it is the page being read.
-   *
-   * The second half is not an optimisation. An `IntersectionObserver` is delivered with a rendered
-   * frame, so a tab that is not painting — backgrounded, a screenshot run, a webview still occluded
-   * behind the app that opened it — never delivers one. The reader then sat on "Fetching pages…"
-   * with every page blank, however long it waited, and one frame later it was fine. So the page the
-   * reader is on is fetched by itself; the observer stays for the neighbours it is meant to prefetch.
-   */
-  /** Width over height of a page in this book, from the first page that loaded. */
+  const queue = new ReaderQueue();
+  const jobs = new Map<number, ReaderJob>();
   let pageAspect = $state(0);
+  let aspects = $state<Record<number, number>>({});
+  let generation = 0;
 
-  function lazyPage(
-    node: HTMLImageElement,
-    params: { page: Page; now: boolean },
-  ): { update: (next: { page: Page; now: boolean }) => void; destroy: () => void } {
-    const page = params.page;
+  function schedulePages(): void {
+    queue.set(readerOrder(index, pages.length).flatMap(i => {
+      const job = jobs.get(i);
+      return job ? [job] : [];
+    }));
+  }
+  $effect(() => {
+    index; pages;
+    // Actions register after the DOM flush. No observer races or browser eager-image fan-out.
+    void tick().then(schedulePages);
+  });
+  $effect(() => () => { generation++; queue.cancel(); });
+
+  function lazyPage(node: HTMLImageElement, page: Page): { destroy: () => void } {
     let live = true;
-    let started = false;
-
-    const load = (): void => {
-      if (started) return;
-      started = true;
-      void pageSrc(page)
-        .then((src) => {
-          if (!live) return;
+    const job: ReaderJob = { async run(signal) {
+      try {
+        // page.open / imageCache do not accept AbortSignal. Keep the one worker occupied until
+        // they settle, then discard obsolete results; never start an old chapter's queued pages.
+        const src = await withDeadline(pageSrc(page), 45_000, `page ${page.index + 1}`);
+        if (!live || signal.aborted) return;
+        await new Promise<void>((resolve, reject) => {
+          const cleanup = () => {
+            node.onload = null; node.onerror = null;
+            signal.removeEventListener('abort', abort);
+          };
+          const abort = () => { cleanup(); node.removeAttribute('src'); resolve(); };
+          node.onload = () => { cleanup(); resolve(); };
+          node.onerror = () => { cleanup(); reject(new Error(`Page ${page.index + 1} could not load`)); };
+          signal.addEventListener('abort', abort, {once:true});
           node.src = src;
-          // The first page that arrives says how tall every page in this book is, which is what the
-          // boxes outside the window need: an empty box with only a viewport's height makes the
-          // document shorter than the book, so the scroll position maps to the wrong page.
-          node.addEventListener(
-            "load",
-            () => {
-              if (pageAspect === 0 && node.naturalHeight > 0) pageAspect = node.naturalWidth / node.naturalHeight;
-            },
-            { once: true },
-          );
-        })
-        .catch((error: unknown) => {
-          // A page that cannot be produced here — a JPEG 2000 scan pdf.js takes minutes over, a file
-          // that went away — says so on its own box instead of leaving a blank the reader scrolls
-          // past wondering whether it is still loading.
-          if (!live) return;
-          const box = node.closest(".page");
-          if (box instanceof HTMLElement) box.dataset.note = error instanceof Error ? error.message : String(error);
         });
-    };
+        if (!live || signal.aborted) return;
+        if (node.naturalHeight > 0) {
+          aspects[page.index] = node.naturalWidth / node.naturalHeight;
+          if (pageAspect === 0) pageAspect = aspects[page.index];
+        }
+        await node.decode();
+        // Two frames: the first commits layout, the second runs after that frame was painted.
+        // Background tabs deliberately do not start more page work until painting resumes.
+        await new Promise<void>(resolve => {
+          const abort = () => { cancelAnimationFrame(frame); resolve(); };
+          let frame = requestAnimationFrame(() => {
+            frame = requestAnimationFrame(() => { signal.removeEventListener('abort', abort); resolve(); });
+          });
+          signal.addEventListener('abort', abort, {once:true});
+        });
+      } catch (error) {
+        if (!live || signal.aborted) return;
+        const box = node.closest<HTMLElement>('.page');
+        if (box) box.dataset.note = error instanceof Error ? error.message : String(error);
+      }
+    }};
+    jobs.set(page.index, job);
+    void tick().then(schedulePages);
+    return { destroy() {
+      live = false;
+      if (jobs.get(page.index) === job) jobs.delete(page.index);
+      void tick().then(schedulePages);
+      // pages.ts / imageCache own these URLs and their bounded caches, not the DOM action.
+    }};
+  }
 
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (!entries.some((entry) => entry.isIntersecting)) return;
-        observer.disconnect();
-        load();
-      },
-      // A screen and a half ahead: enough that a scroll never shows a blank, and no more.
-      { rootMargin: "150% 0px" },
-    );
-
-    if (params.now) load();
-    else observer.observe(node);
-
-    return {
-      update(next) {
-        if (!next.now) return;
-        observer.disconnect();
-        load();
-      },
-      destroy() {
-        live = false;
-        observer.disconnect();
-        // The URL is not revoked here: `pages.ts` and `imageCache` own the blob URLs they hand out
-        // and bound them themselves (12 local pages, 160 cached images). Revoking one here left that
-        // cache pointing at a dead URL, and a page came back blank when the reader returned to it.
-      },
-    };
+  const tap = new ReaderTap();
+  function surfaceDown(event: PointerEvent): void {
+    if (event.button !== 0) return;
+    tap.down(event.pointerId, event.clientX, event.clientY);
+  }
+  function surfaceUp(event: PointerEvent): void {
+    if (!tap.up(event.pointerId, event.clientX, event.clientY) || settingsOpen) return;
+    const host = event.currentTarget as HTMLElement;
+    const fraction = (event.clientX - host.getBoundingClientRect().left) / host.clientWidth;
+    if (!chrome && settings.tapZones && (fraction < .32 || fraction > .68)) advance(fraction < .32 ? 'left' : 'right');
+    else if (chrome) chrome = false;
+    else showChrome();
   }
   let index = $state(0);
   let busy = $state(true);
@@ -283,34 +282,24 @@
    * stays empty rather than pointing at the network, because this path exists precisely for the
    * case where the network is not available. A chapter that is only partly here says so.
    */
-  async function openLocal(local: LocalChapter): Promise<void> {
-    // Pages that are here come from the device. Pages that are not are filled from the source when
-    // there is a connection — the alternative was `<img src="">`, which renders as a broken image
-    // and reads as a broken chapter.
-    const gaps = local.urls.some((url) => url === null);
-    let remote: Page[] = [];
-    if (gaps) {
-      try {
-        remote = await withDeadline(library.pages(local.chapterId), RUNTIME_DEADLINE_MS, "the missing pages");
-      } catch {
-        remote = [];
-      }
-    }
-    const filled = await Promise.all(
-      local.urls.map(async (url, index) => {
-        if (url !== null) return { index, url } as Page;
-        const fallback = remote[index];
-        if (fallback === undefined) return { index, url: "" } as Page;
-        return { index, url: await pageSrc(fallback) } as Page;
-      }),
-    );
-    pages = filled;
-    urls = filled.map((page) => page.url);
-    const stillMissing = filled.filter((page) => page.url === "").length;
-    partialNotice =
-      stillMissing === 0
-        ? null
-        : `${stillMissing} of ${local.total} pages are not on this device and could not be fetched. Retry the download when you have a connection.`;
+  function openLocal(local: LocalChapter): void {
+    // Local bytes paint immediately. Only a missing page asks for remote metadata/bytes, inside
+    // the same one-worker queue as every other page; no Promise.all gate over the whole chapter.
+    let remote: Promise<Page[]> | null = null;
+    pages = local.urls.map((url, index) => url !== null ? {index, url} : {
+      index, url: `missing:${local.chapterId}:${index}`,
+      open: async () => {
+        remote ??= withDeadline(library.pages(local.chapterId), RUNTIME_DEADLINE_MS, 'the missing pages');
+        const fallback = (await remote)[index];
+        if (!fallback) throw new Error(`Page ${index + 1} is not on this device`);
+        const src = await pageSrc(fallback);
+        const response = await fetch(src);
+        if (!response.ok) throw new Error(`Page ${index + 1}: ${response.status}`);
+        return response.blob();
+      },
+    });
+    const missing = local.urls.filter(url => url === null).length;
+    partialNotice = missing === 0 ? null : `${missing} of ${local.total} pages are not on this device. Missing pages will be fetched when reached if a connection is available.`;
   }
 
   /**
@@ -335,6 +324,20 @@
 
   async function load(id: string): Promise<void> {
     if (library.profile === null) return;
+    const token = ++generation;
+    const stale = Symbol('obsolete chapter');
+    const guard = async <T,>(work: Promise<T>): Promise<T> => {
+      const value = await work;
+      if (token !== generation) throw stale;
+      return value;
+    };
+    closeSession();
+    if (saveTimer !== null) clearTimeout(saveTimer);
+    saveTimer = null;
+    queue.cancel();
+    jobs.clear();
+    pageAspect = 0;
+    aspects = {};
     busy = true;
     error = null;
     index = 0;
@@ -342,7 +345,7 @@
     // A chapter that fails to load must not leave the last one's pages on screen: "1 / 124" beside
     // another book's error reads as if this chapter were 124 pages long.
     pages = [];
-    urls = [];
+
     chapterName = "";
     try {
       // Every step below can wait on something outside this screen — a download row, the database,
@@ -351,38 +354,31 @@
       // no way out, which is indistinguishable from a frozen app. Each one now says which part it
       // was waiting on, in the same 30 s the rest of the app uses for a source that has gone quiet.
       // A downloaded chapter wins: it is the one that works with no network.
-      const local = await withDeadline(downloads.local(id), RUNTIME_DEADLINE_MS, "this device's downloads");
-      if (local !== null) {
-        fromDownload = true;
-        await openLocal(local);
-      } else {
-        fromDownload = false;
-        pages = await withDeadline(library.pages(id), RUNTIME_DEADLINE_MS, "the page list");
-        // A plain page is just its URL. A page that needs a header is resolved when it comes near
-        // the viewport (`use:lazyPage`), because resolving all of them up front fetched every page
-        // of a 214-page chapter the moment it opened — gigabytes of scans for one visible page.
-        // A page with no URL of its own — one that needs a header, or one this device produces from a
-        // CBZ/PDF — is resolved by `use:lazyPage` when it comes near the viewport.
-        urls = pages.map((page) => (page.headers === undefined && page.open === undefined ? page.url : ""));
-      }
-      const progress = await withDeadline(
-        library.profile.store.getProgress(id),
-        RUNTIME_DEADLINE_MS,
-        "the library database",
-      );
-      index = Math.min(progress?.page ?? 0, Math.max(pages.length - 1, 0));
+      const local = await guard(withDeadline(downloads.local(id), RUNTIME_DEADLINE_MS, "this device's downloads"));
+      const nextPages = local === null
+        ? await guard(withDeadline(library.pages(id), RUNTIME_DEADLINE_MS, 'the page list')) : null;
+      const progress = await guard(withDeadline(library.profile.store.getProgress(id), RUNTIME_DEADLINE_MS, 'the library database'));
+      index = Math.min(progress?.page ?? 0, Math.max((local?.urls.length ?? nextPages?.length ?? 0) - 1, 0));
+      fromDownload = local !== null;
+      if (local !== null) openLocal(local);
+      else pages = nextPages ?? [];
+      // Only the resumed/current page may start first. Metadata/history are not a paint gate.
+      busy = false;
+      await tick();
+      if (token !== generation) return;
+      scrollToPage(index, 'auto');
       read = library.ownsProgress(id)
-        ? await withDeadline(library.profile.store.isRead(id), RUNTIME_DEADLINE_MS, "the library database")
+        ? await guard(withDeadline(library.profile.store.isRead(id), RUNTIME_DEADLINE_MS, "the library database"))
         : false;
 
       // A URL that names another series is corrected before anything is written with it: from here
       // on the address bar, the back link and the two chapter buttons all use `owner`.
-      owner = await ownerOf(seriesId, id);
+      owner = await guard(ownerOf(seriesId, id));
       if (owner !== seriesId) history.replaceState(null, "", `#${pathTo("read", owner, id)}`);
 
       // The chapter list is a nicety for the name and the prev/next buttons; with the host down
       // it must not stop a downloaded chapter from opening, so the stored list is the fallback.
-      const list = await chapterList(owner);
+      const list = await guard(chapterList(owner));
       chapters = list;
       chapterName =
         list.find((row) => row.id === id)?.name ??
@@ -390,22 +386,25 @@
       // Opening a chapter is the moment history exists; it is not a read mark. Neither write is
       // worth a reader that never opens, so both are bounded: a place that cannot be saved in 30 s
       // is reported, and the pages are still shown.
-      await withDeadline(library.remember(owner, id, index, pages.length), RUNTIME_DEADLINE_MS, "saving your place");
+      await guard(withDeadline(library.remember(owner, id, index, pages.length), RUNTIME_DEADLINE_MS, "saving your place"));
       // One session per chapter opened: the previous one is closed at the page it reached, so a
       // chapter-to-chapter jump does not leave a session running forever.
       closeSession();
       lastPage = index;
-      sessionId = await withDeadline(library.beginSession(owner, id, index), RUNTIME_DEADLINE_MS, "saving your place");
+      const opened = await withDeadline(library.beginSession(owner, id, index), RUNTIME_DEADLINE_MS, "saving your place");
+      if (token !== generation) {
+        if (opened !== null) void library.endSession(opened, index, false);
+        return;
+      }
+      sessionId = opened;
       armIdle();
       // `tick()` from Svelte flushes the DOM in a microtask; the old local version was a
       // `requestAnimationFrame`, so in a tab that was not painting "Fetching pages…" never cleared
       // at all — the reader was ready and said it was not.
-      await tick();
-      scrollToPage(index, "auto");
     } catch (e) {
-      error = e instanceof Error ? e.message : String(e);
+      if (token === generation && e !== stale) error = e instanceof Error ? e.message : String(e);
     } finally {
-      busy = false;
+      if (token === generation) busy = false;
     }
   }
 
@@ -416,7 +415,9 @@
     const child = host.querySelector<HTMLElement>(`[data-page="${target}"]`);
     if (child === null) return;
     if (horizontal) {
-      host.scrollTo({ left: child.offsetLeft, behavior });
+      const bounds = child.getBoundingClientRect();
+      const viewport = host.getBoundingClientRect();
+      host.scrollBy({ left: rtl ? bounds.right - viewport.right : bounds.left - viewport.left, behavior });
     } else {
       host.scrollTo({ top: child.offsetTop, behavior });
     }
@@ -425,13 +426,16 @@
   function onScroll(): void {
     const host = scroller;
     if (host === null || pages.length === 0) return;
-    const position = horizontal ? host.scrollLeft : host.scrollTop;
+    const position = host.scrollTop;
+    const viewport = host.getBoundingClientRect();
     // The page whose top/left edge is nearest the viewport's is the one being read.
     let best = 0;
     let bestDistance = Number.POSITIVE_INFINITY;
     for (const element of host.querySelectorAll<HTMLElement>("[data-page]")) {
-      const start = horizontal ? element.offsetLeft : element.offsetTop;
-      const distance = Math.abs(start - position);
+      const bounds = element.getBoundingClientRect();
+      const distance = horizontal
+        ? Math.abs(rtl ? bounds.right - viewport.right : bounds.left - viewport.left)
+        : Math.abs(element.offsetTop - position);
       if (distance < bestDistance) {
         bestDistance = distance;
         best = Number(element.dataset.page);
@@ -553,52 +557,43 @@
       class="scroller"
       class:horizontal
       class:rtl
+      class:webtoon={settings.readerMode === 'webtoon'}
+      data-fit={settings.readerFit}
       bind:this={scroller}
       onscroll={onScroll}
+      onpointerdown={surfaceDown}
+      onpointermove={(event) => tap.move(event.pointerId, event.clientX, event.clientY)}
+      onpointerup={surfaceUp}
+      onpointercancel={() => tap.cancel()}
+      role="region"
+      aria-label="Reading surface"
       style:--gap="{settings.pageGap}px"
-      style:--fit={settings.readerFit}
     >
       {#each pages as page (page.index)}
         <div
           class="page"
           data-page={page.index}
-          style:min-height={!horizontal && pageAspect > 0 ? `calc(min(100vw, 900px) / ${pageAspect})` : null}
+          style:--aspect={aspects[page.index] ?? (pageAspect || .7)}
         >
           {#if Math.abs(page.index - index) > WINDOW}
             <!-- Outside the window: the box holds the scroll position, the bytes are not loaded. A
                  214-page chapter used to fetch every page at once because a zero-height page is
                  "on screen" for every lazy image in it. -->
-          {:else if page.headers !== undefined || page.open !== undefined}
-            <!-- The bytes have to be fetched by us, which an `<img>` cannot do for a source that
-                 wants a header: this action fetches them when the page is close to the viewport —
-                 or at once, when it is the page being read, because that must not wait on a frame. -->
+          {:else if page.url !== '' || page.open !== undefined}
             <img
-              use:lazyPage={{ page, now: page.index === index }}
+              use:lazyPage={page}
               alt={`Page ${page.index + 1} of ${pages.length}`}
-              loading={page.index < 3 ? "eager" : "lazy"}
               decoding="async"
+              draggable="false"
             />
-          {:else if (urls[page.index] ?? page.url) === ""}
-            <div class="missing" role="note">Page {page.index + 1} is not on this device</div>
           {:else}
-            <img
-              src={urls[page.index] ?? page.url}
-              alt={`Page ${page.index + 1} of ${pages.length}`}
-              loading={page.index < 3 ? "eager" : "lazy"}
-              decoding="async"
-            />
+            <div class="missing" role="note">Page {page.index + 1} is not on this device</div>
           {/if}
         </div>
       {/each}
     </div>
 
-    <!-- Tap zones: they sit above the pages and only exist when chrome is hidden, so a tap on a
-         control is never swallowed by a zone. -->
-    <div class="zones" class:off={chrome || !settings.tapZones}>
-      <button class="zone left" aria-label="Previous page" onclick={() => advance("left")}></button>
-      <button class="zone mid" aria-label="Show controls" onclick={showChrome}></button>
-      <button class="zone right" aria-label="Next page" onclick={() => advance("right")}></button>
-    </div>
+
   {/if}
 
   <footer class="chrome bottom" class:shown={chrome}>
@@ -749,89 +744,62 @@
   }
 
   .scroller {
+    position: relative;
     flex: 1;
-    overflow-y: auto;
-    overflow-x: hidden;
+    min-height: 0;
+    overflow: auto;
     display: flex;
     flex-direction: column;
-    align-items: center;
+    align-items: flex-start;
     gap: var(--gap);
     scrollbar-width: none;
-    /* Room for the chrome, so the first and last page are never under a bar. */
-    padding: var(--s7) 0;
+    touch-action: pan-x pan-y pinch-zoom;
+    overscroll-behavior: contain;
   }
-
-  .scroller::-webkit-scrollbar {
-    display: none;
-  }
-
+  .scroller::-webkit-scrollbar { display: none; }
+  .scroller.webtoon { gap: 0; }
   .scroller.horizontal {
     flex-direction: row;
-    overflow-x: auto;
-    overflow-y: hidden;
+    align-items: flex-start;
     scroll-snap-type: x mandatory;
     gap: 0;
   }
-
-  .scroller.horizontal.rtl {
-    direction: rtl;
-  }
-
+  .scroller.horizontal.rtl { direction: rtl; }
   .page {
     flex: none;
-    display: grid;
-    place-items: center;
-    width: 100%;
+    display: flex;
+    align-items: flex-start;
+    justify-content: safe center;
+    min-width: 100%;
+    width: max-content;
+    min-height: calc(min(100vw, 900px) / var(--aspect));
   }
-
-  /* Vertical mode: a page's box is reserved before its bytes arrive, so the pages either side of
-     the window still take their space and the scroll position does not jump when one mounts. */
-  .scroller:not(.horizontal) .page {
-    min-height: 100vh;
-  }
-
-  .scroller.horizontal .page {
-    width: 100vw;
-    height: 100%;
-    scroll-snap-align: start;
-  }
-
+  .scroller.horizontal .page { scroll-snap-align: start; }
   img {
     display: block;
-    max-width: 100%;
+    flex: none;
+    width: min(100vw, 900px);
     height: auto;
-    /* `--fit` is width / height / contain, and each is a different way to fill the screen. */
-    object-fit: var(--fit);
+    max-width: none;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
   }
-
-  .scroller:not(.horizontal) img {
-    width: 100%;
-    max-width: 900px;
+  /* object-fit cannot resize an auto-sized image, and width/height are not valid values.
+     Give each fit actual dimensions. Height may pan horizontally; Whole page never clips. */
+  .scroller[data-fit='height'] .page { min-height: 100dvh; }
+  .scroller[data-fit='height'] img { width: auto; height: 100dvh; }
+  .scroller[data-fit='contain'] .page {
+    min-height: min(100dvh, calc(100vw / var(--aspect)));
   }
-
-  .scroller.horizontal img {
-    max-height: 100vh;
+  .scroller[data-fit='contain'] img {
     width: auto;
-    margin: auto;
+    height: auto;
+    max-width: 100vw;
+    max-height: 100dvh;
   }
-
-  .zones {
-    position: absolute;
-    inset: 0;
-    z-index: 5;
-    display: grid;
-    grid-template-columns: 32% 36% 32%;
-  }
-
-  .zones.off {
-    pointer-events: none;
-  }
-
-  .zone {
-    all: unset;
-    cursor: pointer;
-    height: 100%;
-  }
+  /* Paged slots stay viewport-wide/high even for a small image. */
+  .scroller.horizontal .page { min-height: 100dvh; }
 
   .loading {
     position: absolute;
