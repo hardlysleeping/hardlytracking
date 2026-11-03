@@ -469,10 +469,14 @@ button.ghost:disabled {
   position: sticky;
   top: 0;
   z-index: 30;
-  margin-top: calc(-1 * var(--safe-t));
-  padding-top: var(--safe-t);
+  margin-top: calc(-1 * (var(--safe-t) + var(--pad-y)));
+  margin-left: calc(-1 * var(--pad-x));
+  margin-right: calc(-1 * var(--pad-x));
+  padding-left: var(--pad-x);
+  padding-right: var(--pad-x);
+  padding-top: calc(var(--safe-t) + var(--pad-y));
   background: var(--bg);
-  box-shadow: 0 calc(var(--s4) + 2px) 0 var(--bg);
+  box-shadow: none;
 }
 
 /* Maximize space: the heading and the Continue strip are comfort, not navigation — everything they
@@ -499,7 +503,8 @@ button.ghost:disabled {
  * a 62 px inset pushed every title ~80 px down the screen. */
 @media (max-width: 599px) {
   .view {
-    padding-top: 10px !important;
+    --pad-y: 10px;
+    padding-top: var(--pad-y) !important;
   }
 }
 

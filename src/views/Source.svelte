@@ -12,6 +12,8 @@
   import { needsLogin } from "../api/mihon-bridge";
   import type { Series, SourceFilter, SourceFilterSelection } from "../api/source";
   import SeriesGrid from "../components/SeriesGrid.svelte";
+  import SeriesDetail from "./Series.svelte";
+  let expandedId = $state<string | null>(null);
   import SeriesActions from "../components/SeriesActions.svelte";
   import SourceSettings from "../components/SourceSettings.svelte";
   import SourceFilterSheet from "../components/SourceFilterSheet.svelte";
@@ -203,6 +205,7 @@
 </script>
 
 <section class="view" class:embedded>
+  <div class="pin">
   <header class="bar">
     {#if !embedded}
       <button class="btn ghost icon" aria-label="Back to sources" onclick={() => go("/browse")}>
@@ -254,6 +257,8 @@
     {/if}
   </div>
 
+  </div>
+
   {#if error}<p class="banner">{error}</p>{/if}
   {#if askConsent !== null}
     <div class="consent" role="group" aria-label="Cookie permission">
@@ -272,14 +277,24 @@
   {/if}
   {#if busy && items.length === 0}<p class="empty">Loading…</p>{/if}
 
-  <!-- A tap asks what to do with the title — read it, keep it, download it, file it — instead of
-       assuming the series page. The page is still one tap away inside the sheet. -->
+  <!-- A tap exposes this item's issues in the result grid, not a menu hiding the contents. -->
   <SeriesGrid
     series={items}
     cover={132}
     empty={mode === "search" ? "This source found nothing." : "This source returned nothing."}
-    onpick={(series) => (actions = series)}
+    expandAfter={expandedId}
+    expanded={issuePanel}
+    onlongpress={(series) => (actions = series)}
+    onpick={(series) => { expandedId = expandedId === series.id ? null : series.id; }}
   />
+  {#snippet issuePanel()}
+    {#if expandedId !== null}
+      <div class="issue-panel">
+        <button class="btn ghost" aria-label="Close item details" onclick={() => (expandedId = null)}>Close details</button>
+        <SeriesDetail seriesId={expandedId} embedded />
+      </div>
+    {/if}
+  {/snippet}
   <SeriesActions series={actions} onclose={() => (actions = null)} ondetails={(series) => go(pathTo("series", series.id))} />
 
   {#if hasNext}
@@ -303,6 +318,19 @@
 {/if}
 
 <style>
+  .issue-panel {
+    padding: var(--s3);
+    border: 1px solid var(--line);
+    border-radius: var(--r3);
+    background: var(--surface);
+  }
+  .issue-panel :global(.view > header) {
+    position: static;
+    margin-top: 0;
+    padding-top: 0;
+    box-shadow: none;
+  }
+
   .consent {
     display: grid;
     gap: var(--s1);

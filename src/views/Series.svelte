@@ -249,7 +249,7 @@
 
     <section class="chapters">
       <header class="chead">
-        <h2>Chapters</h2>
+        <h2>{series?.provider === "archive" ? "Issues" : "Chapters"}</h2>
         <span class="count">{chapters.length}{unread > 0 ? ` · ${unread} unread` : ""}</span>
         <button
           class="chip sortchip"
