@@ -29,8 +29,27 @@
  *   Android, so no store build draws a Checkout button or can reach one. The
  *   row is still read: a subscription bought on the web is the same row here.
  */
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { openExternal } from "../lib/external";
+import {
+  Account,
+  accountConfig,
+  envOfBuild,
+  ownOrigin,
+  shellOf,
+  text,
+  type AccountConfig,
+  type AccountSession,
+  type Shell,
+} from "./account";
+
+/**
+ * The auth this app had before `account.ts` existed, still exported here so every existing
+ * import site keeps working: the shared client, the session shape, the config reader and the
+ * shell. New code should import them from `./account` instead — this file owns billing,
+ * entitlements and checkout, and nothing about who is signed in.
+ */
+export { envOfBuild, ownOrigin, roleOf, shellOf, type Shell } from "./account";
 
 /** Where the shop is. Public: it is a URL, not a key. The reader's default. */
 export const SYNC_BILLING_DEFAULT = "https://billing.hardlysleep.ing";
@@ -46,18 +65,11 @@ export const CHECKOUT_OPENED =
 /** The two plan names the service knows. Prices are Stripe's and never appear here. */
 export type PlanKey = "monthly" | "yearly";
 
-/** Both values are public by design; row-level security is the protection. */
-export interface SyncConfig {
-  readonly url: string;
-  readonly anonKey: string;
-}
+/** The project's public values. Owned by `account.ts`; aliased so imports do not move. */
+export type SyncConfig = AccountConfig;
 
-/** The signed-in identity, as this device holds it. */
-export interface SyncSession {
-  readonly userId: string;
-  readonly email: string;
-  readonly token: string;
-}
+/** The signed-in identity. Owned by `account.ts`; aliased so imports do not move. */
+export type SyncSession = AccountSession;
 
 /** What the row says, in the only three shapes the app needs. */
 export type SyncState =
@@ -73,35 +85,6 @@ export type CheckoutFailure =
   | "billing_unreachable"
   | "no_url"
   | "purchase_unavailable";
-
-/** Which shell this build is running in. Read from the globals the shells set. */
-export type Shell = "ios" | "android" | "desktop" | "web";
-
-/**
- * The shell, from the globals the shells set themselves.
- *
- * `isNativePlatform()` says an app is wrapping this build but not which store is
- * watching it; `Capacitor.getPlatform()` is the only thing that separates iOS
- * from Android. A native shell that will not name its platform is answered
- * `ios` — the no-shop side — because guessing "web" there would draw a Checkout
- * button inside an app, which is the one mistake this file exists to prevent.
- */
-export function shellOf(scope: unknown = globalThis): Shell {
-  const globals = (scope ?? {}) as Record<string, unknown>;
-  if ("__TAURI_INTERNALS__" in globals) return "desktop";
-  const capacitor = globals["Capacitor"] as
-    | { isNativePlatform?: () => boolean; getPlatform?: () => string }
-    | undefined;
-  if (
-    capacitor !== undefined &&
-    typeof capacitor.isNativePlatform === "function" &&
-    capacitor.isNativePlatform()
-  ) {
-    const named = typeof capacitor.getPlatform === "function" ? text(capacitor.getPlatform()) : "";
-    return named === "android" ? "android" : "ios";
-  }
-  return "web";
-}
 
 /** Where a subscription may be bought in this build. */
 export type Shop = "stripe" | "none";
@@ -134,64 +117,19 @@ export class CheckoutError extends Error {
   }
 }
 
-/** The environment a Vite build was handed, read the way both apps read it. */
-export function envOfBuild(): Record<string, unknown> | null {
-  try {
-    return (import.meta as unknown as { env?: Record<string, unknown> }).env ?? null;
-  } catch {
-    return null;
-  }
-}
-
-function text(value: unknown): string {
-  return typeof value === "string" ? value.trim() : "";
-}
-
-/** A key whose own claims say `service_role` is refused, not used. */
-export function roleOf(key: string): string | null {
-  const parts = key.split(".");
-  if (parts.length !== 3) return null;
-  try {
-    const payload = JSON.parse(atob(parts[1].replace(/-/g, "+").replace(/_/g, "/"))) as {
-      role?: unknown;
-    };
-    return typeof payload.role === "string" ? payload.role : null;
-  } catch {
-    return null;
-  }
-}
-
 /**
  * The build's Supabase values, or null when it has none.
  *
- * The same names HardlyReader reads (`PUBLIC_SUPABASE_URL`, `PUBLIC_SUPABASE_ANON_KEY`)
- * because it is the same project: a second project would be a second account and
- * a second subscription, which is the thing this file exists to avoid. A build
- * with no values has no HardlySyncing row to show — not an error, and not a paid
- * switch it cannot check.
+ * Kept as a name here because the panel and the suite already ask for it; the reader is
+ * `accountConfig()` in `account.ts`, which is also what the shared client uses.
  */
 export function syncConfig(env: Record<string, unknown> | null = envOfBuild()): SyncConfig | null {
-  if (env === null) return null;
-  const url = text(env.PUBLIC_SUPABASE_URL);
-  const anonKey = text(env.PUBLIC_SUPABASE_ANON_KEY);
-  if (url === "" || anonKey === "") return null;
-  if (roleOf(anonKey) === "service_role") return null;
-  return { url: url.replace(/\/+$/, ""), anonKey };
+  return accountConfig(env);
 }
 
 /** The service this build sells through. */
 export function billingUrl(env: Record<string, unknown> | null = envOfBuild()): string {
   return (text(env?.PUBLIC_BILLING_URL) || SYNC_BILLING_DEFAULT).replace(/\/+$/, "");
-}
-
-/** This app's own origin, when it has one. A packaged app has none to name. */
-export function ownOrigin(): string | undefined {
-  try {
-    if (typeof location === "undefined" || !/^https?:$/.test(location.protocol)) return undefined;
-    return location.origin;
-  } catch {
-    return undefined;
-  }
 }
 
 /** A row, as a state. Pure, so the policy can be read without a network. */
@@ -238,9 +176,9 @@ export interface SyncAccountOptions {
  */
 export class SyncAccount {
   private readonly settings: SyncConfig;
-  private readonly client: SupabaseClient;
+  /** Who is signed in. Shared with the community catalogue, so one login serves both. */
+  private readonly account: Account;
   private readonly call: typeof fetch;
-  private readonly redirectTo: string | null;
   private readonly base: string;
   /** Which shell this is, and therefore whether there is a shop at all. */
   readonly shell: Shell;
@@ -250,37 +188,20 @@ export class SyncAccount {
     this.settings = options.config;
     this.shell = options.shell ?? shellOf();
     this.shop = shopOf(this.shell);
-    this.client =
-      options.client ??
-      createClient(options.config.url, options.config.anonKey, {
-        auth: {
-          persistSession: true,
-          // Refresh is ours, on return to the window. A timer is a call nobody asked for.
-          autoRefreshToken: false,
-          // The link comes back to this window with the session in the URL.
-          detectSessionInUrl: true,
-        },
-      });
+    // The client is not this class's any more: `account.ts` owns it, so a sign-in made here
+    // is the sign-in the community catalogue reads, and vice versa.
+    this.account = new Account({
+      config: options.config,
+      ...(options.client === undefined ? {} : { client: options.client }),
+      redirectTo: options.redirectTo ?? null,
+    });
     this.call = options.fetch ?? fetch;
-    this.redirectTo = options.redirectTo ?? null;
     this.base = (options.billingBase ?? billingUrl()).replace(/\/+$/, "");
   }
 
   /** The session this device already has, or null. Never a request for a new one. */
   async session(): Promise<SyncSession | null> {
-    try {
-      const { data, error } = await this.client.auth.getSession();
-      if (error !== null) return null;
-      const session = (data as {
-        session?: { access_token?: string; user?: { id?: string; email?: string } } | null;
-      })?.session ?? null;
-      const token = text(session?.access_token);
-      const userId = text(session?.user?.id);
-      if (token === "" || userId === "") return null;
-      return { userId, token, email: text(session?.user?.email) };
-    } catch {
-      return null;
-    }
+    return this.account.session();
   }
 
   /**
@@ -293,13 +214,7 @@ export class SyncAccount {
    * the thing to avoid.
    */
   async sendLink(email: string): Promise<void> {
-    const address = email.trim();
-    if (address === "") throw new Error("An emailed sign-in link needs an address to send it to.");
-    const { error } = await this.client.auth.signInWithOtp({
-      email: address,
-      ...(this.redirectTo === null ? {} : { options: { emailRedirectTo: this.redirectTo } }),
-    });
-    if (error !== null) throw new Error(`the sign-in link could not be sent: ${error.message}`);
+    await this.account.sendLink(email);
   }
 
   /**
@@ -399,11 +314,7 @@ export class SyncAccount {
 
   /** Signs this device out. The row is the server's and is untouched. */
   async signOut(): Promise<void> {
-    try {
-      await this.client.auth.signOut();
-    } catch {
-      /* a sign-out that cannot reach the server still clears this device */
-    }
+    await this.account.signOut();
   }
 }
 
