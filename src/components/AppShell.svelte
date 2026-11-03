@@ -208,10 +208,10 @@
   }
 
   .app.compact main {
-    /* The shell is the one owner of the safe areas: the notch is paid for once here, and a view
-     * adds only its own breathing room. Every view used to add `var(--safe-t)` again, which put
-     * every heading an extra status-bar-height below the top on an iPhone. */
-    padding-top: var(--safe-t);
+    /* The bottom bar is outside the scroller, so reserve its height here. */
+    /* The pinned header owns the top safe area in normal flow. Padding main would make
+     * sticky top:0 clamp below the status bar and lift the header over following content. */
+    padding-top: 0;
     padding-bottom: calc(var(--nav-h) + var(--safe-b));
   }
 

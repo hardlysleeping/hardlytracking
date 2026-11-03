@@ -11,8 +11,8 @@
 export type Size = "compact" | "medium" | "large";
 
 class Viewport {
-  width = $state(1200);
-  height = $state(800);
+  width = $state(typeof window === "undefined" ? 1200 : window.innerWidth);
+  height = $state(typeof window === "undefined" ? 800 : window.innerHeight);
 
   /**
    * The shorter side decides, for the same reason `deviceClass` does: a phone on its side must not

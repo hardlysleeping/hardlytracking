@@ -455,12 +455,11 @@ button.ghost:disabled {
  *
  * Three details that are not decoration:
  *
- * - `main` pays the notch with `padding-top`, and that padding is *above* the heading's static
- *   position, so `top: 0` alone would tuck the title under the status bar. The negative margin
- *   cancels that padding and the heading's own padding puts it back: nothing moves at rest, and
- *   when it sticks the heading covers the notch itself.
- * - The background is opaque and the box-shadow paints a band below it, because a view keeps its
- *   own margin under its heading — content scrolling through that gap must not show through.
+ * - The header owns the notch padding in normal flow. `main` must not also have top safe-area
+ *   padding: sticky would clamp below it, leaving a transparent status strip and overlapping the
+ *   next element. The negative margin cancels only the view's ordinary top padding.
+ * - The opaque header extends through its safe-area padding, so the status area is part of the
+ *   same surface, not a transparent cutout above a floating band.
  * - `z-index` is above cards and covers; a sticky bar that a cover can scroll over is worse than
  *   no bar at all.
  * ------------------------------------------------------------------------- */
@@ -469,7 +468,7 @@ button.ghost:disabled {
   position: sticky;
   top: 0;
   z-index: 30;
-  margin-top: calc(-1 * (var(--safe-t) + var(--pad-y)));
+  margin-top: calc(-1 * var(--pad-y));
   margin-left: calc(-1 * var(--pad-x));
   margin-right: calc(-1 * var(--pad-x));
   padding-left: var(--pad-x);
