@@ -13,8 +13,9 @@
    * - **no shop in this build** — an app-store build (iOS, Android) draws no
    *   price and calls no Checkout: Apple's 3.1.1 forbids sending someone to an
    *   outside checkout for a subscription, and there is no StoreKit product to
-   *   sell instead. The section appears only for someone already signed in, so
-   *   a subscription bought on the web is visible and nothing invites a sale.
+   *   sell instead. The dedicated Sync page still allows account sign-in so an existing
+   *   subscription is accessible; an inline panel stays hidden until signed in. Neither
+   *   invites a sale or exposes checkout on native builds.
    * - **signed out** — an email and a link, which is exactly the reader's sign-in:
    *   the same SDK, the same `signInWithOtp`, the same email template. Nothing to
    *   type back in, and nothing to configure on the project.
@@ -31,6 +32,8 @@
     syncConfig,
   } from "../api/sync-account";
 
+  /** A dedicated Sync page stays useful even when its backend is absent. */
+  let { standalone = false }: { standalone?: boolean } = $props();
   const account = createSyncAccount(syncConfig());
 
   /**
@@ -102,12 +105,14 @@
   const until = (at: number | null): string => (at === null ? "" : new Date(at).toLocaleDateString());
 </script>
 
-{#if account !== null && (canBuy || (ready && session !== null))}
+{#if account === null && standalone}
+  <p class="hint" role="status">Cloud sync is not configured in this build. Local reading and manual backup are still available.</p>
+{:else if account !== null && (standalone || canBuy || (ready && session !== null))}
   <section class="group">
     <h2>HardlySyncing</h2>
     <p class="hint">
       One subscription, for this app and the reader: what it carries is your own state between your
-      devices, and it is bought once. Manual backup above is free and always will be.
+      devices, and it is bought once. Manual backup is free and always will be.
     </p>
 
     {#if session === null}
@@ -170,6 +175,7 @@
 
 <style>
   .row {
+    flex-wrap: wrap;
     display: flex;
     align-items: center;
     justify-content: space-between;

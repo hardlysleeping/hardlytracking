@@ -1,0 +1,10 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Sync navigation QA</title></head><body><main id="fixture"></main><script type="module">
+import { mount, unmount } from 'svelte';
+import More from '../../src/views/More.svelte';
+import Sync from '../../src/views/Sync.svelte';
+import '../../src/app.css';
+let instance;
+function render(){if(instance) unmount(instance);instance=mount(location.hash==='#/sync'?Sync:More,{target:document.querySelector('#fixture')});}
+addEventListener('hashchange',render);render();
+</script></body></html>
