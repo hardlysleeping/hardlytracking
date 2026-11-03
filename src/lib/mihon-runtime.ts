@@ -138,38 +138,50 @@ async function loadNativePlugin(): Promise<MihonRuntimePlugin | null> {
  *
  * `load` exists so a test can hand in a fake plugin; production callers never pass it.
  */
+export interface NativeRuntimeResult { baseUrl: string | null; error: string | null }
+
+/** Keep the refusal/timeout reason: an installer must not turn every native failure into null. */
+export async function startNativeRuntimeDetailed(
+  port = NATIVE_RUNTIME_PORT,
+  load: () => Promise<MihonRuntimePlugin | null> = loadNativePlugin,
+  deadlines: { status: number; start: number; load?: number } = {
+    status: RUNTIME_STATUS_DEADLINE_MS, start: RUNTIME_START_DEADLINE_MS,
+  },
+): Promise<NativeRuntimeResult> {
+  let step = "Loading the native runtime bridge";
+  const failed = (error: string): NativeRuntimeResult => ({ baseUrl: null, error });
+  const serving = (bound: number): NativeRuntimeResult => ({ baseUrl: loopbackBase(bound), error: null });
+  try {
+    const plugin = await within(load(), deadlines.load ?? RUNTIME_LOAD_DEADLINE_MS);
+    if (plugin === TIMED_OUT) return failed(`${step} did not answer within ${deadlines.load ?? RUNTIME_LOAD_DEADLINE_MS} ms.`);
+    if (plugin === null) return failed("This build has no registered on-device extension runtime plugin.");
+    step = "Checking the on-device runtime status";
+    const before = await within(plugin.status(), deadlines.status);
+    if (before === TIMED_OUT) return failed(`${step} did not answer within ${deadlines.status} ms.`);
+    if (before.running) return serving(before.port > 0 ? before.port : port);
+    step = "Starting the on-device extension runtime";
+    const started = await within(plugin.start({ port }), deadlines.start);
+    if (started === TIMED_OUT) return failed(`${step} did not answer within ${deadlines.start} ms.`);
+    const bound = started.port > 0 ? started.port : port;
+    step = "Confirming the on-device runtime status";
+    const after = await within(plugin.status(), deadlines.status);
+    // The actual /capabilities handshake still verifies this bound port before installing.
+    if (after === TIMED_OUT) return serving(bound);
+    return after.running ? serving(bound) : failed("The native runtime start returned, but its server is not running.");
+  } catch (cause) {
+    return failed(`${step}: ${cause instanceof Error ? cause.message : String(cause)}`);
+  }
+}
+
+/** Compatibility seam: optional startup callers still receive a loopback URL or null. */
 export async function startNativeRuntime(
   port = NATIVE_RUNTIME_PORT,
   load: () => Promise<MihonRuntimePlugin | null> = loadNativePlugin,
   deadlines: { status: number; start: number; load?: number } = {
-    status: RUNTIME_STATUS_DEADLINE_MS,
-    start: RUNTIME_START_DEADLINE_MS,
+    status: RUNTIME_STATUS_DEADLINE_MS, start: RUNTIME_START_DEADLINE_MS,
   },
 ): Promise<string | null> {
-  // The one await in this function that used to have nobody watching it: on a phone whose webview
-  // never finishes the bridge import, the whole boot would wait here, before any step was named.
-  const plugin = await within(load(), deadlines.load ?? RUNTIME_LOAD_DEADLINE_MS);
-  if (plugin === null || plugin === TIMED_OUT) return null;
-  try {
-    const before = await within(plugin.status(), deadlines.status);
-    if (before === TIMED_OUT) return null;
-    if (before.running) return loopbackBase(before.port > 0 ? before.port : port);
-    const started = await within(plugin.start({ port }), deadlines.start);
-    // A start that never answers is a wedged JVM, not a slow one: the app cannot wait on it, and the
-    // library has to open. Treated as "no host", which the registry already knows how to report.
-    if (started === TIMED_OUT) return null;
-    const bound = started.port > 0 ? started.port : port;
-    // A `start` that resolves is not proof the server is listening: ask it. That answer is the one
-    // that may be trusted late — the port is already bound, so a slow status is a slow status.
-    const after = await within(plugin.status(), deadlines.status);
-    if (after === TIMED_OUT) return loopbackBase(bound);
-    return after.running ? loopbackBase(bound) : null;
-  } catch {
-    // No plugin compiled in, a JVM that refused to start, a port already taken — all the same to the
-    // caller: this build has no on-device host, so the default one is used and the UI shows the
-    // warning the registry already produces.
-    return null;
-  }
+  return (await startNativeRuntimeDetailed(port, load, deadlines)).baseUrl;
 }
 
 /**

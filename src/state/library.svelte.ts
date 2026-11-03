@@ -9,7 +9,7 @@ import { providerFor, type DalvikHost } from "../api/registry";
 import { packageIdFromApkName, type InstalledExtension } from "../api/dalvik";
 import { installOnHtServer, setHtServerExtensionEnabled, uninstallOnHtServer } from "../api/htserver";
 import { downloadApk, loadRepository, type Repository } from "../lib/extensions/repository";
-import { remoteHost } from "../lib/host";
+import { apiUrl, remoteHost } from "../lib/host";
 import type { ExtensionEntry } from "../lib/extensions/index";
 import type { RepoRow, ViewStateRow } from "../lib/db/store";
 import { BACKGROUND_GRACE_MS, viewStateKey } from "../lib/history";
@@ -30,7 +30,7 @@ import {
   type MigrationTarget,
   type SummaryRow,
 } from "../lib/migrate";
-import { startNativeRuntime, shellFetch } from "../lib/mihon-runtime";
+import { startNativeRuntimeDetailed, shellFetch } from "../lib/mihon-runtime";
 import { openDatabase, memoryDatabase, type Database } from "../lib/db/open";
 import { detectPlatform } from "../lib/webview/index";
 import { plugins } from "./plugins.svelte";
@@ -175,21 +175,68 @@ class LibraryState {
    * never answers costs the extensions and their sources this session, which is exactly what the
    * message says.
    */
-  private async attachHost(ownHost: boolean): Promise<void> {
-    if (!ownHost) return;
-    const base = await startNativeRuntime();
+  extensionHostStarting = $state(false);
+  extensionHostError = $state<string | null>(null);
+  private hostAttachments = new WeakMap<LibraryProfile, Promise<void>>();
+
+  /** Startup and install join the same work; a failed attempt may be retried on the next tap. */
+  private attachHost(ownHost: boolean): Promise<void> {
     const profile = this.profile;
-    if (profile === null) return;
-    if (base === null) {
-      this.error =
-        "The on-device extension host did not start. Extensions and their sources are unavailable this session; your library still opens.";
-      return;
+    if (!ownHost || profile === null) return Promise.resolve();
+    const pending = this.hostAttachments.get(profile);
+    if (pending !== undefined) return pending;
+    const work = this.runAttachHost(profile).finally(() => this.hostAttachments.delete(profile));
+    this.hostAttachments.set(profile, work);
+    return work;
+  }
+
+  private async runAttachHost(profile: LibraryProfile): Promise<void> {
+    this.extensionHostStarting = true;
+    const previousError = this.extensionHostError;
+    this.extensionHostError = null;
+    try {
+      const result = await startNativeRuntimeDetailed();
+      if (this.profile !== profile) throw new Error("The library changed while its extension runtime was starting.");
+      if (result.baseUrl === null) throw new Error(result.error ?? "The on-device extension runtime did not start.");
+      const warning = await profile.attachDalvik(result.baseUrl);
+      if (this.profile !== profile) throw new Error("The library changed while its extension runtime was attaching.");
+      if (warning !== null) throw new Error(`The on-device runtime did not answer its capability check: ${warning}`);
+      if (profile.dalvik === null) throw new Error("The runtime answered, but its extension host was not attached.");
+      if (this.error === previousError) this.error = null;
+      this.extensions = await profile.listExtensions();
+      // Host readiness must not wait for unrelated configured servers to list their sources.
+      void this.loadSources().catch((cause) => {
+        if (this.profile === profile) this.error = message(cause);
+      });
+    } catch (cause) {
+      if (this.profile === profile) {
+        this.extensionHostError = message(cause);
+        this.error = this.extensionHostError;
+      }
+      throw cause;
+    } finally {
+      if (this.profile === profile) this.extensionHostStarting = false;
     }
-    const warning = await profile.attachDalvik(base);
-    if (warning !== null) this.error = warning;
-    // The provider list grew, so the chips and the extension rows have to be read again.
-    await this.loadSources();
-    this.extensions = await profile.listExtensions();
+  }
+
+  /** Only installs wait for the extension runtime; saved-library boot never does. */
+  async ensureExtensionHost(): Promise<void> {
+    const profile = this.profile;
+    if (profile === null) throw new Error(this.notOpenMessage);
+    if (profile.extensionWhere === "host") return;
+    const pending = this.hostAttachments.get(profile);
+    if (pending !== undefined) { await pending; return; }
+    if (profile.dalvik !== null) return;
+    const shell = detectPlatform();
+    if (shell === "capacitor" || shell === "tauri") {
+      await this.attachHost(true);
+    } else {
+      // Browser proxy failures can be retried too; never redirect a phone to a PC host.
+      const warning = await profile.attachDalvik(apiUrl("/api/dalvik"));
+      if (warning !== null) throw new Error(`The extension runtime is unavailable: ${warning}`);
+    }
+    if (this.profile !== profile) throw new Error("The library changed before the extension could be installed.");
+    if (profile.dalvik === null) throw new Error("The extension runtime has not attached to this library.");
   }
 
   /**
@@ -280,7 +327,10 @@ class LibraryState {
       // Started, not awaited: the screen is usable from here on, and the host's arrival only adds
       // sources to it. On a phone the JVM may take a minute or never come up; neither is the library's
       // business any more.
-      void this.attachHost(ownHost).catch((error) => { this.error = message(error); });
+      const openingProfile = this.profile;
+      void this.attachHost(ownHost).catch((error) => {
+        if (this.profile === openingProfile) this.error = message(error);
+      });
       if (ownHost) {
         const profile = this.profile;
         void profile.refreshHtServer().then(async (warning) => {
@@ -458,8 +508,12 @@ class LibraryState {
 
   async installApk(file: File): Promise<InstalledExtension> {
     if (this.profile === null) throw new Error(this.notOpenMessage);
+    const profile = this.profile;
+    await this.ensureExtensionHost();
+    if (this.profile !== profile) throw new Error("The library changed before the extension could be installed.");
     const apk = new Uint8Array(await file.arrayBuffer());
-    const installed = await this.profile.installApk(apk, packageIdFromApkName(file.name));
+    if (this.profile !== profile) throw new Error("The library changed before the extension could be installed.");
+    const installed = await profile.installApk(apk, packageIdFromApkName(file.name));
     this.extensions = await this.profile.listExtensions();
     await this.loadSources();
     return installed;
@@ -512,8 +566,12 @@ class LibraryState {
    */
   async installEntry(entry: ExtensionEntry, repoUrl: string): Promise<InstalledExtension> {
     if (this.profile === null) throw new Error(this.notOpenMessage);
+    const profile = this.profile;
+    await this.ensureExtensionHost();
+    if (this.profile !== profile) throw new Error("The library changed before the extension could be installed.");
     const apk = await downloadApk(entry);
-    const installed = await this.profile.installApk(apk, entry.pkg, {
+    if (this.profile !== profile) throw new Error("The library changed before the extension could be installed.");
+    const installed = await profile.installApk(apk, entry.pkg, {
       name: entry.name,
       iconUrl: entry.iconUrl,
       repoUrl,
