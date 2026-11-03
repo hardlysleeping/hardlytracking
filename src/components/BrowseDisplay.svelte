@@ -3,7 +3,7 @@
   import { viewport } from "../lib/layout.svelte";
   import { browseMode, columnsFor, maxColumns } from "../lib/browse-display";
   const mode = $derived(browseMode(settings.libraryView));
-  const columns = $derived(columnsFor(settings.browseColumns, viewport.width));
+  const columns = $derived(columnsFor(settings.browseColumns, viewport.width, viewport.height));
 </script>
 <div class="display" aria-label="Browse display">
   <div class="modes" role="group" aria-label="Layout">
@@ -18,7 +18,7 @@
       <option value="compact">Compact</option><option value="larger">Larger</option>
     </select></label>
     <label class="columns">Columns <output>{columns}×{columns}</output>
-      <input aria-label="Grid columns" type="range" min="2" max={maxColumns(viewport.width)} step="1" value={columns}
+      <input aria-label="Grid columns" type="range" min="2" max={maxColumns(viewport.width, viewport.height)} step="1" value={columns}
         oninput={(e) => settings.set("browseColumns", Number(e.currentTarget.value))} />
     </label>
     <small>Columns, not a result limit</small>

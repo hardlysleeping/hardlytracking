@@ -201,8 +201,9 @@ class Settings {
     };
     const legacyView = await read("libraryView", this.libraryView);
     this.libraryView = browseMode(legacyView);
-    this.browseColumns = columnsFor(await read("browseColumns", this.browseColumns), 1200);
-    this.browseDensity = await read("browseDensity", legacyView === "compact" ? "compact" : this.browseDensity);
+    this.browseColumns = columnsFor(await read("browseColumns", this.browseColumns), 1280);
+    const density = await read("browseDensity", legacyView === "compact" ? "compact" : this.browseDensity);
+    this.browseDensity = density === "compact" ? "compact" : "larger";
     this.browseHorizontal = (await read("browseHorizontal", false)) === true;
     this.coverSize = await read("coverSize", this.coverSize);
     this.libraryDensity = await read("libraryDensity", this.libraryDensity);

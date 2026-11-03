@@ -7,14 +7,18 @@ test('legacy display choices migrate to the same three modes', () => {
   for (const [input, result] of [['list','row'], ['row','row'], ['compact','grid'], ['grid','grid'], ['card','card'], [null,'grid'], ['garbage','grid']]) assert.equal(browseMode(input), result);
 });
 test('columns are integers: 2 minimum, 6 on phone/tablet, 8 desktop', () => {
-  for (const width of [320,390,844,1024,1199,1200,1920]) {
+  for (const width of [320,390,844,1024,1199,1200,1279,1280,1920]) {
     assert.equal(columnsFor(-1,width),2);
-    assert.equal(columnsFor(99,width),width < 1200 ? 6 : 8);
+    assert.equal(columnsFor(99,width),width < 1280 ? 6 : 8);
     assert.equal(columnsFor(4,width),4);
     assert.equal(columnsFor(3.7,width),4);
     for (const bad of [undefined, null, NaN, Infinity, '6']) assert.equal(columnsFor(bad,width),3);
-    assert.equal(maxColumns(width),width < 1200 ? 6 : 8);
+    assert.equal(maxColumns(width),width < 1280 ? 6 : 8);
   }
+});
+test('phone landscape never receives desktop column limits', () => {
+  assert.equal(maxColumns(1280, 390), 6);
+  assert.equal(columnsFor(8, 1280, 390), 6);
 });
 test('only actual finite known byte counts produce sizes', () => {
   for (const value of [undefined,null,NaN,Infinity,-1,'1024']) assert.equal(knownSize(value),null);

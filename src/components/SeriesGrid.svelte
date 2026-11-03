@@ -133,7 +133,7 @@
   });
 
   const mode = $derived(browseMode(view));
-  const columnCount = $derived(columnsFor(columns, viewport.width));
+  const columnCount = $derived(columnsFor(columns, viewport.width, viewport.height));
 
   let pressTimer: ReturnType<typeof setTimeout> | null = null;
   /** The tile under a held finger, and whether that hold has turned into a drag. */
@@ -321,6 +321,8 @@
   .set.row .sub, .set.card .sub { white-space:normal; overflow-wrap:anywhere; }
   .description { font-size:var(--t-sm); color:var(--text-2); display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
   .set.grid.compact .title { font-size:var(--t-xs); }
+  .set.explicit.grid.compact { gap: var(--s2) var(--s1); }
+  .set.explicit.grid:not(.compact) { gap: var(--s4) var(--s3); }
   .set {
     /* Replacing the tapped row must not make the browser anchor to a later tile and jump. */
     overflow-anchor: none;
