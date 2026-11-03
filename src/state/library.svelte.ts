@@ -400,6 +400,13 @@ class LibraryState {
     await this.loadSources();
   }
 
+  /** Rebuild the existing Mihon provider after Suwayomi settings or its switch change. */
+  async refreshSuwayomi(): Promise<void> {
+    if (this.profile === null) return;
+    this.error = await this.profile.refreshSuwayomi();
+    await this.loadSources();
+  }
+
   /** Re-ask the WebDAV card's folder after its address or login changes. */
   async refreshWebdav(): Promise<void> {
     if (this.profile === null) return;

@@ -7,8 +7,9 @@
  * local and whose providers are whatever the build configured.
  */
 import { apiUrl } from "../lib/host";
-import { createProviders, openDalvik, openHtServer, type DalvikHost, type RegistryConfig } from "./registry";
-import { BUILTIN_ARCHIVE_ID, BUILTIN_HT_SERVER_ID, ensureBuiltinExtensions, isBuiltin } from "./builtin";
+import { createProviders, configuredMihonProvider, openDalvik, openHtServer, type DalvikHost, type RegistryConfig } from "./registry";
+import { BUILTIN_ARCHIVE_ID, BUILTIN_HT_SERVER_ID, BUILTIN_SUWAYOMI_ID, ensureBuiltinExtensions, isBuiltin } from "./builtin";
+import { suwayomiEnabled, setSuwayomiEnabled } from "../lib/suwayomi";
 import { htServerEnabled, setHtServerEnabled } from "../lib/host";
 import type { InstalledExtension } from "./dalvik";
 import type { SourceProvider } from "./source";
@@ -73,6 +74,8 @@ export interface LibraryProfile {
    * Browse disagreeing, which reads as "the setting did nothing".
    */
   refreshKomga(): Promise<string | null>;
+  /** Swap the existing Mihon provider after hosted settings change; no startup/network gate. */
+  refreshSuwayomi(): Promise<string | null>;
   /** Rebuild the WebDAV provider after its card changes — the address and login are read then. */
   refreshWebdav(): Promise<string | null>;
   /** Configured hosts that did not answer — a banner, not silence. */
@@ -174,9 +177,9 @@ export async function openLibraryProfile(options: OpenProfileOptions = {}): Prom
   /** The built-ins are this device's — the archive switch and the HT-Server pairing — so they never
    * come from a host registry, which holds APKs only. */
   async function listExtensions(): Promise<InstalledExtension[]> {
-    if (hostRegistry === null) return store.listExtensions();
+    if (hostRegistry === null) return (await store.listExtensions()).map(row => row.extensionId === BUILTIN_SUWAYOMI_ID ? { ...row, enabled: suwayomiEnabled() } : row);
     const own = (await store.listExtensions()).filter((row) => row.builtin === true);
-    return [...own, ...(await hostRegistry.list())];
+    return [...own.map(row => row.extensionId === BUILTIN_SUWAYOMI_ID ? { ...row, enabled: suwayomiEnabled() } : row), ...(await hostRegistry.list())];
   }
 
   /**
@@ -211,6 +214,13 @@ export async function openLibraryProfile(options: OpenProfileOptions = {}): Prom
     htServer: registry.htServer,
     extensionWhere: hostRegistry === null ? "device" : "host",
     listExtensions,
+    async refreshSuwayomi(): Promise<string | null> {
+      const at = providers.findIndex(provider => provider.kind === "mihon");
+      if (at >= 0) providers.splice(at, 1);
+      const next = configuredMihonProvider(config);
+      if (next !== null) providers.push(next);
+      return null;
+    },
     async refreshKomga(): Promise<string | null> {
       const at = providers.findIndex((provider) => provider.kind === "komga");
       if (at >= 0) providers.splice(at, 1);
@@ -313,6 +323,10 @@ export async function openLibraryProfile(options: OpenProfileOptions = {}): Prom
         const row = await store.getExtension(extensionId);
         if (row !== undefined) await store.putExtension({ ...row, enabled });
         if (extensionId === BUILTIN_ARCHIVE_ID) switches.archive = enabled;
+        if (extensionId === BUILTIN_SUWAYOMI_ID) {
+          setSuwayomiEnabled(enabled);
+          await this.refreshSuwayomi();
+        }
         // The HT-Server's switch is the pairing decision: the address and token stay, its sources
         // stop being offered. Nothing else on this device changes.
         if (extensionId === BUILTIN_HT_SERVER_ID) {

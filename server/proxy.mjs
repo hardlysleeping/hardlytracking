@@ -23,6 +23,7 @@ import { createServer, request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
 import { upstreamPath } from "./upstream-path.mjs";
 import { komgaTarget } from "./komga-target.mjs";
+import { serveSuwayomi } from "./suwayomi-target.mjs";
 import { networkInterfaces } from "node:os";
 import { readFile } from "node:fs/promises";
 import { extname, join, normalize } from "node:path";
@@ -619,6 +620,8 @@ const server = createServer((request, response) => {
     ? (req, res) => serveUpstream(req, res, "image")
     : path === "/api/file"
     ? (req, res) => serveUpstream(req, res, "file")
+    : path.startsWith("/api/suwayomi/")
+    ? serveSuwayomi
     : path.startsWith("/api/komga/")
     ? serveKomga
     : path.startsWith("/api/dalvik/")

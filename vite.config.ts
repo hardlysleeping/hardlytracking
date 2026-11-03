@@ -46,6 +46,10 @@ export default defineConfig({
         target: LOCAL_PROXY,
         changeOrigin: true,
       },
+      "/api/suwayomi": {
+        target: LOCAL_PROXY,
+        changeOrigin: true,
+      },
     },
   },
 });

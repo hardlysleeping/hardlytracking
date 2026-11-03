@@ -18,6 +18,8 @@
 import { apiUrl, htServerBase, hostToken, remoteHost } from "../lib/host";
 import { komgaEnabled, komgaSettings } from "../lib/komga";
 import { browserMihonTransport, createMihonProvider } from "./mihon";
+import { createSuwayomiProvider } from "./suwayomi";
+import { suwayomiEnabled, suwayomiSettings } from "../lib/suwayomi";
 import { createLocalProvider } from "./local";
 import { createArchiveProvider } from "./archive";
 import {
@@ -40,7 +42,7 @@ export interface RegistryConfig {
   store: LibraryStore;
   /** Build local providers without remote handshakes; attach hosts after the saved library opens. */
   localFirst?: boolean;
-  /** Base path of the Mihon runtime; `null` disables the provider (local-only build). */
+  /** Legacy/default Mihon runtime; `null` disables the fallback, not an explicitly saved Suwayomi. */
   mihonBase?: string | null;
   /**
    * Where the dalvik host is reachable: an absolute loopback URL in the packaged app,
@@ -199,13 +201,24 @@ export async function openHtServer(config: RegistryConfig): Promise<HtServerResu
   }
 }
 
+/** Build without a network gate: explicit hosted settings override only the legacy Mihon fallback. */
+export function configuredMihonProvider(config: RegistryConfig): SourceProvider | null {
+  if (!suwayomiEnabled()) return null;
+  const saved = suwayomiSettings();
+  if (saved !== null) return createSuwayomiProvider({
+    ...saved, ...(config.fetchImpl === undefined ? {} : { fetchImpl: config.fetchImpl }),
+  });
+  const base = config.mihonBase === undefined ? apiUrl("/api/mihon") : config.mihonBase;
+  return base === null ? null : createMihonProvider(browserMihonTransport(base, config.fetchImpl));
+}
+
 export async function createProviders(config: RegistryConfig): Promise<ProviderSet> {
   const providers: SourceProvider[] = [];
   const warnings: string[] = [];
   const extensionList = config.extensionList ?? (() => config.store.listExtensions());
 
-  const mihonBase = config.mihonBase === undefined ? apiUrl("/api/mihon") : config.mihonBase;
-  if (mihonBase !== null) providers.push(createMihonProvider(browserMihonTransport(mihonBase)));
+  const mihon = configuredMihonProvider(config);
+  if (mihon !== null) providers.push(mihon);
 
   providers.push(createLocalProvider(config.store));
 
