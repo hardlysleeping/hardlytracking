@@ -15,7 +15,8 @@ import type { SourceFilterSelection } from "../api/source";
 import { DEFAULT_CPU_LEVEL, type CpuLevel } from "../lib/performance";
 import { levelOr, type ContentLevel } from "../lib/content/levels";
 
-export type LibraryView = "grid" | "compact" | "list";
+import { browseMode, columnsFor } from "../lib/browse-display";
+export type LibraryView = "grid" | "compact" | "list" | "row" | "card";
 export type Sort = "title" | "recent" | "source";
 export type ReaderMode = "vertical" | "webtoon" | "paged" | "ltr" | "rtl";
 export type Fit = "width" | "height" | "contain";
@@ -25,6 +26,9 @@ const KEY = "settings.";
 /** The fields a caller may write through `set`, so a typo is a compile error. */
 export interface Prefs {
   libraryView: LibraryView;
+  browseColumns: number;
+  browseDensity: "compact" | "larger";
+  browseHorizontal: boolean;
   coverSize: number;
   /** Auto follows the device class; Custom is the cover-size slider. */
   libraryDensity: DensityPreference;
@@ -136,6 +140,9 @@ class Settings {
   ready = $state(false);
 
   libraryView = $state<LibraryView>("grid");
+  browseColumns = $state(3);
+  browseDensity = $state<"compact" | "larger">("larger");
+  browseHorizontal = $state(false);
   coverSize = $state(132);
   libraryDensity = $state<DensityPreference>("auto");
   categoryNav = $state<CategoryNavPreference>("automatic");
@@ -192,7 +199,11 @@ class Settings {
       const value = await store.getPref<T>(KEY + key);
       return value === undefined ? fallback : value;
     };
-    this.libraryView = await read("libraryView", this.libraryView);
+    const legacyView = await read("libraryView", this.libraryView);
+    this.libraryView = browseMode(legacyView);
+    this.browseColumns = columnsFor(await read("browseColumns", this.browseColumns), 1200);
+    this.browseDensity = await read("browseDensity", legacyView === "compact" ? "compact" : this.browseDensity);
+    this.browseHorizontal = (await read("browseHorizontal", false)) === true;
     this.coverSize = await read("coverSize", this.coverSize);
     this.libraryDensity = await read("libraryDensity", this.libraryDensity);
     this.categoryNav = await read("categoryNav", this.categoryNav);

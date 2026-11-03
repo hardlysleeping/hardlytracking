@@ -16,6 +16,7 @@
   import { viewStateKey } from "../lib/history";
   import CategoryRail from "../components/CategoryRail.svelte";
   import SeriesGrid from "../components/SeriesGrid.svelte";
+  import BrowseDisplay from "../components/BrowseDisplay.svelte";
   import { cleanOrder, orderAfterMove } from "../lib/library/order";
   import { applyCollection, collectionState, hiddenBy, selectAll } from "../lib/library/selection";
   import { BADGE_KINDS, DEFAULT_BADGES, PRESET_BADGES, badgeList, type Badge } from "../lib/library/badges";
@@ -169,8 +170,7 @@
       return;
     }
     // A remembered view is applied, not merely stored: the point is that it looks the same.
-    if (row.view !== undefined) settings.set("libraryView", row.view as typeof settings.libraryView);
-    if (row.coverSize !== undefined) settings.set("coverSize", row.coverSize);
+    // Display is global across Library and Search; legacy collection snapshots cannot rewind it.
     if (row.filter !== undefined) {
       settings.set("libraryFilter", row.filter);
     } else if (row.onlyUnread !== undefined || row.onlySource !== undefined) {
@@ -261,12 +261,6 @@
   /** Auto is the device class's density, Custom is the slider, a preset wins over both. */
   const cover = $derived(coverWidth(settings.libraryDensity, layout.device, settings.coverSize));
 
-  const VIEWS = [
-    { id: "grid", icon: "M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z" },
-    { id: "compact", icon: "M4 4h4v4H4zM10 4h4v4h-4zM16 4h4v4h-4zM4 10h4v4H4zM10 10h4v4h-4zM16 10h4v4h-4z" },
-    { id: "list", icon: "M4 6h16M4 12h16M4 18h16" },
-  ] as const;
-
   /**
    * The facts every stage of the query reads, from one pass over what we already hold.
    *
@@ -275,6 +269,14 @@
    */
   /** seriesId -> the source id its mapping names, when one exists. */
   let mappedSource = $state<Map<string, { provider: string; sourceId: string }>>(new Map());
+
+  let bookSizes = $state<Map<string, number>>(new Map());
+  const fileSizes = $derived.by(() => {
+    const sizes = new Map<string, number>();
+    for (const row of downloads.rows) if (row.bytes > 0) sizes.set(row.seriesId, (sizes.get(row.seriesId) ?? 0) + row.bytes);
+    for (const [id, bytes] of bookSizes) sizes.set(id, bytes);
+    return sizes;
+  });
 
   let counts = $state<{
     unread: Map<string, number>;
@@ -302,6 +304,7 @@
       // dalvik one instead of silently doing nothing.
       store.listMappings(),
     ]);
+    bookSizes = new Map((await store.listBooks()).map((book) => [book.seriesId, book.bytes]));
     // The whole mapping, not just the source id: a migrated title is governed by the source it
     // reads from now, and only the mapping knows which one that is.
     mappedSource = new Map(mappings.map((row) => [row.seriesId, { provider: row.provider, sourceId: row.sourceId }]));
@@ -789,19 +792,6 @@
           <!-- The comics they already own: no server, no extension, no network. -->
           <AddFiles />
           <button class="btn ghost" onclick={() => (driveOpen = true)}>From Drive</button>
-          <div class="views" role="group" aria-label="Layout">
-            {#each VIEWS as view (view.id)}
-              <button
-                class="btn ghost icon"
-                class:on={settings.libraryView === view.id}
-                aria-label={`${view.id} layout`}
-                aria-pressed={settings.libraryView === view.id}
-                onclick={() => settings.set("libraryView", view.id)}
-              >
-                <svg viewBox="0 0 24 24"><path d={view.icon} /></svg>
-              </button>
-            {/each}
-          </div>
         </div>
 
         <ChipRow chips={filterChips} onremove={removeChip} />
@@ -811,6 +801,7 @@
         {/if}
         {/if}
 
+        <BrowseDisplay />
         {#if !library.ready}
           <p class="empty">Opening the library…</p>
         {:else if rows.length === 0 && library.library.length === 0}
@@ -840,6 +831,11 @@
             series={rows}
             view={settings.libraryView}
             cover={cover}
+            columns={settings.browseColumns}
+            density={settings.browseDensity}
+            horizontal={settings.browseHorizontal}
+            sizes={fileSizes}
+            totals={counts.total}
             empty={emptyMessage}
             current={layout.mode === "split" ? picked : current}
             {selection}
@@ -1023,7 +1019,18 @@
     font-size: 13px;
     line-height: 1.35;
   }
+  .view :global([role="tablist"][aria-label="Categories"]) {
+    flex-wrap: wrap;
+    overflow: visible;
+  }
+  .view :global([role="tablist"][aria-label="Categories"] .chip) {
+    max-width: 100%;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
   .view {
+    min-width: 0;
+    box-sizing: border-box;
     padding: var(--s4) var(--s4) var(--s6);
     max-width: 1200px;
   }
@@ -1150,32 +1157,12 @@
     color: var(--text-3);
   }
 
-  .views svg {
-    width: 18px;
-    height: 18px;
-    fill: none;
-    stroke: currentColor;
-    stroke-width: 1.6;
-    stroke-linecap: round;
-    stroke-linejoin: round;
-  }
-
-  .views button.on {
-    color: var(--text-1);
-    background: var(--surface-2);
-  }
-
   .tools {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: var(--s2);
     margin-bottom: var(--s4);
-  }
-
-  .views {
-    margin-left: auto;
-    display: flex;
-    gap: 2px;
   }
 
     .blank {
@@ -1199,6 +1186,7 @@
 
   .blankacts {
     display: flex;
+    flex-wrap: wrap;
     gap: var(--s2);
     margin-top: var(--s2);
   }
@@ -1219,7 +1207,9 @@
     border: 1px solid var(--line-strong);
     box-shadow: var(--shadow-2);
     max-width: calc(100vw - 24px);
-    overflow-x: auto;
+    flex-wrap: wrap;
+    box-sizing: border-box;
+    border-radius: var(--r2);
   }
 
   .selection .n {
@@ -1235,6 +1225,7 @@
 
   .sacts {
     display: flex;
+    flex-wrap: wrap;
     gap: var(--s1);
   }
 

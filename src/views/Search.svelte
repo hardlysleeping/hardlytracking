@@ -15,6 +15,8 @@
   import { providerFor } from "../api/registry";
   import type { Chapter, Series, Source } from "../api/source";
   import SeriesGrid from "../components/SeriesGrid.svelte";
+  import BrowseDisplay from "../components/BrowseDisplay.svelte";
+  import { downloads } from "../state/downloads.svelte";
   import SeriesActions from "../components/SeriesActions.svelte";
   import Cover from "../components/Cover.svelte";
   import { settings } from "../state/settings.svelte";
@@ -82,6 +84,17 @@
   const saved = $derived(new Set(library.library.map((row) => row.id)));
 
   const rows = $derived(blocks.flatMap((block) => block.items));
+  let bookSizes = $state<Map<string, number>>(new Map());
+  $effect(() => {
+    const store = library.profile?.store;
+    if (store) void store.listBooks().then((books) => { bookSizes = new Map(books.map((book) => [book.seriesId, book.bytes])); });
+  });
+  const fileSizes = $derived.by(() => {
+    const sizes = new Map<string, number>();
+    for (const row of downloads.rows) if (row.bytes > 0) sizes.set(row.seriesId, (sizes.get(row.seriesId) ?? 0) + row.bytes);
+    for (const [id, bytes] of bookSizes) sizes.set(id, bytes);
+    return sizes;
+  });
 
   $effect(() => {
     // Sources arrive after the first render (an extension has to be read, a server has to answer), and
@@ -517,6 +530,7 @@
   </form>
   </div>
 
+  <BrowseDisplay />
   <div class="picker">
     <span class="label">Sources · {chosen.size} of {sources.length} selected</span>
     <button class="chip" onclick={() => (chosen = new Set(sources.map((source) => source.id)))}>All</button>
@@ -583,6 +597,11 @@
               saved={saved}
               series={block.items}
               cover={116}
+              view={settings.libraryView}
+              columns={settings.browseColumns}
+              density={settings.browseDensity}
+              horizontal={settings.browseHorizontal}
+              sizes={fileSizes}
               empty=""
               current={shown?.id ?? null}
               selection={selectMode ? selected : null}
@@ -631,6 +650,7 @@
 
   .bar {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: var(--s2);
     margin-bottom: var(--s3);
@@ -664,6 +684,7 @@
 
   .search .field {
     flex: 1;
+    min-width: 0;
     min-height: 40px;
   }
 
@@ -1008,6 +1029,7 @@
   }
 
   .selbar {
+    flex-wrap: wrap;
     position: sticky;
     bottom: 0;
     display: flex;

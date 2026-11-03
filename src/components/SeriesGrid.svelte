@@ -10,6 +10,8 @@
   import type { Series } from "../api/source";
   import type { Badge } from "../lib/library/badges";
   import Cover from "./Cover.svelte";
+  import { browseMode, columnsFor, knownSize } from "../lib/browse-display";
+  import { viewport } from "../lib/layout.svelte";
   import { go, pathTo } from "../lib/nav";
 
   /** A screenful and a bit; the rest arrives while the reader is still looking at the first row. */
@@ -32,7 +34,12 @@
 
   interface Props {
     series: Series[];
-    view?: "grid" | "compact" | "list";
+    view?: "grid" | "compact" | "list" | "row" | "card";
+    columns?: number;
+    density?: "compact" | "larger";
+    horizontal?: boolean;
+    sizes?: Map<string, number>;
+    totals?: Map<string, number>;
     /** Minimum cover width in px; the column count follows from it. */
     cover?: number;
     empty?: string;
@@ -74,6 +81,11 @@
   let {
     series,
     view = "grid",
+    columns,
+    density = "larger",
+    horizontal = false,
+    sizes = new Map(),
+    totals = new Map(),
     cover = 132,
     empty = "Nothing here yet.",
     current = null,
@@ -119,6 +131,9 @@
       cancelSchedule(handle);
     };
   });
+
+  const mode = $derived(browseMode(view));
+  const columnCount = $derived(columnsFor(columns, viewport.width));
 
   let pressTimer: ReturnType<typeof setTimeout> | null = null;
   /** The tile under a held finger, and whether that hold has turned into a drag. */
@@ -217,7 +232,8 @@
 {#if series.length === 0}
   <p class="empty">{empty}</p>
 {:else}
-  <div class="set {view}" style:--cover="{cover}px">
+  <div class="browse-rail" class:horizontal tabindex={horizontal ? 0 : undefined} role="region" aria-label={horizontal ? "Horizontally browsable titles" : undefined}>
+  <div class="set {mode}" class:compact={density === "compact" || view === "compact"} class:explicit={columns !== undefined} style:--columns={columnCount} style:--cover="{cover}px">
     {#each drawn as item (item.id)}
       {#if expanded !== null && expandAfter !== null && item.id === (expansionAnchor ?? expandAfter)}
         <div class="expand" data-expanded="true">
@@ -245,9 +261,6 @@
           onlongpress?.(item);
         }}
       >
-        {#if view === "list"}
-          <Cover series={item} size="row" />
-        {:else}
           <div class="art">
             <Cover series={item} />
             {#if pillsFor(item).length > 0}
@@ -271,13 +284,14 @@
               <span class="tick" aria-hidden="true">{selection.has(item.id) ? "✓" : ""}</span>
             {/if}
           </div>
-        {/if}
         <span class="meta">
           <span class="title">{item.title}</span>
-          {#if view === "list"}
+          {#if mode === "row" || mode === "card"}
             <span class="sub">
-              {saved?.has(item.id) === true ? "✓ In your library" : (item.author ?? item.provider)}
+              {[item.author, item.provider, item.status].filter(Boolean).join(" · ")}
             </span>
+            <span class="sub">{[totals.has(item.id) ? `${totals.get(item.id)} chapters` : "", unread.has(item.id) ? `${badgeFor(item.id)} unread` : "", knownSize(sizes.get(item.id)) !== null ? `${knownSize(sizes.get(item.id))} on device` : "Size unknown"].filter(Boolean).join(" · ")}</span>
+            {#if mode === "card" && item.description}<span class="description">{item.description}</span>{/if}
           {:else if view === "compact"}
             <span class="sub">{badgeFor(item.id) > 0 ? `${badgeFor(item.id)} unread` : ""}</span>
           {:else}
@@ -288,9 +302,25 @@
       {/if}
     {/each}
   </div>
+  </div>
 {/if}
 
 <style>
+  .browse-rail { min-width:0; max-width:100%; }
+  .browse-rail.horizontal { overflow-x:auto; overscroll-behavior-x:contain; padding-bottom:8px; }
+  .browse-rail.horizontal .set { display:flex; flex-direction:row; gap:12px; }
+  .horizontal .set .tile { flex:0 0 min(75vw, 220px); }
+  .horizontal .set.row .tile { flex-basis:min(82vw, 380px); }
+  .horizontal .expand { flex:0 0 100%; }
+  .set.explicit.grid { grid-template-columns:repeat(var(--columns), minmax(0, 1fr)); }
+  .set.card { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,240px),1fr)); gap:16px; }
+  .set.card .tile { padding:12px; border:1px solid var(--line); background:var(--surface); align-content:start; }
+  .set.card .art { width:min(100%,180px); justify-self:center; }
+  .set.row .art { width:clamp(68px,18vw,calc(var(--cover) * 0.76)); flex:none; }
+  .set.row .meta { flex:1; }
+  .set.row .sub, .set.card .sub { white-space:normal; overflow-wrap:anywhere; }
+  .description { font-size:var(--t-sm); color:var(--text-2); display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
+  .set.grid.compact .title { font-size:var(--t-xs); }
   .set {
     /* Replacing the tapped row must not make the browser anchor to a later tile and jump. */
     overflow-anchor: none;
@@ -305,7 +335,7 @@
     grid-template-columns: repeat(auto-fill, minmax(calc(var(--cover) * 0.72), 1fr));
     gap: var(--s3) var(--s2);
   }
-  .set.list {
+  .set.row {
     display: flex;
     flex-direction: column;
     gap: 2px;
@@ -337,14 +367,14 @@
        makes every row that scrolls in re-lay-out the grid, which is where the frames went. */
     contain-intrinsic-size: auto calc(var(--cover) * 1.5 + 76px);
   }
-  .set.list .tile {
+  .set.row .tile {
     contain-intrinsic-size: auto calc(var(--cover) * 0.5 + 16px);
     display: flex;
     align-items: center;
     gap: var(--s3);
     padding: var(--s2);
   }
-  .set.list .tile:hover {
+  .set.row .tile:hover {
     background: var(--surface-2);
   }
 
@@ -492,7 +522,7 @@
     -webkit-box-orient: vertical;
     overflow: hidden;
   }
-  .set.list .title {
+  .set.row .title {
     -webkit-line-clamp: 1;
   }
   .sub {
