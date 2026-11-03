@@ -31,7 +31,7 @@ import {
   type SummaryRow,
 } from "../lib/migrate";
 import { startNativeRuntime, shellFetch } from "../lib/mihon-runtime";
-import { memoryDatabase } from "../lib/db/open";
+import { openDatabase, memoryDatabase, type Database } from "../lib/db/open";
 import { detectPlatform } from "../lib/webview/index";
 import { plugins } from "./plugins.svelte";
 import { watchOpenedFiles } from "../lib/files/opened";
@@ -245,7 +245,8 @@ class LibraryState {
       // makes a repository index reachable with no `/api/repo` proxy in the app.
       const fetchImpl = await shellFetch();
       const options = {
-        ...(ownHost ? { dalvikBase: null } : {}),
+        localFirst: ownHost,
+        ...(ownHost ? { dalvikBase: null, mihonBase: null } : {}),
         ...(fetchImpl === undefined ? {} : { fetchImpl }),
       };
 
@@ -259,16 +260,17 @@ class LibraryState {
        * plainly that nothing will be kept. Silence was the bug; a working screen with a sentence is
        * the fix.
        */
+      let database: Database;
       try {
-        this.profile = await bootStep("Opening the library database", () => openLibraryProfile(options));
+        database = await bootStep("Opening the library database", () => openDatabase());
       } catch (cause) {
         const reason = message(cause);
-        this.profile = await bootStep("Opening the library database", () =>
-          openLibraryProfile({ ...options, database: memoryDatabase() }),
-        );
+        database = memoryDatabase();
         this.storageFallback = true;
         this.error = `This device's library storage did not open (${reason}), so nothing can be saved this session — your library, reading and browsing all still work. Reload to try again.`;
       }
+      // Provider failures must never replace a successfully opened persistent database with memory.
+      this.profile = await bootStep("Preparing the library", () => openLibraryProfile({ ...options, database }));
       this.library = await bootStep("Reading the saved titles", () => this.profile!.store.listSeries());
       this.extensions = await bootStep("Listing extensions", () => this.profile!.listExtensions());
       this.htServer = this.profile.htServer;
@@ -278,7 +280,17 @@ class LibraryState {
       // Started, not awaited: the screen is usable from here on, and the host's arrival only adds
       // sources to it. On a phone the JVM may take a minute or never come up; neither is the library's
       // business any more.
-      void this.attachHost(ownHost);
+      void this.attachHost(ownHost).catch((error) => { this.error = message(error); });
+      if (ownHost) {
+        const profile = this.profile;
+        void profile.refreshHtServer().then(async (warning) => {
+          if (this.profile !== profile) return;
+          this.htServer = profile.htServer;
+          this.hostExtensions = [...(profile.htServer?.extensions ?? [])];
+          if (warning !== null) this.error = warning;
+          await this.loadSources();
+        }).catch((error) => { this.error = message(error); });
+      }
       // Covers and page images live in the same database, behind the user's ceiling.
       imageCache.attach(this.profile.store.database);
       void imageCache.prune();

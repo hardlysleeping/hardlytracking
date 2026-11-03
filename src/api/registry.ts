@@ -38,6 +38,8 @@ import { wirePreferences } from "../lib/extensions/prefs";
 
 export interface RegistryConfig {
   store: LibraryStore;
+  /** Build local providers without remote handshakes; attach hosts after the saved library opens. */
+  localFirst?: boolean;
   /** Base path of the Mihon runtime; `null` disables the provider (local-only build). */
   mihonBase?: string | null;
   /**
@@ -232,8 +234,10 @@ export async function createProviders(config: RegistryConfig): Promise<ProviderS
       ...komga,
       ...(config.fetchImpl === undefined ? {} : { fetchImpl: config.fetchImpl }),
     });
-    try {
-      // One cheap question at boot: the login is proven by asking who we are.
+    if (config.localFirst) {
+      providers.push(provider);
+    } else try {
+      // Explicit connection checks remain available outside local-first startup.
       const sources = await provider.sources();
       providers.push(provider);
       if (sources.length === 0) warnings.push(`Komga ${komga.baseUrl}: signed in, but no libraries are visible to that user`);
@@ -261,14 +265,16 @@ export async function createProviders(config: RegistryConfig): Promise<ProviderS
 
   let dalvik: DalvikHost | null = null;
   const dalvikBase = config.dalvikBase === undefined ? apiUrl("/api/dalvik") : config.dalvikBase;
-  if (dalvikBase !== null) {
+  if (dalvikBase !== null && !config.localFirst) {
     const attached = await openDalvik(config, dalvikBase, extensionList);
     if (attached.provider !== null) providers.push(attached.provider);
     if (attached.warning !== null) warnings.push(attached.warning);
     dalvik = attached.dalvik;
   }
 
-  const htServer = await openHtServer(config);
+  const htServer = config.localFirst
+    ? { host: null, provider: null, warning: null }
+    : await openHtServer(config);
   if (htServer.provider !== null) providers.push(htServer.provider);
   if (htServer.warning !== null) warnings.push(htServer.warning);
 

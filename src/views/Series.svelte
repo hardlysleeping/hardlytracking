@@ -48,30 +48,62 @@
     void load(seriesId);
   });
 
+  let loadGeneration = 0;
   async function load(id: string): Promise<void> {
-    if (library.profile === null) return;
+    const profile = library.profile;
+    if (profile === null) return;
+    const generation = ++loadGeneration;
+    const current = () => generation === loadGeneration && id === seriesId;
     busy = true;
     error = null;
+    series = null;
+    chapters = [];
+    saved = false;
+    position = null;
     try {
+      // Render persisted content before asking any source. A runtime starting in the background
+      // must not prevent opening a title or its downloaded chapters.
+      const [stored, cached, rememberedPosition, prefs] = await Promise.all([
+        profile.store.getSeries(id), profile.store.listChapters(id), profile.store.getPosition(id), profile.store.listPrefs(),
+      ]);
+      const storedRead = new Set(prefs.filter(row => String(row.key).startsWith('read:') && row.value === true)
+        .map(row => String(row.key).slice(5)));
+      if (!current()) return;
+      if (stored !== undefined) {
+        series = stored;
+        chapters = cached.map(chapter => ({ ...chapter, read: chapter.read || storedRead.has(chapter.id) }));
+        saved = true;
+        position = rememberedPosition ?? null;
+        busy = false;
+      }
       // Through the library, not the provider: a migrated title asks the source its mapping names,
       // which is not the one its id was born on.
-      series = await library.details(id);
-      void library.rememberSeriesMeta(series);
-      saved = await library.isSaved(id);
-      position = (await library.profile.store.getPosition(id)) ?? null;
-      chapters = await library.chapters(id);
+      const fresh = await library.details(id);
+      if (!current()) return;
+      series = fresh;
+      void library.rememberSeriesMeta(fresh);
+      const freshSaved = await library.isSaved(id);
+      const freshPosition = await profile.store.getPosition(id);
+      const freshChapters = await library.chapters(id);
+      if (!current()) return;
+      saved = freshSaved;
+      position = freshPosition ?? null;
+      chapters = freshChapters;
       // Read marks for a provider that keeps them itself come from the host; ours come from the
       // prefs store. Merge, so a chapter shows as read whichever of the two said so.
       const local = new Set(
-        (await library.profile.store.listPrefs())
+        (await profile.store.listPrefs())
           .filter((row) => String(row.key).startsWith("read:") && row.value === true)
           .map((row) => String(row.key).slice(5)),
       );
+      if (!current()) return;
       chapters = chapters.map((chapter) => ({ ...chapter, read: chapter.read || local.has(chapter.id) }));
     } catch (e) {
-      error = e instanceof Error ? e.message : String(e);
+      if (!current()) return;
+      const reason = e instanceof Error ? e.message : String(e);
+      error = series === null ? reason : `Showing saved details and cached chapters. Source unavailable: ${reason}`;
     } finally {
-      busy = false;
+      if (current()) busy = false;
     }
   }
 

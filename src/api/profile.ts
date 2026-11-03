@@ -114,6 +114,8 @@ export interface InstallMeta {
 }
 
 export interface OpenProfileOptions {
+  /** No server requests on the path to opening the saved library. */
+  localFirst?: boolean;
   database?: Database;
   label?: string;
   mihonBase?: string | null;
@@ -149,9 +151,10 @@ export async function openLibraryProfile(options: OpenProfileOptions = {}): Prom
   // Where the APK rows live. Asked once, at boot: a proxy answering `/api/host/extensions` means
   // this page is being served by a PC that is an HT-Server, and then its registry is the list — the
   // same list a paired phone reads, so the two screens cannot disagree.
-  const hostRegistry = await openHostRegistry(store);
+  const hostRegistry = options.localFirst ? null : await openHostRegistry(store);
   const config: RegistryConfig = {
     store,
+    localFirst: options.localFirst ?? false,
     // `null` is the local-only build; only an absent option means "the default runtime".
     mihonBase: options.mihonBase === undefined ? apiUrl("/api/mihon") : options.mihonBase,
     dalvikBase: options.dalvikBase === undefined ? apiUrl("/api/dalvik") : options.dalvikBase,
