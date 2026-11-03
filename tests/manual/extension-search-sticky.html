@@ -1,0 +1,14 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Extension search sticky QA</title><style>main{height:100dvh;overflow-y:auto}</style></head><body><main id="fixture"></main><script type="module">
+import { mount } from 'svelte';
+import Extensions from '../../src/views/Extensions.svelte';
+import { library } from '../../src/state/library.svelte';
+import { settings } from '../../src/state/settings.svelte';
+import { memoryDatabase } from '../../src/lib/db/open';
+import { LibraryStore } from '../../src/lib/db/store';
+import '../../src/app.css';
+const store=new LibraryStore(memoryDatabase());await settings.load(store);
+library.profile={store,providers:[]};library.ready=true;library.extensions=[];
+library.repos=[{name:'Fixture repository',url:'https://fixture.example/index.json'}];
+library.repoEntries=async()=>Array.from({length:120},(_,i)=>({name:`Fixture extension ${String(i).padStart(3,'0')}`,pkg:`fixture.extension.${i}`,version:'1.0',versionCode:1,lang:'en',sources:[{id:String(i),name:'Fixture source',lang:'en'}],contentWarning:'SAFE'}));
+mount(Extensions,{target:document.querySelector('#fixture')});
+</script></body></html>
