@@ -31,6 +31,7 @@ import {
   type SummaryRow,
 } from "../lib/migrate";
 import { startNativeRuntime, shellFetch } from "../lib/mihon-runtime";
+import { memoryDatabase } from "../lib/db/open";
 import { detectPlatform } from "../lib/webview/index";
 import { plugins } from "./plugins.svelte";
 import { watchOpenedFiles } from "../lib/files/opened";
@@ -137,12 +138,30 @@ class LibraryState {
       // The desktop shell needs Rust's HTTP client for loopback (CORS), and that same client is what
       // makes a repository index reachable with no `/api/repo` proxy in the app.
       const fetchImpl = await shellFetch();
-      this.profile = await bootStep("Opening the library database", () =>
-        openLibraryProfile({
-          ...(nativeBase === null ? {} : { dalvikBase: nativeBase }),
-          ...(fetchImpl === undefined ? {} : { fetchImpl }),
-        }),
-      );
+      const options = {
+        ...(nativeBase === null ? {} : { dalvikBase: nativeBase }),
+        ...(fetchImpl === undefined ? {} : { fetchImpl }),
+      };
+
+      /**
+       * The library opens even when the device's own storage does not.
+       *
+       * A phone whose webview refuses IndexedDB (or blocks its upgrade behind another connection)
+       * used to sit on "Opening the library…" for the whole session, because the database was
+       * treated as a precondition rather than as one thing that can fail. Storage failing must cost
+       * *saving*, not the app: an in-memory library opens, browses, reads and searches, and says
+       * plainly that nothing will be kept. Silence was the bug; a working screen with a sentence is
+       * the fix.
+       */
+      try {
+        this.profile = await bootStep("Opening the library database", () => openLibraryProfile(options));
+      } catch (cause) {
+        const reason = message(cause);
+        this.profile = await bootStep("Opening the library database", () =>
+          openLibraryProfile({ ...options, database: memoryDatabase() }),
+        );
+        this.error = `This device's library storage did not open (${reason}), so nothing can be saved this session — your library, reading and browsing all still work. Reload to try again.`;
+      }
       this.library = await bootStep("Reading the saved titles", () => this.profile!.store.listSeries());
       this.extensions = await bootStep("Listing extensions", () => this.profile!.listExtensions());
       this.htServer = this.profile.htServer;

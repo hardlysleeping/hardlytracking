@@ -120,6 +120,14 @@ export async function openDatabase(options: { connect?: import("./sqlite").SqlCo
 
 function openIndexedDb(): Promise<Database> {
   const opening = new Promise<IDBDatabase>((resolve, reject) => {
+    // A webview that has no IndexedDB at all (storage disabled by policy, a private context, or a
+    // custom-scheme origin WebKit refuses to persist) must say so, not hang: `indexedDB.open` on an
+    // undefined global throws a ReferenceError inside the executor, which is a rejection the caller
+    // can act on — but only if the message is a sentence rather than "indexedDB is not defined".
+    if (typeof indexedDB === "undefined") {
+      reject(new Error("this webview has no local database to open"));
+      return;
+    }
     const request = indexedDB.open(DB_NAME, DB_VERSION);
     request.onupgradeneeded = () => {
       const db = request.result;
@@ -139,6 +147,11 @@ function openIndexedDb(): Promise<Database> {
     };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error ?? new Error("could not open indexeddb"));
+    // A second connection holding an older version blocks the upgrade, and `onblocked` is the only
+    // notice there is: without it the request never settles and boot waits forever. A rejection is
+    // an answer the library can work around; a pending promise is the dead screen.
+    request.onblocked = () =>
+      reject(new Error("another window is holding this device's library database open"));
   });
 
   return opening.then((db) => {
