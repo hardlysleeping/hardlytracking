@@ -23,7 +23,7 @@
 import { CONTENT_LEVELS, type ContentLevel } from "../lib/content/levels";
 
   /** The slider shows the cover the library actually draws, not a value a preset overrides. */
-  const cover = $derived(coverWidth(settings.libraryDensity, deviceClass(viewport.width), settings.coverSize));
+  const cover = $derived(coverWidth(settings.libraryDensity, deviceClass(viewport.width, viewport.height), settings.coverSize));
 
   const bytes = $derived(
     downloads.bytes < 1024 * 1024

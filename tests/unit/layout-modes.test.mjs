@@ -26,6 +26,14 @@ import {
 
 test("device classes: phone, tablet, desktop at the plan's boundaries", () => {
   assert.equal(deviceClass(390), "phone");
+  // A phone on its side is still a phone: 844×390 used to be handed the tablet rail, whose labels did
+  // not fit the width it left, inside a viewport 390 px tall.
+  assert.equal(deviceClass(844, 390), "phone");
+  assert.equal(deviceClass(667, 375), "phone");
+  // …and a short desktop window is still a desktop, which a shortest-side rule would have broken.
+  assert.equal(deviceClass(1280, 900), "desktop");
+  assert.equal(deviceClass(1600, 700), "desktop");
+  assert.equal(deviceClass(1024, 768), "tablet");
   assert.equal(deviceClass(599), "phone");
   assert.equal(deviceClass(600), "tablet");
   assert.equal(deviceClass(1180), "tablet"); // iPad landscape is not a desktop

@@ -14,8 +14,13 @@ class Viewport {
   width = $state(1200);
   height = $state(800);
 
+  /**
+   * The shorter side decides, for the same reason `deviceClass` does: a phone on its side must not
+   * become a tablet, or its chrome changes under a finger that merely rotated the device.
+   */
   get size(): Size {
-    if (this.width < 600) return "compact";
+    // A phone on its side is still a phone; everything wider than that is judged by width alone.
+    if (Math.min(this.width, this.height) < 600) return "compact";
     if (this.width <= 1000) return "medium";
     return "large";
   }

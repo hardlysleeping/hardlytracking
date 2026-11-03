@@ -63,9 +63,21 @@ export interface LayoutOptions {
   forceSplit?: boolean;
 }
 
-/** Phone below 600, tablet to 1279, desktop above. iPad landscape (1024–1180) is a tablet. */
-export function deviceClass(width: number): DeviceClass {
-  if (width < 600) return "phone";
+/**
+ * Phone below 600, tablet to 1279, desktop above — measured on the **shorter side**.
+ *
+ * Width alone turned an iPhone on its side into a small tablet: 844×390 has the width of a tablet and
+ * the height of a phone, so it was given the 76 px rail, the rail's labels did not fit the space it
+ * left, and the screen it was drawing into had 390 px to do it in. A phone is a phone horizontal or
+ * vertical; what changes is which edge the notch is on, which is the safe area's business and not the
+ * breakpoint's. A tablet in landscape (1024×768) is still a tablet, and a desktop window dragged short
+ * stays a desktop rather than becoming a phone.
+ */
+export function deviceClass(width: number, height: number = width): DeviceClass {
+  // Only the *phone* test looks at the shorter side: it is what tells "a phone on its side" apart from
+  // "a small tablet". Past that, width decides — a 1280×900 desktop window is a desktop, not a tablet
+  // with a wide rail, which is what a shortest-side rule would have made of it.
+  if (Math.min(width, height) < 600) return "phone";
   if (width < 1280) return "tablet";
   return "desktop";
 }
@@ -252,7 +264,7 @@ export function badgesFor(density: Density, enabled: Badge[] = DEFAULT_BADGES): 
  * collection navigation. That separation is what stops "iPad Pro gets seven columns" logic appearing.
  */
 export function libraryLayout(width: number, height: number, options: LayoutOptions = {}): LibraryLayout {
-  const device = deviceClass(width);
+  const device = deviceClass(width, height);
   const usable = Math.max(width - railWidth(device) - PAGE_PADDING, 0);
   const preference = options.nav ?? "automatic";
   const collectionCount = options.collectionCount ?? 0;

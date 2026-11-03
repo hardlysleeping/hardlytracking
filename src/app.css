@@ -405,6 +405,18 @@ button.ghost:disabled {
   --pad-y: 8px;
 }
 
+/**
+ * A row of action buttons wraps instead of widening the page.
+ *
+ * `.blankacts` is a flex row of up to four buttons in every empty state. Flex items do not shrink below
+ * their own text, so at 390 px the row was 100 px wider than the screen and dragged the paragraph above
+ * it out of the frame — content behind the right edge, with no way to reach it, because the shell clips
+ * horizontally on purpose.
+ */
+:root .blankacts {
+  flex-wrap: wrap;
+}
+
 .view {
   padding-left: var(--pad-x) !important;
   padding-right: var(--pad-x) !important;

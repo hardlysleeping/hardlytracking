@@ -88,7 +88,7 @@
    * The chrome is the library's device class, from the same module the library's own layout comes
    * from — a rail the shell draws is a width the library may not use for a grid.
    */
-  const device = $derived(deviceClass(viewport.width));
+  const device = $derived(deviceClass(viewport.width, viewport.height));
 </script>
 
 <div class="app" class:compact={device === "phone"} class:medium={device === "tablet"} class:large={device === "desktop"}>
@@ -174,6 +174,14 @@
     grid-template-rows: minmax(0, 1fr);
     overflow: hidden;
     background: var(--bg);
+    /*
+     * The notch moves to a side edge when the phone is on its side, and nothing used to pay for it:
+     * buttons sat under the sensor housing and the first and last column of every grid were clipped.
+     * Paying it once, here, keeps every presentation (bar, rail, sidebar, scroller) inside the safe
+     * area without each one remembering the two insets.
+     */
+    padding-left: var(--safe-l);
+    padding-right: var(--safe-r);
   }
 
   main {
@@ -212,7 +220,7 @@
    * the content rather than in the scroll flow, so a long page keeps its room. */
   .history-nav {
     position: fixed;
-    left: var(--s3);
+    left: calc(var(--s3) + var(--safe-l));
     bottom: calc(var(--nav-h) + var(--safe-b) + var(--s2));
     display: flex;
     gap: var(--s2);
@@ -343,7 +351,8 @@
   /* ---- bottom bar (compact) ---- */
   .bar {
     position: fixed;
-    inset: auto 0 0 0;
+    /* Full-bleed background, inset content: on its side the notch eats the first and last item. */
+    inset: auto var(--safe-r) 0 var(--safe-l);
     z-index: 20;
     /* An iOS tab bar is 49 pt of content plus the home-indicator inset. Two steps of padding on
      * each side made ours ~20 px taller than that, which is the "fat band" a phone user sees. */
