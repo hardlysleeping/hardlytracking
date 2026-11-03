@@ -48,13 +48,26 @@ export async function sameSecret(presented: string, expected: string): Promise<b
   return difference === 0 && presented.length > 0;
 }
 
-/** The deployment: a request carrying the service-role key, and nothing else. */
+/**
+ * The deployment: a request carrying the service-role key.
+ *
+ * Either header may carry it. `Authorization` is how an operator's curl and a
+ * service-role client both send it; `apikey` is where it sits when the same request also
+ * carries an admin's token in `Authorization`, which is exactly what `publish-plugin`
+ * needs. A request is this deployment's if *either* proves it, and neither header is
+ * allowed to fall back to the other's value by accident.
+ */
 export async function requireService(req: Request, project: Project): Promise<void> {
-  const presented = bearer(req) || (req.headers.get("apikey") ?? "").trim();
-  if (presented === "") {
+  const candidates = [bearer(req), (req.headers.get("apikey") ?? "").trim()].filter(
+    (value) => value !== "",
+  );
+  if (candidates.length === 0) {
     throw new HttpError(401, "This endpoint is for the catalogue's own operators.");
   }
-  if (!(await sameSecret(presented, project.serviceKey))) {
+  const matches = await Promise.all(
+    candidates.map((candidate) => sameSecret(candidate, project.serviceKey)),
+  );
+  if (!matches.some(Boolean)) {
     // 403, not 401: the caller is not going to succeed by trying again with the same
     // token, and the status says "you are not this" rather than "sign in".
     throw new HttpError(403, "This endpoint is for the catalogue's own operators.");

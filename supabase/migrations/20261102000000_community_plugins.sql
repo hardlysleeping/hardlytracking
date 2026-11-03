@@ -793,7 +793,7 @@ comment on view public.community_installable_versions is
   'The only rows an installer should read: published versions of published listings.';
 
 revoke all on public.community_installable_versions from anon, authenticated;
-grant select on public.community_installable_versions to anon, authenticated;
+grant select on public.community_installable_versions to anon, authenticated, service_role;
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- 11. The bucket

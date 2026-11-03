@@ -132,6 +132,9 @@ Deno.serve(async (req: Request): Promise<Response> => {
       );
     }
 
+    // A listing created by a submission that then fails stays behind, empty and pending.
+    // That is deliberate: it is invisible to everybody but its owner, and a retry with the
+    // same slug finds it and adds the version, which is exactly what the person wanted.
     const storagePath = storagePathFor(pluginId, manifest.version);
     await uploadPackage(project, storagePath, bytes);
 

@@ -224,16 +224,34 @@ export class CommunityClient {
     return versionOf(version as Record<string, unknown>);
   }
 
-  /** Files a report. The reporter's id comes from the token, never from this body. */
+  /**
+   * Files a report.
+   *
+   * A row, not an Edge Function: `community_plugin_reports` is insert-only behind row-level security,
+   * and the reporter's id comes from the token the policy reads (`reporter_id = auth.uid()`), never
+   * from this body. Nobody can read reports back through the client at all — that grant belongs to the
+   * service role, which is what stops the catalogue becoming a wall of accusations.
+   */
   async report(pluginId: string, reason: ReportReason, note = ""): Promise<void> {
-    const { base } = this.project();
-    const token = await this.token();
+    const { base, anonKey } = this.project();
+    const session = await this.account?.session();
+    if (session === null || session === undefined) {
+      throw new CommunityError("not_signed_in", "Sign in to report a plugin.");
+    }
+    const token = session.token;
     let response: Response;
     try {
-      response = await this.call(`${base}/functions/v1/report-plugin`, {
+      response = await this.call(`${base}/rest/v1/community_plugin_reports`, {
         method: "POST",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ plugin_id: pluginId, reason, note }),
+        headers: {
+          apikey: anonKey,
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+          Prefer: "return=minimal",
+        },
+        // `reporter_id` must be in the body because the policy checks it against `auth.uid()`;
+        // sending someone else's id is refused by the database, not by this code.
+        body: JSON.stringify([{ plugin_id: pluginId, reporter_id: session.userId, reason, note }]),
       });
     } catch (cause) {
       throw new CommunityError("unreachable", "The report did not reach the server.", String(cause));
