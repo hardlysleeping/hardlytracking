@@ -64,9 +64,8 @@
     /**
      * A card that opens *in the grid*, after the tile with this id.
      *
-     * The tile stays where it is and the opened card takes the whole next row, so the rest of the
-     * grid moves down around it — the thing he asked for: "the card expands and everything shifts
-     * away". A pane beside the grid keeps the grid still and puts the answer somewhere else.
+     * Replace the clicked tile with a full-row expansion at the start of its existing row.
+     * Opening below the tile forces a second scroll to find the result of the tap.
      */
     expandAfter?: string | null;
     /** What to draw in that row. Ignored unless `expandAfter` matches a tile in this grid. */
@@ -181,7 +180,12 @@
     if (wasHeld) onlongpress?.(item);
   }
 
-  function pick(item: Series) {
+  let expansionAnchor = $state<string | null>(null);
+  function pick(item: Series, event: MouseEvent) {
+    const tile = event.currentTarget as HTMLElement;
+    const top = tile.getBoundingClientRect().top;
+    const siblings = [...(tile.parentElement?.querySelectorAll<HTMLElement>(":scope > .tile") ?? [])];
+    expansionAnchor = siblings.find(el => Math.abs(el.getBoundingClientRect().top - top) < 2)?.dataset.seriesId ?? item.id;
     if (selection !== null) {
       onselect?.(item);
       return;
@@ -215,6 +219,12 @@
 {:else}
   <div class="set {view}" style:--cover="{cover}px">
     {#each drawn as item (item.id)}
+      {#if expanded !== null && expandAfter !== null && item.id === (expansionAnchor ?? expandAfter)}
+        <div class="expand" data-expanded="true">
+          {@render expanded()}
+        </div>
+      {/if}
+      {#if expanded === null || expandAfter !== item.id}
       <button
         class="tile"
         class:current={current === item.id}
@@ -223,7 +233,7 @@
         class:dragging={dragId === item.id}
         data-series-id={item.id}
         aria-pressed={selection === null ? undefined : selection.has(item.id)}
-        onclick={() => pick(item)}
+        onclick={(event) => pick(item, event)}
         onpointerdown={(event) => down(event, item)}
         onpointermove={moved}
         onpointerup={(event) => up(event, item)}
@@ -275,18 +285,16 @@
           {/if}
         </span>
       </button>
-      {#if expanded !== null && expandAfter === item.id}
-        <!-- The opened card takes the next whole row: the tiles after it move down, so nothing is
-             hidden behind it and the grid stays where the user was reading. -->
-        <div class="expand" data-expanded="true">
-          {@render expanded()}
-        </div>
       {/if}
     {/each}
   </div>
 {/if}
 
 <style>
+  .set {
+    /* Replacing the tapped row must not make the browser anchor to a later tile and jump. */
+    overflow-anchor: none;
+  }
   .set.grid,
   .set.compact {
     display: grid;

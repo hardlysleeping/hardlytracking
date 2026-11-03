@@ -11,7 +11,6 @@
    * candidates is five clicks, not five round trips through the series page and Back. The series page
    * is still one button away inside the pane — it is where chapters live, not where you decide.
    */
-  import { tick } from "svelte";
   import { library } from "../state/library.svelte";
   import { providerFor } from "../api/registry";
   import type { Chapter, Series, Source } from "../api/source";
@@ -280,50 +279,7 @@
   /** The pane's record: the fuller one when it has arrived, the search row until then. */
   const record = $derived(detailed ?? shown);
 
-  /**
-   * Bring the opened card into view, gently, and again once its issue list has arrived.
-   *
-   * The first nudge happens while the card still says "asking the source…", so it is measured
-   * against a card that has not finished growing; the second happens when the list (or the failure)
-   * is actually on screen. Both bail out if the card is already wholly visible, so a short card does
-   * not move the page at all and a tall one is aligned to the top of its own scroll pane.
-   */
-  function revealCard(): void {
-    const card = document.querySelector("[data-expanded]") as HTMLElement | null;
-    if (card === null) return;
-    // The results scroll inside their own pane, not the document, so `scrollIntoView` decides for
-    // its own reasons how much to move. Measure against that pane and move by exactly the overflow:
-    // the card bottom lands on the pane bottom when the card fits, and its top when it does not.
-    const pane = card.closest("main") ?? (document.scrollingElement as HTMLElement | null);
-    if (pane === null) return;
-    const box = card.getBoundingClientRect();
-    const view = pane.getBoundingClientRect();
-    // The tab bar is fixed over the bottom of the pane, so treat its height as dead space: landing
-    // the card under it would hide the very rows this scroll exists to show.
-    const tabs = document.querySelector("nav.bar");
-    const covered = tabs === null ? 0 : Math.max(0, Math.round(tabs.getBoundingClientRect().height));
-    const free = view.height - covered;
-    const delta = box.height <= free ? box.bottom - (view.bottom - covered) : box.top - view.top;
-    if (delta <= 1) return;
-    const from = pane.scrollTop;
-    const to = from + delta;
-    pane.scrollTo({ top: to, behavior: "smooth" });
-    // Some engines refuse to animate and then do not move at all — the card would stay off screen
-    // with no error to show for it. If nothing has moved by the next few frames, jump instead.
-    window.setTimeout(() => {
-      if (Math.abs(pane.scrollTop - from) < 2) pane.scrollTop = to;
-    }, 150);
-  }
-
-  $effect(() => {
-    if (record === null) return;
-    void tick().then(revealCard);
-  });
-
-  $effect(() => {
-    if (issueState !== "ready" && issueState !== "error") return;
-    void tick().then(revealCard);
-  });
+  // Opening a result must not scroll; the grid expands at the tapped row.
   const inLibrary = $derived(shown !== null && saved.has(shown.id));
 
   /**
