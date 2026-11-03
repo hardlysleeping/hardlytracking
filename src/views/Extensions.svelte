@@ -16,18 +16,15 @@
   import { settings } from "../state/settings.svelte";
   import { REPORT_REASONS, sourceReport, type ReportReason } from "../lib/report/source";
   import { extensionLabel, extensionLanguages, sourcesOfExtension } from "../lib/extensions/installed";
+  import { ALL_LANGUAGES, filterEntries, keepLanguage, languagesOf } from "../lib/extensions/browse-filter";
   import { softwareHref } from "../lib/software";
   import { proxiedImage } from "../lib/pages";
   import { go, pathTo } from "../lib/nav";
   import { htServerEnabled, hostToken, remoteHost, setHostToken, setRemoteHost } from "../lib/host";
-import {
-  komgaBaseUrl,
-  komgaPassword,
-  komgaUsername,
-  probeKomga,
-  setKomgaEnabled,
-  setKomgaSettings,
-} from "../lib/komga";
+  import { setKomgaEnabled } from "../lib/komga";
+  import { setSuwayomiEnabled } from "../lib/suwayomi";
+  import SuwayomiLogin from "../components/SuwayomiLogin.svelte";
+  import KomgaLogin from "../components/KomgaLogin.svelte";
 import {
   setWebdavEnabled,
   setWebdavPassword,
@@ -72,6 +69,10 @@ import { probeWebdav } from "../api/webdav";
   let loading = $state(false);
   let search = $state("");
   let activeRepo = $state<string | null>(null);
+  /** A repository name is a toggle: a second tap folds its list away instead of refetching it. */
+  let collapsed = $state(false);
+  /** `all` or one source language code. Kept per repository, never a hidden filter. */
+  let language = $state(ALL_LANGUAGES);
   let installing = $state<string | null>(null);
   /** Two-step uninstall: removing an extension is destructive and one stray tap should not do it. */
   let removing = $state<string | null>(null);
@@ -109,37 +110,6 @@ import { probeWebdav } from "../api/webdav";
     }
   }
 
-  // ---- Komga ---------------------------------------------------------------
-  //
-  // Its own card, like the HT-Server: a source you point at a machine. The login is a username and
-  // a password, because that is what every Komga client asks for and what a person already has.
-  let komgaBase = $state(komgaBaseUrl());
-  let komgaUser = $state(komgaUsername());
-  let komgaSecret = $state(komgaPassword());
-  let komgaProbe = $state<string | null>(null);
-  let komgaBusy = $state(false);
-
-  function komgaSaved(): void {
-    setKomgaSettings({ baseUrl: komgaBase, username: komgaUser, password: komgaSecret });
-    komgaBase = komgaBaseUrl();
-    komgaUser = komgaUsername();
-    void library.refreshKomga().catch(() => undefined);
-  }
-
-  async function testKomga(): Promise<void> {
-    const settings = { baseUrl: komgaBase, username: komgaUser, password: komgaSecret };
-    komgaBusy = true;
-    komgaProbe = null;
-    try {
-      const probe = await probeKomga(settings);
-      komgaProbe = probe.ok
-        ? `Signed in${probe.libraries === undefined || probe.libraries.length === 0 ? " — but no libraries are visible to that user" : ` · ${probe.libraries.join(", ")}`}`
-        : (probe.error ?? "Komga did not answer");
-    } finally {
-      komgaBusy = false;
-    }
-  }
-
   let hostValue = $state(remoteHost());
   let hostTokenValue = $state(hostToken());
 
@@ -164,9 +134,11 @@ import { probeWebdav } from "../api/webdav";
       // its sources off. Both are written: the row is what the card draws, the preference is what
       // the provider asks.
       if (row.extensionId === "builtin:komga") setKomgaEnabled(row.enabled === false);
+      if (row.extensionId === "builtin:suwayomi") setSuwayomiEnabled(row.enabled === false);
       if (row.extensionId === "builtin:webdav") setWebdavEnabled(row.enabled === false);
       await library.setExtensionEnabled(row.extensionId, row.enabled === false);
       if (row.extensionId === "builtin:komga") await library.refreshKomga();
+      if (row.extensionId === "builtin:suwayomi") await library.refreshSuwayomi();
       if (row.extensionId === "builtin:webdav") await library.refreshWebdav();
     } finally {
       busy = null;
@@ -311,13 +283,10 @@ import { probeWebdav } from "../api/webdav";
   );
   const levelNotice = $derived(hiddenNotice(entries.length - allowed.length, settings.contentLevel));
 
-  const matched = $derived.by(() => {
-    const needle = search.trim().toLowerCase();
-    if (needle === "") return allowed;
-    return allowed.filter((entry) =>
-      `${entry.name} ${entry.pkg} ${entry.sources.map((source) => source.lang).join(" ")}`.toLowerCase().includes(needle),
-    );
-  });
+  /** The languages this index actually publishes in — the chips are derived, never hardcoded. */
+  const languageCodes = $derived(languagesOf(allowed));
+
+  const matched = $derived(filterEntries(allowed, search, language));
 
   /** A live repository publishes over a thousand entries; drawing them all is a stall. */
   const shown = $derived(matched.slice(0, 120));
@@ -387,11 +356,19 @@ import { probeWebdav } from "../api/webdav";
   }
 
   async function openRepository(url: string): Promise<void> {
+    // Same name, second tap: fold the list away. The entries stay in memory, so unfolding is free.
+    if (activeRepo === url) {
+      collapsed = !collapsed;
+      return;
+    }
     activeRepo = url;
+    collapsed = false;
     loading = true;
     error = null;
+    language = ALL_LANGUAGES;
     try {
       entries = await library.repoEntries(url);
+      language = keepLanguage(language, entries);
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
       entries = [];
@@ -502,6 +479,7 @@ import { probeWebdav } from "../api/webdav";
 </script>
 
 <section class="view">
+  <div class="pin">
   <header class="top">
     <h1>Extensions</h1>
     <span class="count">{installed.length} installed</span>
@@ -511,6 +489,19 @@ import { probeWebdav } from "../api/webdav";
     <button class="chip" class:on={section === "installed"} role="tab" aria-selected={section === "installed"} onclick={() => (section = "installed")}>Installed</button>
     <button class="chip" class:on={section === "available"} role="tab" aria-selected={section === "available"} onclick={() => (section = "available")}>Available</button>
     <button class="chip" class:on={section === "repositories"} role="tab" aria-selected={section === "repositories"} onclick={() => (section = "repositories")}>Repositories</button>
+  </div>
+
+  {#if section === "available" && library.repos.length > 0 && !collapsed}
+    <input class="field search" type="search" placeholder="Search extensions, packages or languages" bind:value={search} aria-label="Search extensions" />
+    {#if languageCodes.length > 1}
+      <div class="langs" role="group" aria-label="Filter by language">
+        <button class="chip" class:on={language === ALL_LANGUAGES} aria-pressed={language === ALL_LANGUAGES} onclick={() => (language = ALL_LANGUAGES)}>All</button>
+        {#each languageCodes as code (code)}
+          <button class="chip" class:on={language === code} aria-pressed={language === code} onclick={() => (language = code)}>{code.toUpperCase()}</button>
+        {/each}
+      </div>
+    {/if}
+  {/if}
   </div>
 
   <!-- The line this app has to be clear about: the app is ours, the extensions are not. Same words
@@ -565,9 +556,9 @@ import { probeWebdav } from "../api/webdav";
                   {#if row.extensionId === "builtin:ht-server"}
                     <!-- A host is not a source itself: what matters is which machine it is. -->
                     {row.versionName ?? "1.0.0"} · {hostValue === "" ? "no host set" : hostValue}{#if !htServerEnabled()} · paired but off{/if}
-                  {:else if row.extensionId === "builtin:komga"}
+                  {:else if row.extensionId === "builtin:komga" || row.extensionId === "builtin:suwayomi"}
                     <!-- Same idea: what matters is which server, and whether the login works. -->
-                    {row.versionName ?? "1.0.0"} · {komgaBase === "" ? "no server set" : komgaBase}{#if komgaBase !== "" && !row.enabled} · switched off{/if}
+                    {row.versionName ?? "1.0.0"} · read state sync{#if !row.enabled} · switched off{/if}
                   {:else}
                     {row.versionName ?? "unknown version"} · {row.sources.length} source{row.sources.length === 1 ? "" : "s"}{#if langs.length > 0} · {langs.join(", ")}{/if}
                   {/if}
@@ -616,66 +607,9 @@ import { probeWebdav } from "../api/webdav";
             {/if}
 
             {#if row.extensionId === "builtin:komga"}
-              <div class="hostform">
-                <label>
-                  <span>Address</span>
-                  <input
-                    class="field"
-                    type="text"
-                    value={komgaBase}
-                    placeholder="http://192.168.1.20:25600"
-                    spellcheck="false"
-                    onchange={(event) => {
-                      komgaBase = event.currentTarget.value;
-                      komgaSaved();
-                    }}
-                  />
-                </label>
-                <label>
-                  <span>Username</span>
-                  <input
-                    class="field"
-                    type="text"
-                    value={komgaUser}
-                    autocomplete="username"
-                    spellcheck="false"
-                    onchange={(event) => {
-                      komgaUser = event.currentTarget.value;
-                      komgaSaved();
-                    }}
-                  />
-                </label>
-                <label>
-                  <span>Password</span>
-                  <input
-                    class="field"
-                    type="password"
-                    value={komgaSecret}
-                    autocomplete="current-password"
-                    onchange={(event) => {
-                      komgaSecret = event.currentTarget.value;
-                      komgaSaved();
-                    }}
-                  />
-                </label>
-                <div class="hosthead">
-                  <button class="chip small" disabled={komgaBusy || komgaBase === ""} onclick={() => void testKomga()}>
-                    {komgaBusy ? "Asking…" : "Test login"}
-                  </button>
-                  {#if komgaProbe !== null}<span class="hoststate">{komgaProbe}</span>{/if}
-                </div>
-                <p class="hint">
-                  {#if komgaBase === ""}
-                    No server set — Komga's shelves are not offered.
-                  {:else if komgaUser === "" || komgaSecret === ""}
-                    Add the username and password you sign in to Komga with.
-                  {:else if komgaProbe !== null && !komgaProbe.startsWith("Signed in")}
-                    Login saved, but it did not work — read the answer above.
-                  {:else}
-                    Login saved as {komgaUser} · read state syncs both ways
-                  {/if}
-                </p>
-              </div>
+              <KomgaLogin onchange={() => library.refreshKomga()} />
+            {:else if row.extensionId === "builtin:suwayomi"}
+              <SuwayomiLogin onchange={() => library.refreshSuwayomi()} />
             {/if}
 
             {#if row.extensionId === "builtin:webdav"}
@@ -919,14 +853,20 @@ import { probeWebdav } from "../api/webdav";
     {:else}
       <div class="repo-bar">
         {#each library.repos as repo (repo.url)}
-          <button class="chip" class:on={activeRepo === repo.url} onclick={() => void openRepository(repo.url)}>{repo.name}</button>
+          <button
+            class="chip"
+            class:on={activeRepo === repo.url && !collapsed}
+            aria-expanded={activeRepo === repo.url ? !collapsed : false}
+            title={activeRepo === repo.url && !collapsed ? `Hide ${repo.name}'s extensions` : `Show ${repo.name}'s extensions`}
+            onclick={() => void openRepository(repo.url)}
+          >{repo.name}</button>
         {/each}
       </div>
 
-      <input class="field search" type="search" placeholder="Search extensions, packages or languages" bind:value={search} aria-label="Search extensions" />
-
       {#if loading}
         <p class="empty">Reading the index…</p>
+      {:else if collapsed}
+        <!-- Folded by its own repository chip: the names above are the whole section. -->
       {:else if entries.length === 0}
         <p class="empty">Pick a repository above to read its index.</p>
       {:else}
@@ -961,7 +901,7 @@ import { probeWebdav } from "../api/webdav";
                   disabled={installing === entry.pkg || state === "up-to-date"}
                   onclick={() => void install(entry)}
                 >
-                  {installing === entry.pkg ? "Installing…" : state === "new" ? "Install" : state === "update" ? "Update" : state === "downgrade" ? "Reinstall" : "Installed"}
+                  {installing === entry.pkg ? (library.extensionHostStarting ? "Starting runtime…" : "Installing…") : state === "new" ? "Install" : state === "update" ? "Update" : state === "downgrade" ? "Reinstall" : "Installed"}
                 </button>
                 {#if library.htServer !== null}
                   <!-- A second, separate list: the PC's extensions are the PC's, and installing there
@@ -1338,10 +1278,15 @@ import { probeWebdav } from "../api/webdav";
     margin: 0 0 var(--s2);
   }
 
+  /* The shared .view > .pin owns sticky positioning and the status-bar inset once. */
+  .pin { padding-bottom: var(--s3); display: grid; gap: var(--s2); min-width: 0; }
+  /* Language chips wrap: the band never becomes a sideways scroller on a phone. */
+  .langs { display: flex; flex-wrap: wrap; gap: var(--s1); min-width: 0; }
   .search {
     width: 100%;
-    min-height: 38px;
-    margin-bottom: var(--s3);
+    min-width: 0;
+    min-height: 40px;
+    margin: 0;
   }
 
   .summary {
