@@ -121,3 +121,23 @@ browser, which is the same challenge page the proxy was fixed for.
 
 `tests/unit/cookies.test.mjs` ("the webview UA goes only where the session goes") pins both halves
 against the fixture host.
+
+### What the bundled runtime actually does with a UA
+
+Measured 2026-11-03 against `plugins/mihon-runtime/linux/runner.jar` (MExtensionServer v1.0.9, the jar
+the desktop build spawns and the IPA embeds), MangaDex 1.5.0, `getPopularManga`:
+
+| `user-agent` sent | result |
+| --- | --- |
+| absent | 20 titles |
+| desktop Chrome | `500 Unexpected JSON token … <!doctype html>` |
+| Android Chrome (what a webview login stores) | same 500 |
+| `Tachiyomi Mozilla/5.0 …` | 20 titles |
+| `HardlyTracking/1.0 CFNetwork/… Darwin/…` | 20 titles |
+| empty string | 20 titles |
+
+So the runtime really does hand the UA to the extension's HTTP client, and the only values that break
+are *browser-shaped* ones — which is exactly what a stored webview UA is. Gating it on a session fixes
+anonymous sources everywhere; a source the person logged into through a webview still presents that
+browser UA, and a site that refuses browser UAs (MangaDex's API does) will refuse it. That trade is
+deliberate: the UA exists to satisfy sites that *require* the browser identity.
