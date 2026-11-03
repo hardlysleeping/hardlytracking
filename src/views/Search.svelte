@@ -514,6 +514,12 @@
 {/snippet}
 
 <section class="view">
+  <!--
+    The heading and the field are one pinned block: a search page whose field scrolls away is a page
+    you have to scroll back up to use. `.pin` is sticky in `app.css`, together with every other
+    view's heading, so the notch and the background are handled in one place.
+  -->
+  <div class="pin">
   <header class="bar">
     <h1>Search</h1>
     <button
@@ -553,6 +559,7 @@
     <input class="field" type="search" placeholder="One title, every source" bind:value={query} aria-label="Search every selected source" />
     <button class="btn primary" type="submit" disabled={running || chosen.size === 0}>{running ? "Searching…" : "Search"}</button>
   </form>
+  </div>
 
   <div class="picker">
     <span class="label">Sources · {chosen.size} of {sources.length} selected</span>

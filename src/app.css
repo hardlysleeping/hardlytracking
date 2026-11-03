@@ -402,6 +402,36 @@ button.ghost:disabled {
   padding-top: var(--pad-y) !important;
 }
 
+/* -------------------------------------------------------------------------
+ * A title belongs to the screen, not to the scroll.
+ *
+ * Scrolling a page used to take its own heading — and, on Search, the field you were about to type
+ * in — up and away with the content, which is the one thing that most makes a webview feel like a
+ * web page instead of an app. Every view's first heading (and Search's pinned field block) now
+ * sticks to the top of the scroller.
+ *
+ * Three details that are not decoration:
+ *
+ * - `main` pays the notch with `padding-top`, and that padding is *above* the heading's static
+ *   position, so `top: 0` alone would tuck the title under the status bar. The negative margin
+ *   cancels that padding and the heading's own padding puts it back: nothing moves at rest, and
+ *   when it sticks the heading covers the notch itself.
+ * - The background is opaque and the box-shadow paints a band below it, because a view keeps its
+ *   own margin under its heading — content scrolling through that gap must not show through.
+ * - `z-index` is above cards and covers; a sticky bar that a cover can scroll over is worse than
+ *   no bar at all.
+ * ------------------------------------------------------------------------- */
+:root .view > header,
+:root .view > .pin {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  margin-top: calc(-1 * var(--safe-t));
+  padding-top: var(--safe-t);
+  background: var(--bg);
+  box-shadow: 0 calc(var(--s4) + 2px) 0 var(--bg);
+}
+
 /* Maximize space: the heading and the Continue strip are comfort, not navigation — everything they
  * led to is still one tap away, so removing them costs no control. */
 :root[data-space="max"] .view > header,
