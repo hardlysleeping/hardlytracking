@@ -115,6 +115,14 @@ class LibraryState {
   htServer = $state.raw<DalvikHost | null>(null);
   /** What the PC has installed, as its own registry last answered. Managed from here, owned there. */
   hostExtensions = $state<InstalledExtension[]>([]);
+  /**
+   * True when the device's storage refused to open and the library is running in memory.
+   *
+   * A separate flag from `error` because it is a state the user has to be told about on every screen
+   * — "nothing you do now is being kept" — while `error` is also used for messages that belong to one
+   * screen (a dead extension host, a source that did not answer).
+   */
+  storageFallback = $state(false);
   /** Stops listening for files the system hands over (iOS only). */
   stopOpenedFiles: (() => void) | null = null;
   /** Repositories the user added, oldest first. */
@@ -160,6 +168,7 @@ class LibraryState {
         this.profile = await bootStep("Opening the library database", () =>
           openLibraryProfile({ ...options, database: memoryDatabase() }),
         );
+        this.storageFallback = true;
         this.error = `This device's library storage did not open (${reason}), so nothing can be saved this session — your library, reading and browsing all still work. Reload to try again.`;
       }
       this.library = await bootStep("Reading the saved titles", () => this.profile!.store.listSeries());

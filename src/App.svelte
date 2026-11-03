@@ -123,6 +123,14 @@ import { sourceMarks } from "./state/source-marks.svelte";
   <Reader seriesId={route.id} chapterId={route.chapterId} />
 {:else}
   <AppShell {active}>
+    {#if library.storageFallback}
+      <!--
+        Device-level, so it belongs above every destination: a library running in memory looks
+        completely normal until someone closes the app and finds nothing they did survived. One
+        sentence, dismissible by fixing the cause, not by tapping an X.
+      -->
+      <p class="nostore" role="status">{library.error}</p>
+    {/if}
     {#if !library.ready && library.openError === null && active === "library"}
       <!--
         Scoped to the library destination on purpose. The gate used to sit above every route, so an
@@ -179,6 +187,15 @@ import { sourceMarks } from "./state/source-marks.svelte";
   .boot {
     padding: var(--s5) var(--s4);
     color: var(--text-2);
+    font-size: var(--t-sm);
+  }
+
+  .nostore {
+    margin: 0;
+    padding: var(--s3) var(--s4);
+    border-bottom: 1px solid var(--line-strong);
+    background: var(--surface);
+    color: var(--text-1);
     font-size: var(--t-sm);
   }
 </style>
