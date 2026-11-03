@@ -89,6 +89,25 @@ Measured 2026-11-02 through `/api/mihon/graphql` on the second command's port:
 - The source with no filters drew no Filters button at all, which is the "absent is a real answer"
   rule in `SourceProvider.filters?`.
 
+## The embedded host must never gate the library
+
+`library.open()` starts the on-device host before it opens anything (`startNativeRuntime`), because the
+providers are built from it. That is fine when the host answers and fatal when it does not: the native
+side answers from a **serial worker queue**, and a JVM that wedges inside `MihonRuntimeStart` never
+calls its completion — so the Capacitor promise stays pending forever, `open()` never returns, and the
+app sits on "Opening the library…" for the whole session.
+
+Seen on an iPhone: the library never opened, and every tab looked dead because the boot message was
+rendered *above the routes*, so Settings, Browse and More all showed the same sentence. Two fixes:
+
+- every native call has a deadline (`RUNTIME_STATUS_DEADLINE_MS` 5 s, `RUNTIME_START_DEADLINE_MS`
+  45 s). A call that does not answer is treated exactly like a refused one: `null` means "no host this
+  session", the library still opens, and the app says so on the iPhone
+  (`library.error`). A follow-up `status` that hangs *after* a start resolved is trusted late, because
+  the port is already bound.
+- the boot block is scoped to the library destination. Other screens read the same state and render
+  their own empty case, so the tabs keep working while the library is starting.
+
 ## The dalvik hop invents no headers
 
 `/api/dalvik/*` is passed to the runtime with `node:http`, not `fetch`, and two of the tab's own

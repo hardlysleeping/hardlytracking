@@ -18,11 +18,43 @@
  * - A runtime that fails to start returns `null` rather than throwing. A phone that cannot start its
  *   JVM must still open its library and say what happened; `registry.ts` turns the missing host into
  *   a warning line, which is the shape the UI already understands.
+ * - **Every call has a deadline.** The native side answers from a serial worker queue, and a JVM that
+ *   wedges inside `MihonRuntimeStart` never calls its completion — which leaves the Capacitor promise
+ *   pending forever. That is not a slow start, it is a dead app: `library.open()` awaits this and the
+ *   shell then shows "Opening the library…" for the whole session while every tab looks broken. A
+ *   call that does not answer in time is treated exactly like a refused one, so the library opens.
  */
 import { detectPlatform } from "./webview/index";
 
 /** Loopback port the embedded server listens on. Fixed so a stale pairing cannot point elsewhere. */
 export const NATIVE_RUNTIME_PORT = 8747;
+
+/**
+ * How long a native answer may take before the app assumes there is no host this session.
+ *
+ * `status` is a cheap question — the native side answers "not running" without touching the JVM — so
+ * silence there means the bridge is wedged. `start` really does build a JVM on an interpreter-only
+ * port, which takes seconds on a phone, so it gets a generous window rather than a tight one.
+ */
+export const RUNTIME_STATUS_DEADLINE_MS = 5_000;
+export const RUNTIME_START_DEADLINE_MS = 45_000;
+
+const TIMED_OUT: unique symbol = Symbol("timed out");
+
+/** `work`, or `TIMED_OUT` once `ms` pass. The timer is cleared so it cannot outlive the race. */
+async function within<T>(work: Promise<T>, ms: number): Promise<T | typeof TIMED_OUT> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      work,
+      new Promise<typeof TIMED_OUT>((resolve) => {
+        timer = setTimeout(() => resolve(TIMED_OUT), ms);
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
 
 export interface NativeRuntimeStatus {
   running: boolean;
@@ -107,16 +139,26 @@ async function loadNativePlugin(): Promise<MihonRuntimePlugin | null> {
 export async function startNativeRuntime(
   port = NATIVE_RUNTIME_PORT,
   load: () => Promise<MihonRuntimePlugin | null> = loadNativePlugin,
+  deadlines: { status: number; start: number } = {
+    status: RUNTIME_STATUS_DEADLINE_MS,
+    start: RUNTIME_START_DEADLINE_MS,
+  },
 ): Promise<string | null> {
   const plugin = await load();
   if (plugin === null) return null;
   try {
-    const before = await plugin.status();
+    const before = await within(plugin.status(), deadlines.status);
+    if (before === TIMED_OUT) return null;
     if (before.running) return loopbackBase(before.port > 0 ? before.port : port);
-    const started = await plugin.start({ port });
+    const started = await within(plugin.start({ port }), deadlines.start);
+    // A start that never answers is a wedged JVM, not a slow one: the app cannot wait on it, and the
+    // library has to open. Treated as "no host", which the registry already knows how to report.
+    if (started === TIMED_OUT) return null;
     const bound = started.port > 0 ? started.port : port;
-    // A `start` that resolves is not proof the server is listening: ask it.
-    const after = await plugin.status();
+    // A `start` that resolves is not proof the server is listening: ask it. That answer is the one
+    // that may be trusted late — the port is already bound, so a slow status is a slow status.
+    const after = await within(plugin.status(), deadlines.status);
+    if (after === TIMED_OUT) return loopbackBase(bound);
     return after.running ? loopbackBase(bound) : null;
   } catch {
     // No plugin compiled in, a JVM that refused to start, a port already taken — all the same to the

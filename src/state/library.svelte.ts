@@ -31,6 +31,7 @@ import {
   type SummaryRow,
 } from "../lib/migrate";
 import { startNativeRuntime, shellFetch } from "../lib/mihon-runtime";
+import { detectPlatform } from "../lib/webview/index";
 import { watchOpenedFiles } from "../lib/files/opened";
 import { imageCache } from "../lib/cache/images";
 import type { Chapter, Page, Series, Source } from "../api/source";
@@ -99,6 +100,12 @@ class LibraryState {
       // before the providers are built. Everywhere else this resolves to `null` without doing any
       // work, and the app's own `/api/dalvik` proxy stays the default host.
       const nativeBase = await startNativeRuntime();
+      // A phone that could not start its own extension host still has a library — files, Komga,
+      // the Archive — so this is said, not fatal. Silence is what made the iPhone look broken: the
+      // host never answered and nothing on screen named it.
+      if (nativeBase === null && detectPlatform() === "capacitor") {
+        this.error = "The on-device extension host did not start. Extensions and their sources are unavailable this session; your library still opens.";
+      }
       // The desktop shell needs Rust's HTTP client for loopback (CORS), and that same client is what
       // makes a repository index reachable with no `/api/repo` proxy in the app.
       const fetchImpl = await shellFetch();

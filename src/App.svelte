@@ -122,9 +122,15 @@ import { sourceMarks } from "./state/source-marks.svelte";
   <Reader seriesId={route.id} chapterId={route.chapterId} />
 {:else}
   <AppShell {active}>
-    {#if !library.ready && library.openError === null}
+    {#if !library.ready && library.openError === null && active === "library"}
+      <!--
+        Scoped to the library destination on purpose. The gate used to sit above every route, so an
+        opening library replaced Settings, Browse, Extensions and More with the same sentence — the
+        tabs looked broken, and a library that never finished left the whole app looking dead. Other
+        destinations read the same state and render their own empty case, so they keep working.
+      -->
       <p class="boot">Opening the library…</p>
-    {:else if library.openError !== null}
+    {:else if library.openError !== null && active === "library"}
       <div class="boot">
         <p class="banner">{library.openError}</p>
         <p class="muted">The library could not be opened. Reload once the extension host is running.</p>

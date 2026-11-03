@@ -75,6 +75,37 @@ test("a plugin name nothing registered answers null instead of throwing", async 
   assert.equal(await startNativeRuntime(NATIVE_RUNTIME_PORT, async () => plugin), null);
 });
 
+test("a start that never answers is not a hang: the library still opens", async () => {
+  // The failure seen on a phone: the native side answers from a serial worker queue, and a JVM that
+  // wedges inside MihonRuntimeStart never calls its completion. The promise stays pending forever,
+  // `library.open()` awaits it, and the whole app shows "Opening the library…" with every tab dead.
+  const plugin = fakePlugin();
+  plugin.start = () => new Promise(() => {});
+  const started = Date.now();
+  const base = await startNativeRuntime(NATIVE_RUNTIME_PORT, async () => plugin, { status: 50, start: 120 });
+  assert.equal(base, null, "an unanswered start is treated as no host, not as a reason to wait forever");
+  assert.ok(Date.now() - started < 2000, "the deadline is honoured");
+});
+
+test("a status that never answers is a wedged bridge, not a slow one", async () => {
+  const plugin = fakePlugin();
+  plugin.status = () => new Promise(() => {});
+  const base = await startNativeRuntime(NATIVE_RUNTIME_PORT, async () => plugin, { status: 50, start: 120 });
+  assert.equal(base, null);
+});
+
+test("a start that binds the port is trusted even if the follow-up status is slow", async () => {
+  const plugin = fakePlugin();
+  let asked = 0;
+  plugin.status = async () => {
+    asked += 1;
+    if (asked === 1) return { running: false, port: 0 };
+    return new Promise(() => {});
+  };
+  const base = await startNativeRuntime(NATIVE_RUNTIME_PORT, async () => plugin, { status: 50, start: 500 });
+  assert.equal(base, loopbackBase(NATIVE_RUNTIME_PORT), "the port was bound, so the host is real");
+});
+
 test("the base URL is loopback, never a LAN address", async () => {
   assert.equal(loopbackBase(8747), "http://127.0.0.1:8747");
   assert.equal(loopbackBase(0), "http://127.0.0.1:0");
