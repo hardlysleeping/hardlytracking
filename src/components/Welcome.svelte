@@ -129,7 +129,9 @@
     line-height: 1.45;
   }
   .door-go {
-    color: var(--accent);
+    /* The doors are white cards in every theme, so this cannot take the theme's
+       text accent: in dark that is #7aa2ff, 2.5:1 on white. */
+    color: #2a63f0;
     font-size: var(--t-sm);
   }
   .skip {

@@ -26,13 +26,30 @@
   --text-3: #6f6f7e;
 
   --accent: #7aa2ff;
+  /* Text that has to read on a surface rather than on an accent fill. Same hue,
+     darker in light: #7aa2ff on white is 2.6:1, #2a63f0 is 5.07:1. */
+  --accent-text: #7aa2ff;
   --accent-ink: #0b1020;
   --success: #7fbf95;
   --warning: #e0b06b;
   --danger: #e08b8b;
   --tone-pinned: #0078e0;
 
-  /* 4px spacing scale */
+  /* A control that resets its own styles must still show where the keyboard is.
+   `all: unset` in the components drops the UA outline, and it outranks a plain
+   :focus-visible rule on source order, so this one is deliberate. */
+:focus-visible {
+  /* !important because the components' `all: unset` is more specific than a
+     bare :focus-visible, and a reset that also erases the focus ring is not a
+     restyle the reader asked for. */
+  outline: 2px solid var(--accent-text) !important;
+  outline-offset: 2px !important;
+}
+:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* 4px spacing scale */
   --s1: 4px;
   --s2: 8px;
   --s3: 12px;
@@ -86,8 +103,11 @@
   --line-strong: #c8c8d2;
   --text-1: #14141a;
   --text-2: #55555f;
-  --text-3: #8a8a96;
+  /* 3.4:1 on white was too faint for a nav label; this is 5.25:1 and still
+     reads as the quiet tier. */
+  --text-3: #6b6b78;
   --accent: #2f6bff;
+  --accent-text: #2a63f0;
   --accent-ink: #ffffff;
   --success: #2f7a4a;
   --warning: #9a6b12;
@@ -117,7 +137,9 @@
     --line-strong: #c8c8d2;
     --text-1: #14141a;
     --text-2: #55555f;
-    --text-3: #8a8a96;
+    /* 3.4:1 on white was too faint for a nav label; this is 5.25:1 and still
+     reads as the quiet tier. */
+  --text-3: #6b6b78;
     --accent: #2f6bff;
     --accent-ink: #ffffff;
     --success: #2f7a4a;

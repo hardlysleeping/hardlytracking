@@ -92,6 +92,9 @@
 </script>
 
 <div class="app" class:compact={device === "phone"} class:medium={device === "tablet"} class:large={device === "desktop"}>
+  <!-- First stop in the tab order: the nav repeats on every screen, and a
+       keyboard reader should be able to jump past it. -->
+  <a class="skip-link" href="#content">Skip to content</a>
   {#if device === "desktop"}
     <aside class="sidebar">
       <div class="brand">HardlyTracking</div>
@@ -126,7 +129,7 @@
     </nav>
   {/if}
 
-  <main bind:this={frame}>
+  <main id="content" tabindex="-1" bind:this={frame}>
     {@render children()}
   </main>
 
@@ -376,5 +379,27 @@
 
   .bar .item.on {
     color: var(--accent);
+  }
+  /* Visible only while focused: a skip link that shows all the time is chrome
+     the reader did not ask for. */
+  .skip-link {
+    position: absolute;
+    top: 0;
+    left: 50%;
+    z-index: 100;
+    transform: translate(-50%, -120%);
+    padding: 10px 16px;
+    border-radius: 0 0 10px 10px;
+    background: var(--text-1);
+    color: var(--bg);
+    font-size: var(--t-sm);
+    font-weight: 600;
+    text-decoration: none;
+    transition: transform 0.12s ease;
+  }
+  .skip-link:focus-visible {
+    transform: translate(-50%, 0);
+    outline: 2px solid var(--accent-text);
+    outline-offset: 2px;
   }
 </style>
