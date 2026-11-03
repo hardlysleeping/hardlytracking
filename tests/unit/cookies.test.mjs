@@ -251,6 +251,41 @@ test("a login that does not take is reported, not swallowed, and keeps its cooki
   });
 });
 
+test("the webview UA goes only where the session goes", async () => {
+  await withMock(async (mock) => {
+    const jar = memoryCookieJar();
+    const client = new DalvikClient({ baseUrl: mock.baseUrl });
+    const extensions = [{ extensionId: mock.extensionId, packageId: PACKAGE_NAME, name: EXTENSION_NAME, sources: mock.sources() }];
+    const provider = createDalvikProvider({
+      client,
+      extensions,
+      cookies: jar,
+      userAgent: () => "HardlyTracking-Test/1.0",
+    });
+    const sourceId = `dalvik:src:${SOURCE_IDS.html}`;
+    const host = hostOf(mock.sources().find((s) => s.id === SOURCE_IDS.html).baseUrl);
+
+    // 1. No session for this host: the runtime is left alone, so the extension keeps its own UA.
+    //    Sending the stored webview UA here is what made MangaDex answer an HTML challenge page to a
+    //    browser user-agent, and the packaged builds talk to the runtime directly, past the proxy
+    //    that strips a forwarded UA — so this has to be right at the source.
+    await provider.popular(sourceId, 1);
+    const anonymous = mock.state.calls.at(-1);
+    // `user-agent` is not asserted here: Node's `fetch` fills the header with `node` when the app
+    // sends none, so the wire cannot distinguish "the app said nothing" from a transport default.
+    // The private header is the app's own voice and nothing invents it.
+    assert.equal(anonymous.headers["x-hardlytracking-user-agent"], undefined, "an anonymous source must not inherit a browser UA");
+
+    // 2. Once this host has a session cookie, the UA is the identity of that session and travels
+    //    with it — both spellings, one value, the same rule as the cookie header.
+    await jar.remember(host, ["session=abc; Path=/; Max-Age=3600"]);
+    await provider.popular(sourceId, 1);
+    const signedIn = mock.state.calls.at(-1);
+    assert.equal(signedIn.headers["user-agent"], "HardlyTracking-Test/1.0");
+    assert.equal(signedIn.headers["x-hardlytracking-user-agent"], "HardlyTracking-Test/1.0");
+  });
+});
+
 test("the login page is the one the source named, resolved against its site", () => {
   const target = { sourceId: "1", baseUrl: "https://toonily.com/" };
   assert.equal(loginUrlFor({ ...target, loginUrl: "/login?source=1" }), "https://toonily.com/login?source=1");

@@ -648,7 +648,14 @@ export function createDalvikProvider(options: DalvikProviderOptions): SourceProv
   async function authFor(sourceBaseUrl: string | undefined): Promise<DalvikAuth> {
     const host = sourceBaseUrl === undefined ? null : hostOf(sourceBaseUrl);
     const cookie = host === null || options.cookies === undefined ? undefined : await options.cookies.header(host);
-    const userAgent = options.userAgent?.();
+    // The stored webview UA is the identity of a *session*, so it travels only where that session's
+    // cookies travel. Sent with every call it made the extension browse as a browser everywhere, and
+    // a site that blocks browser user-agents answered an HTML challenge page — MangaDex: "Unexpected
+    // JSON token … <!doctype html>", a 500, and a source with nothing to show. A source with no cookie
+    // for its host gets no UA either, so it keeps the extension's own identity; the dalvik build here
+    // is the one that matters, because the packaged builds talk to the runtime directly, past the
+    // proxy that strips a forwarded UA.
+    const userAgent = cookie === undefined ? undefined : options.userAgent?.();
     const webviewPort = options.webviewPort?.();
     return {
       ...(cookie === undefined ? {} : { cookie }),

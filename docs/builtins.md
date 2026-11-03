@@ -109,3 +109,15 @@ headers are dropped on the way:
 
 `tests/unit/dalvik-user-agent.test.mjs` starts a real proxy against a recording stand-in for the
 runtime, so both rules are asserted on the wire rather than in the source text.
+
+### The app's own side of the same rule
+
+The proxy only covers the browser build; the desktop and iOS builds call the runtime directly, past
+it. So the stored webview UA is also gated at the source (`authFor` in `src/api/dalvik.ts`): it is
+sent **only for a host the app holds a session cookie for**, because that UA is the identity of that
+session and nothing else. An anonymous source gets no UA at all and keeps the extension's own.
+Before that, one webview login anywhere made every extension — MangaDex included — browse as a
+browser, which is the same challenge page the proxy was fixed for.
+
+`tests/unit/cookies.test.mjs` ("the webview UA goes only where the session goes") pins both halves
+against the fixture host.
