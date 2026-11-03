@@ -21,6 +21,15 @@
 		<true/>
 		<key>NSExceptionDomains</key>
 		<dict>
+			<!-- Qualified Tailscale MagicDNS names do not match the numeric tailnet ranges.
+			     Permit HTTP for user-configured tailnet services without disabling ATS globally. -->
+			<key>ts.net</key>
+			<dict>
+				<key>NSIncludesSubdomains</key>
+				<true/>
+				<key>NSExceptionAllowsInsecureHTTPLoads</key>
+				<true/>
+			</dict>
 			<key>localhost</key>
 			<dict>
 				<key>NSExceptionAllowsInsecureHTTPLoads</key>

@@ -11,8 +11,8 @@
  * - `NSAllowsArbitraryLoads` (or the media / web-content variants) set to true: the blanket allow is
  *   back, and App Review asks for a justification the app cannot give — every public host it talks
  *   to is https.
- * - an exception domain that is not loopback or a private range: a public name here is either a
- *   hardcoded server or a hole. Remote sources do not need one; the extension runtime fetches them
+ * - exceptions outside loopback, private ranges and the user-configured MagicDNS ts.net suffix.
+ *   Remote content sources do not need one; the extension runtime fetches them
  *   with its own Java HTTP stack, which ATS does not govern.
  * - a private-range entry missing `NSExceptionAllowsInsecureHTTPLoads`: from iOS 17 ATS refuses IP
  *   connections by default, so the entry would exist and still block the request.
@@ -51,7 +51,7 @@ function ip4(text) {
 
 /** Whether a plist domain key is a name or range the app is allowed to have an exception for. */
 function isLocalOrPrivate(key) {
-  if (key === "localhost" || key.endsWith(".local")) return true;
+  if (key === "ts.net" || key === "localhost" || key.endsWith(".local")) return true;
   if (PRIVATE_V6.includes(key)) return true;
   const [address, prefixText] = key.split("/");
   if (address.includes(":")) return false;
@@ -73,6 +73,12 @@ test("ATS is not globally disabled", () => {
   }
 });
 
+test("MagicDNS qualified tailnet names allow HTTP without disabling ATS globally", () => {
+  const entry = ats.NSExceptionDomains['ts.net'];
+  assert.equal(entry?.NSExceptionAllowsInsecureHTTPLoads, true, 'HTTP MagicDNS names are blocked before Komga can authenticate');
+  assert.equal(entry?.NSIncludesSubdomains, true, 'device.tailnet.ts.net must match');
+});
+
 test("local networking is declared, which is what exempts .local and unqualified names", () => {
   assert.equal(ats.NSAllowsLocalNetworking, true);
 });
@@ -85,7 +91,7 @@ test("the loopback runtime has an exception, because /dalvik and /image are plai
   }
 });
 
-test("Komga and the HT-Server are covered by private ranges, not by a public name", () => {
+test("Komga and the HT-Server use private ranges or the scoped MagicDNS suffix", () => {
   const domains = Object.keys(ats.NSExceptionDomains);
   for (const key of domains) {
     assert.ok(isLocalOrPrivate(key), `${key} is not loopback or a private range`);
@@ -100,7 +106,7 @@ test("an exception grants insecure http and nothing else", () => {
   for (const [host, entry] of Object.entries(ats.NSExceptionDomains)) {
     assert.deepEqual(
       Object.keys(entry).sort(),
-      ["NSExceptionAllowsInsecureHTTPLoads"],
+      host === "ts.net" ? ["NSExceptionAllowsInsecureHTTPLoads", "NSIncludesSubdomains"].sort() : ["NSExceptionAllowsInsecureHTTPLoads"],
       `${host} relaxes more than plain http`,
     );
   }

@@ -197,6 +197,18 @@ test("a server that is not there is a named failure, not a crash", async () => {
   await assert.rejects(() => provider.sources(), /Komga is not answering at http:\/\/komga.test:25600/);
 });
 
+for (const message of ['Load failed', 'Failed to fetch', 'NetworkError']) {
+  test(`a login transport failure preserves ${message} without inventing CORS or bad credentials`, async () => {
+    const result = await probeKomga(
+      { baseUrl: BASE, username: 'reader', password: 'fixture-secret' },
+      async () => { throw new TypeError(message); },
+    );
+    assert.equal(result.ok, false);
+    assert.ok(result.error.includes(message));
+    assert.doesNotMatch(result.error, /browser blocks|without that limit|refused.*login|fixture-secret/i);
+  });
+}
+
 test("the card's test says which libraries the login can see", async () => {
   const ok = fakeKomga({ "/api/v1/users/me": { email: "reader@example.test" }, "/api/v1/libraries": LIBRARIES });
   const probe = await probeKomga({ baseUrl: BASE, username: "reader", password: "hunter2" }, ok.impl);

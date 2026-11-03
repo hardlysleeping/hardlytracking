@@ -170,17 +170,9 @@ export async function probeKomga(
     const rows = (await libraries.json()) as Array<{ name?: string }>;
     return { ok: true, libraries: rows.map((row) => row.name ?? "Untitled library") };
   } catch (error) {
-    const message = (error as Error).message;
-    // A browser tab cannot call another origin without CORS, and Komga sends no
-    // `Access-Control-Allow-Origin`. The packaged app talks to it directly (Capacitor's HTTP and the
-    // desktop shell both bypass CORS), so this is a "this page" limitation, and saying so is the
-    // difference between "your server is down" and "open this in the app".
-    if (/failed to fetch|networkerror|load failed/i.test(message)) {
-      return {
-        ok: false,
-        error: `This page could not reach ${base} directly (a browser blocks another origin's response). The phone and desktop builds talk to Komga without that limit.`,
-      };
-    }
+    // WebKit and native networking can use the same generic failure text for DNS, TLS,
+    // ATS and routing failures. It is not evidence of CORS or a rejected login.
+    const message = error instanceof Error ? error.message : String(error);
     return { ok: false, error: `Komga is not answering at ${base}: ${message}` };
   }
 }
