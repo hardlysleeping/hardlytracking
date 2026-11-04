@@ -1,5 +1,6 @@
 // Isolated, generated images only. No profile open, real library, or downloads.
 import { mount } from 'svelte';
+import '../../src/app.css';
 import ReaderFixture from './ReaderFixture.svelte';
 import { library } from '../../src/state/library.svelte';
 import { downloads } from '../../src/state/downloads.svelte';
@@ -31,6 +32,7 @@ downloads.local = async()=>args.has('partial') ? {
 settings.readerMode = (args.get('mode')??'vertical') as any;
 settings.readerFit = (args.get('fit')??'width') as any;
 settings.pageGap = 12;
+if (args.has('ahead')) settings.readerAhead = Number(args.get('ahead')) as any;
 settings.tapZones = true;
 settings.set = ((key: string,value: unknown)=>{(settings as any)[key]=value;}) as any;
 (window as any).readerFixture = {events,settings};

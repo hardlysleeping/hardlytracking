@@ -15,6 +15,7 @@ import type { SourceFilterSelection } from "../api/source";
 import { DEFAULT_CPU_LEVEL, type CpuLevel } from "../lib/performance";
 import { levelOr, type ContentLevel } from "../lib/content/levels";
 
+import { DEFAULT_READ_AHEAD, readAheadOf, type ReadAhead } from "../lib/reader-ahead";
 import { browseMode, columnsFor } from "../lib/browse-display";
 export type LibraryView = "grid" | "compact" | "list" | "row" | "card";
 export type Sort = "title" | "recent" | "source";
@@ -83,6 +84,7 @@ export interface Prefs {
   continueDismissed: string[];
   readerMode: ReaderMode;
   readerFit: Fit;
+  readerAhead: ReadAhead;
   pageGap: number;
   keepAwake: boolean;
   tapZones: boolean;
@@ -163,6 +165,7 @@ class Settings {
 
   readerMode = $state<ReaderMode>("vertical");
   readerFit = $state<Fit>("width");
+  readerAhead = $state<ReadAhead>(DEFAULT_READ_AHEAD);
   /** Space between pages in vertical/webtoon mode, px. */
   pageGap = $state(0);
   keepAwake = $state(true);
@@ -229,6 +232,7 @@ class Settings {
     this.continueDismissed = await read("continueDismissed", this.continueDismissed);
     this.readerMode = await read("readerMode", this.readerMode);
     this.readerFit = await read("readerFit", this.readerFit);
+    this.readerAhead = readAheadOf(await read<unknown>("readerAhead", DEFAULT_READ_AHEAD));
     this.pageGap = await read("pageGap", this.pageGap);
     this.keepAwake = await read("keepAwake", this.keepAwake);
     this.tapZones = await read("tapZones", this.tapZones);
@@ -261,7 +265,7 @@ class Settings {
    * `$state` proxy (`DataCloneError`), and a filter or a sort spec is an object.
    */
   set<K extends keyof Prefs>(key: K, value: Prefs[K]): void {
-    const plain = $state.snapshot(value) as Prefs[K];
+    const plain = $state.snapshot(key === "readerAhead" ? readAheadOf(value) : value) as Prefs[K];
     (this as unknown as Record<string, unknown>)[key] = plain;
     void this.store?.setPref(KEY + key, plain).catch(() => {});
   }

@@ -27,6 +27,7 @@
   import { INACTIVITY_TIMEOUT_MS, shouldEndForBackground } from "../lib/history";
   import Sheet from "../components/Sheet.svelte";
   import { plugins } from "../state/plugins.svelte";
+  import { READ_AHEAD_CHOICES, readAheadOf } from "../lib/reader-ahead";
   import { ReaderQueue, ReaderTap, readerOrder, type ReaderJob } from "../lib/reader";
 
   interface Props {
@@ -38,7 +39,8 @@
   let pages = $state<Page[]>([]);
 
 
-  const WINDOW = 4;
+  const ahead = $derived(readAheadOf(settings.readerAhead));
+  const pageWindow = $derived(Math.max(4, ahead));
   const queue = new ReaderQueue();
   const jobs = new Map<number, ReaderJob>();
   let pageAspect = $state(0);
@@ -47,13 +49,13 @@
   let generation = 0;
 
   function schedulePages(): void {
-    queue.set(readerOrder(index, pages.length).flatMap(i => {
+    queue.set(readerOrder(index, pages.length, ahead, ahead === 0 ? 0 : 1).flatMap(i => {
       const job = jobs.get(i);
       return job ? [job] : [];
     }));
   }
   $effect(() => {
-    index; pages;
+    index; pages; ahead;
     // Actions register after the DOM flush. No observer races or browser eager-image fan-out.
     void tick().then(schedulePages);
   });
@@ -605,7 +607,7 @@
           data-note={notes[page.index]}
           style:--aspect={aspects[page.index] ?? (pageAspect || .7)}
         >
-          {#if Math.abs(page.index - index) > WINDOW}
+          {#if Math.abs(page.index - index) > pageWindow}
             <!-- Outside the window: the box holds the scroll position, the bytes are not loaded. A
                  214-page chapter used to fetch every page at once because a zero-height page is
                  "on screen" for every lazy image in it. -->
@@ -666,6 +668,15 @@
         <button class="chip" class:on={settings.readerFit === option.id} onclick={() => settings.set("readerFit", option.id)}>{option.label}</button>
       {/each}
     </div>
+  </div>
+  <div class="group">
+    <span class="label">Read ahead</span>
+    <div class="chips ahead" role="group" aria-label="Read ahead pages">
+      {#each READ_AHEAD_CHOICES as count (count)}
+        <button class="chip" class:on={ahead === count} aria-pressed={ahead === count} onclick={() => settings.set("readerAhead", count)}>{count === 0 ? "None" : String(count)}</button>
+      {/each}
+    </div>
+    <p class="hint">Pages load one at a time, starting with the page you are reading. None fetches only the current page.</p>
   </div>
   <label class="row">
     <span>Page spacing</span>
@@ -901,6 +912,10 @@
     display: flex;
     flex-wrap: wrap;
     gap: var(--s2);
+  }
+
+  @media (pointer: coarse) {
+    .ahead .chip { box-sizing: border-box; min-height: 44px; min-width: 44px; justify-content: center; }
   }
 
   .row {
