@@ -341,8 +341,13 @@ class LibraryState {
           await this.loadSources();
         }).catch((error) => { this.error = message(error); });
       }
-      // Covers and page images live in the same database, behind the user's ceiling.
-      imageCache.attach(this.profile.store.database);
+      // Covers and page images live in the same database, behind the user's ceiling. The ceiling
+      // and the on/off switch come from the saved settings *before* the first prune: attaching with
+      // defaults evicted copies against a limit the reader never chose.
+      imageCache.attach(this.profile.store.database, {
+        limitBytes: settings.imageCacheLimitMb * 1024 * 1024,
+        cacheImages: settings.cacheImages,
+      });
       void imageCache.prune();
       void this.pruneSessions();
       // Arm the tracker hook: a read mark becomes a queued push once a service is connected

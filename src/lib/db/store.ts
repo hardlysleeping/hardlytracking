@@ -784,6 +784,11 @@ export class LibraryStore {
     return { rows: rows.length, bytes };
   }
 
+  /** Forget one stored answer — the "Try again" on a card the source refused to fill. */
+  async removeSearchCache(key: string): Promise<void> {
+    await this.db.remove("searchCache", key);
+  }
+
   async clearSearchCache(): Promise<void> {
     for (const row of await this.db.all<{ key: string }>("searchCache")) await this.db.remove("searchCache", row.key);
   }

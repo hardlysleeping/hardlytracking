@@ -23,7 +23,15 @@
   import SeriesActions from "../components/SeriesActions.svelte";
   import Cover from "../components/Cover.svelte";
   import { settings } from "../state/settings.svelte";
-  import { isFresh, searchCacheKey, type CachedSearch } from "../lib/search/index";
+  import {
+    detailsCacheKey,
+    isFresh,
+    issueCacheKey,
+    searchCacheKey,
+    type CachedDetails,
+    type CachedIssues,
+    type CachedSearch,
+  } from "../lib/search/index";
   import { orderForPicker, pinnedSources, pruneSelection, seedSelection, togglePin } from "../lib/pinned";
   import { go, pathTo } from "../lib/nav";
   import { filterByLevel, levelOfSource } from "../lib/content/levels";
@@ -173,10 +181,14 @@
     // What this device already answered for this query paints immediately — a repeat search is
     // instant, and with no network it still shows the last answer instead of an error.
     const store = library.profile.store;
+    /** Every stored answer for this query, fresh or not: the fallback when the source cannot answer. */
+    const remembered = new Map<string, CachedSearch>();
     await Promise.all(
       pickedSources.map(async (source) => {
         const cached = await store.getSearchCache<CachedSearch>(searchCacheKey(source.id, needle));
-        if (cached === undefined || !isFresh(cached)) return;
+        if (cached === undefined) return;
+        remembered.set(source.id, cached);
+        if (!isFresh(cached)) return;
         if (mine !== token || revision !== privacy.revision || !visibility.sourceAllowed(source.id)) return;
         blocks = blocks.map((block) =>
           block.source.id === source.id ? { ...block, state: "done", items: cached.items, hasNext: false } : block,
@@ -201,11 +213,18 @@
           } satisfies CachedSearch);
         } catch (error) {
           if (mine !== token || revision !== privacy.revision || !visibility.sourceAllowed(source.id)) return;
+          // A source that cannot answer is not a reason to hide the answer this device already has:
+          // the last result set stands, with a line saying it is the last one.
+          const last = remembered.get(source.id);
+          const message = error instanceof Error ? error.message : String(error);
           blocks = blocks.map((block) =>
             block.source.id === source.id
-              ? { ...block, state: "error", error: error instanceof Error ? error.message : String(error) }
+              ? last === undefined
+                ? { ...block, state: "error", error: message }
+                : { ...block, state: "done", items: last.items, hasNext: false, error: message }
               : block,
           );
+          notice = "Showing the last answer from this device; the source did not respond.";
         }
       }),
     );
@@ -221,11 +240,18 @@
     try {
       const result = await providerFor(library.profile.providers, block.source.id).search(block.source.id, query.trim(), next);
       if (revision !== privacy.revision || !visibility.sourceAllowed(block.source.id)) return;
+      const merged = [...block.items, ...result.items];
       blocks = blocks.map((row) =>
         row.source.id === block.source.id
-          ? { ...row, state: "done", items: [...row.items, ...result.items], hasNext: result.hasNext, page: next }
+          ? { ...row, state: "done", items: merged, hasNext: result.hasNext, page: next }
           : row,
       );
+      // The page the reader turned over is part of the answer now: reopening the query must not
+      // drop back to page one and make them ask again.
+      const key = searchCacheKey(block.source.id, query.trim());
+      void library.profile.store
+        .putSearchCache<CachedSearch>(key, { key, sourceId: block.source.id, query: query.trim(), items: merged, at: Date.now() })
+        .catch(() => {});
     } catch (error) {
       if (revision !== privacy.revision || !visibility.sourceAllowed(block.source.id)) return;
       blocks = blocks.map((row) =>
@@ -262,11 +288,31 @@
     detailState = "loading";
     if (library.profile === null) return;
     const wanted = series.id;
+    const store = library.profile.store;
+    // What this device already knows about the title, at any age: opening a card offline still
+    // shows its description instead of a panel waiting on a source that cannot answer.
+    void store
+      .getSearchCache<CachedDetails>(detailsCacheKey(wanted))
+      .then((row) => {
+        if (row === undefined || shown?.id !== wanted || detailed !== null) return;
+        details.set(wanted, row.series);
+        detailed = row.series;
+        detailState = "idle";
+      })
+      .catch(() => {});
     void providerFor(library.profile.providers, wanted)
       .details(wanted)
       .then((full) => {
         if (!visibility.allows(full)) return;
         details.set(wanted, full);
+        void store
+          .putSearchCache<CachedDetails>(detailsCacheKey(wanted), {
+            key: detailsCacheKey(wanted),
+            seriesId: wanted,
+            series: full,
+            at: Date.now(),
+          })
+          .catch(() => {});
         if (shown?.id !== wanted) return;
         detailed = full;
         detailState = "idle";
@@ -388,18 +434,51 @@
     issues = [];
     issueState = "loading";
     const mine = ++issueToken;
+    const store = library.profile?.store ?? null;
+    /** The list was drawn from this device, so a failed refresh must not replace it with an error. */
+    let fromDevice = false;
     void (async () => {
+      // 1. What the device already answered, at any age: a card opened on a train still lists its
+      //    issues, and the source's answer lands on top of it below.
+      if (store !== null) {
+        try {
+          const row = await store.getSearchCache<CachedIssues>(issueCacheKey(id));
+          if (row !== undefined && row.chapters.length > 0 && stillWanted(mine, issueToken)) {
+            const rows = mergeReadMarks(row.chapters, (await store.listPrefs()) ?? []);
+            issueCache.set(id, rows);
+            issues = rows;
+            issueState = "ready";
+            fromDevice = true;
+          }
+        } catch {
+          // A cache read is never something the reader has to be told about.
+        }
+      }
+      // 2. The source, always — the stored list is a head start, not a verdict.
       try {
         const list = await library.chapters(id);
         // A provider that keeps its own read marks says so per chapter; ours live in prefs. Both
         // count, and neither clears the other — see `mergeReadMarks`.
-        const rows = mergeReadMarks(list, (await library.profile?.store.listPrefs()) ?? []);
+        const prefs = (await store?.listPrefs()) ?? [];
+        const rows = mergeReadMarks(list, prefs);
         issueCache.set(id, rows);
+        if (store !== null) {
+          void store
+            .putSearchCache<CachedIssues>(issueCacheKey(id), {
+              key: issueCacheKey(id),
+              seriesId: id,
+              chapters: list,
+              at: Date.now(),
+            })
+            .catch(() => {});
+        }
         if (!stillWanted(mine, issueToken)) return;
         issues = rows;
         issueState = "ready";
       } catch (error) {
         if (!stillWanted(mine, issueToken)) return;
+        // A stale list is a better answer than an error about a list we are already showing.
+        if (fromDevice) return;
         issueError = error instanceof Error ? error.message : String(error);
         issueState = "error";
       }
@@ -448,7 +527,10 @@
               <button
                 class="moredesc"
                 onclick={() => {
-                  if (record !== null) issueCache.delete(record.id);
+                  if (record !== null) {
+                    issueCache.delete(record.id);
+                    void library.profile?.store.removeSearchCache(issueCacheKey(record.id)).catch(() => {});
+                  }
                   issueAttempt += 1;
                 }}>Try again</button
               >

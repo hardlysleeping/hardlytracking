@@ -47,6 +47,18 @@
   let src = $state<string | undefined>(undefined);
   let tile = $state<HTMLElement | null>(null);
 
+  /**
+   * A failed draw is about one URL, not about the title.
+   *
+   * The first attempt may be the plain network URL and the second the cached blob (or the reverse,
+   * once the cache has it): keeping `broken` from the first attempt left a working picture hidden
+   * behind the title for the rest of the session.
+   */
+  $effect(() => {
+    void src;
+    broken = false;
+  });
+
   $effect(() => {
     const url = series.cover;
     if (url === undefined || url === "") {

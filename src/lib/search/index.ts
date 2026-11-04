@@ -12,7 +12,7 @@
  *    same query within the TTL paints from the cache immediately and refreshes in the background,
  *    and with no network at all it still shows what it had.
  */
-import type { Series } from "../../api/source";
+import type { Chapter, Series } from "../../api/source";
 
 /** How long a cached source answer is trusted before the network decides again. */
 export const SEARCH_CACHE_TTL_MS = 10 * 60_000;
@@ -85,5 +85,42 @@ export interface CachedSearch {
 
 /** Is a cached answer still worth painting? */
 export function isFresh(cached: CachedSearch, now = Date.now(), ttl = SEARCH_CACHE_TTL_MS): boolean {
+  return now - cached.at <= ttl;
+}
+
+/**
+ * How long an issue list or a title's details are treated as current.
+ *
+ * Longer than a search answer because both change when a source *publishes*, not when it is asked:
+ * a day-old issue list is the right list, and re-asking costs a request per card opened. Age never
+ * hides an answer — a stored list paints at once and is refreshed behind the paint (see the view);
+ * this is only the sentence that says which one you are looking at.
+ */
+export const ISSUE_CACHE_TTL_MS = 24 * 60 * 60_000;
+
+/** Keys share one store with search answers, so each kind gets its own prefix. */
+export function issueCacheKey(seriesId: string): string {
+  return `issues\u0000${seriesId}`;
+}
+
+export function detailsCacheKey(seriesId: string): string {
+  return `details\u0000${seriesId}`;
+}
+
+export interface CachedIssues {
+  key: string;
+  seriesId: string;
+  chapters: Chapter[];
+  at: number;
+}
+
+export interface CachedDetails {
+  key: string;
+  seriesId: string;
+  series: Series;
+  at: number;
+}
+
+export function issuesAreCurrent(cached: CachedIssues, now = Date.now(), ttl = ISSUE_CACHE_TTL_MS): boolean {
   return now - cached.at <= ttl;
 }

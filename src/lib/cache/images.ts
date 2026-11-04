@@ -68,7 +68,15 @@ export class ImageCache {
   async entries(): Promise<CacheEntry[]> {
     if (this.db === null) return [];
     const rows = await this.db.all<ImageRow>("imageCache");
-    return rows.map((row) => ({ key: row.key, bytes: row.bytes, at: row.at, usedAt: row.usedAt }));
+    return rows.map((row) => ({
+      key: row.key,
+      bytes: row.bytes,
+      at: row.at,
+      usedAt: row.usedAt,
+      // A picture this app drew itself is not a copy of anything remote: an owned book has no
+      // network to fall back on, so evicting its cover would blank it permanently. Never in the plan.
+      pinned: row.key.startsWith(STORED_IMAGE_SCHEME),
+    }));
   }
 
   async usage(): Promise<number> {
@@ -86,11 +94,16 @@ export class ImageCache {
     // off is about not keeping copies downloaded from the network, and an owned book has no network
     // to fall back on — its cover would blank to the title.
     if (url.startsWith(STORED_IMAGE_SCHEME)) return await this.stored(url);
-    if (this.db === null || !this.policy.cacheImages) return url;
+    if (this.db === null) return url;
 
     // Covers and page images go through the app's own `/api/img` proxy, so the interesting URLs are
     // same-origin paths, not absolute ones. A blob: or data: URL is already local — never cached.
     if (!/^(https?:|\/)/i.test(url)) return url;
+
+    // Caching off means "keep no copies of what the network gave us". A cover that needs the login
+    // has no anonymous URL an `<img>` could draw, so it is still fetched — into this session's
+    // object URLs only, never onto the disk — or the tile would read "not available" for good.
+    if (!this.policy.cacheImages && options.headers === undefined) return url;
 
     const cached = this.urls.get(url);
     if (cached !== undefined) {
@@ -123,8 +136,12 @@ export class ImageCache {
         if (!ALLOWED.test(type)) return url;
         const blob = await response.blob();
         if (blob.size === 0 || blob.size > MAX_IMAGE_BYTES) return url;
-        const now = Date.now();
-        await this.db!.put("imageCache", { key: url, blob, bytes: blob.size, at: now, usedAt: now } as unknown as Record<string, unknown>);
+        // With the cache switched off the bytes live for this session only: same object URL, same
+        // trimming, no row on disk.
+        if (this.policy.cacheImages) {
+          const now = Date.now();
+          await this.db!.put("imageCache", { key: url, blob, bytes: blob.size, at: now, usedAt: now } as unknown as Record<string, unknown>);
+        }
         const objectUrl = URL.createObjectURL(blob);
         this.urls.set(url, objectUrl);
         this.trimLive();
