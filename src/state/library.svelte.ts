@@ -15,6 +15,8 @@ import type { RepoRow, ViewStateRow } from "../lib/db/store";
 import { BACKGROUND_GRACE_MS, viewStateKey } from "../lib/history";
 import { nextUnread, seriesOfPosition } from "../lib/library/continue";
 import { settings } from "./settings.svelte";
+import { shouldKeepTitle } from "../lib/offline/policy";
+import { requestKeep } from "../lib/offline/sink";
 import { installTrackerSync } from "../lib/trackers/sync";
 import { planReadState, remoteReadCount } from "../lib/read-state";
 import { providerLabel } from "../api/source";
@@ -619,6 +621,11 @@ class LibraryState {
     if (chapters.length > 0) await this.profile.store.putChapters(series.id, chapters);
     await this.recordMapping(series.id);
     await this.refreshLibrary();
+    // An opt-in offline policy is the *only* thing that downloads without being asked, and adding a
+    // title is where it has something to do. Fire-and-forget: a keep that fails must not fail the add.
+    if (shouldKeepTitle({ keepOnAdd: settings.keepOnAdd, keepCategories: settings.keepCategories }, series, "add")) {
+      requestKeep(series.id);
+    }
   }
 
   async unsave(seriesId: string): Promise<void> {

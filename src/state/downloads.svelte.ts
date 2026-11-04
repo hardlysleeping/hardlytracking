@@ -27,6 +27,8 @@ import {
 import { pageSrc } from "../lib/pages";
 import { workBudget } from "../lib/performance";
 import { settings } from "./settings.svelte";
+import { missingIssues, shouldKeepTitle } from "../lib/offline/policy";
+import { setKeepSink } from "../lib/offline/sink";
 
 export type { DownloadRow, LocalChapter, Progress, QueueItem };
 
@@ -138,6 +140,26 @@ class Downloads implements DownloadHost {
     await store.setPref(TOTALS_PREF, { ...totals, [seriesId]: total });
   }
 
+  /**
+   * Bring every title the reader asked to keep up to date.
+   *
+   * Only the categories they named, only what is missing, and nothing here deletes: this is the
+   * "keep the library offline" button, not a sync of the whole shelf. It returns what it did so the
+   * screen can say so instead of leaving a tap unanswered.
+   */
+  async keepLibraryOffline(): Promise<{ queued: number; titles: number }> {
+    if (library.profile === null) return { queued: 0, titles: 0 };
+    let queued = 0;
+    let titles = 0;
+    for (const row of library.library) {
+      if (!shouldKeepTitle({ keepOnAdd: false, keepCategories: settings.keepCategories }, row, "reconcile")) continue;
+      const result = await this.fetchSeries(row.id, "new");
+      queued += result.queued;
+      titles += result.queued > 0 ? 1 : 0;
+    }
+    return { queued, titles };
+  }
+
   cancel(chapterId: string): void {
     this.worker()?.cancel(chapterId);
   }
@@ -186,3 +208,26 @@ async function fetchPage(page: Page, timeoutMs?: number): Promise<Blob> {
 }
 
 export const downloads = new Downloads();
+
+/**
+ * The offline policies need one thing from the queue: "fetch what is missing for this title".
+ *
+ * Registered here rather than imported by the library, because `downloads` already depends on
+ * `library` and the trail must not run the other way. With nothing registered, asking is a no-op —
+ * which is also what happens before the library is open.
+ */
+setKeepSink({
+  keep: async (seriesId: string) => {
+    if (library.profile === null) return null;
+    const chapters = await library.chapters(seriesId);
+    const missing = missingIssues(chapters, {
+      keepOnAdd: true,
+      keepCategories: [],
+      complete: new Set(downloads.rows.filter(isComplete).map((row) => row.chapterId)),
+      pending: new Set([...downloads.queue.map((row) => row.chapterId), ...(downloads.active === null ? [] : [downloads.active.chapterId])]),
+    });
+    if (missing.length === 0) return { queued: 0, total: chapters.length };
+    downloads.enqueueMany(seriesId, missing);
+    return { queued: missing.length, total: chapters.length };
+  },
+});

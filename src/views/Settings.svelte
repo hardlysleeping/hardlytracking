@@ -9,6 +9,7 @@
   import { settings } from "../state/settings.svelte";
   import { library } from "../state/library.svelte";
   import { downloads } from "../state/downloads.svelte";
+  import { inbox } from "../state/inbox.svelte";
   import ThemePanel from "../components/ThemePanel.svelte";
   import BrowseDisplay from "../components/BrowseDisplay.svelte";
   import { DENSITY_OPTIONS, coverWidth, deviceClass } from "../lib/layout-modes";
@@ -35,6 +36,7 @@
   import { MARGIN_CHOICES, PANE_CHOICES } from "../lib/view-options";
   import { CPU_LEVELS, describeLevel } from "../lib/performance";
 import { CONTENT_LEVELS, type ContentLevel } from "../lib/content/levels";
+import KeepOfflinePanel from "../components/KeepOfflinePanel.svelte";
 
   /** The slider shows the cover the library actually draws, not a value a preset overrides. */
   const cover = $derived(coverWidth(settings.libraryDensity, deviceClass(viewport.width, viewport.height), settings.coverSize));
@@ -119,6 +121,9 @@ import { CONTENT_LEVELS, type ContentLevel } from "../lib/content/levels";
     void refreshCache();
     void refreshSpace();
     imageCache.setPolicy({ limitBytes: settings.imageCacheLimitMb * 1024 * 1024, cacheImages: settings.cacheImages });
+    // The bell's count, and whether there is an account at all. One call, and
+    // only when this screen is opened: nothing here fetches on launch.
+    void inbox.load();
   });
 
   const link = $derived(info === null ? null : pairingLink(info, token));
@@ -307,6 +312,11 @@ import { CONTENT_LEVELS, type ContentLevel } from "../lib/content/levels";
       <span>Show “Continue reading”</span>
       <input type="checkbox" checked={settings.showContinue} onchange={(event) => settings.set("showContinue", event.currentTarget.checked)} />
     </label>
+  </section>
+
+  <section class="group">
+    <h2>Keep offline</h2>
+    <KeepOfflinePanel />
   </section>
 
   <section class="group">
@@ -587,6 +597,34 @@ import { CONTENT_LEVELS, type ContentLevel } from "../lib/content/levels";
     <p class="hint">Manual backup is free and always available. Automatic sync is a paid extra and never required to read.</p>
   </section>
 
+  {#if inbox.signedIn}
+    <!--
+      The bell: one small row, drawn only for an account, because a message is
+      addressed to one. Nothing pops up when one arrives — the dot and the count
+      are the whole of the interruption, and both live here until the page is
+      opened, which marks the list read.
+    -->
+    <section class="group">
+      <h2>Messages</h2>
+      <button class="row link" onclick={() => go("/messages")}>
+        <span class="bellrow">
+          <span class="bell" aria-hidden="true">
+            <svg viewBox="0 0 24 24">
+              <path d="M12 4a4.5 4.5 0 0 0-4.5 4.5v3.4L5.5 15h13l-2-3.1V8.5A4.5 4.5 0 0 0 12 4Z" />
+              <path d="M9.8 18a2.2 2.2 0 0 0 4.4 0" />
+            </svg>
+            {#if inbox.unread > 0}<i class="dot"></i>{/if}
+          </span>
+          Messages
+          <em class="sub">
+            {inbox.unread > 0 ? `${inbox.unread} unread` : "Notes about the app, your account, or a promotion"}
+          </em>
+        </span>
+        <span class="chev">›</span>
+      </button>
+    </section>
+  {/if}
+
   <SyncAccount />
     </div>
   {/if}
@@ -800,4 +838,43 @@ import { CONTENT_LEVELS, type ContentLevel } from "../lib/content/levels";
     font-style: normal;
   }
 
+  /* The bell row: the glyph sits on the row's own line, the dot on its corner,
+     and the count is the `.sub` line every other row already uses. */
+  .bellrow {
+    display: block;
+    position: relative;
+    padding-left: 26px;
+    text-align: left;
+  }
+
+  .bell {
+    position: absolute;
+    left: 0;
+    top: 5px;
+    width: 17px;
+    height: 17px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .bell svg {
+    width: 17px;
+    height: 17px;
+    fill: none;
+    stroke: var(--text-2);
+    stroke-width: 1.5;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .bell .dot {
+    position: absolute;
+    top: -1px;
+    right: -2px;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--accent);
+  }
 </style>

@@ -21,6 +21,7 @@ import {
   type AutoscrollCurve,
   type AutoscrollSpeed,
 } from "../lib/autoscroll";
+import { keepCategoriesOf } from "../lib/offline/policy";
 import { levelOr, type ContentLevel } from "../lib/content/levels";
 
 import { DEFAULT_READ_AHEAD, readAheadOf, type ReadAhead } from "../lib/reader-ahead";
@@ -95,6 +96,8 @@ export interface Prefs {
   readerAhead: ReadAhead;
   autoscrollSpeed: AutoscrollSpeed;
   autoscrollCurve: AutoscrollCurve;
+  keepOnAdd: boolean;
+  keepCategories: string[];
   pageGap: number;
   keepAwake: boolean;
   tapZones: boolean;
@@ -178,6 +181,9 @@ class Settings {
   readerAhead = $state<ReadAhead>(DEFAULT_READ_AHEAD);
   autoscrollSpeed = $state<AutoscrollSpeed>(DEFAULT_AUTOSCROLL_SPEED);
   autoscrollCurve = $state<AutoscrollCurve>(DEFAULT_AUTOSCROLL_CURVE);
+  /** Off by default: nothing is downloaded unless the reader asked. */
+  keepOnAdd = $state(false);
+  keepCategories = $state<string[]>([]);
   /** Space between pages in vertical/webtoon mode, px. */
   pageGap = $state(0);
   keepAwake = $state(true);
@@ -247,6 +253,8 @@ class Settings {
     this.readerAhead = readAheadOf(await read<unknown>("readerAhead", DEFAULT_READ_AHEAD));
     this.autoscrollSpeed = autoscrollSpeedOf(await read<unknown>("autoscrollSpeed", DEFAULT_AUTOSCROLL_SPEED));
     this.autoscrollCurve = autoscrollCurveOf(await read<unknown>("autoscrollCurve", DEFAULT_AUTOSCROLL_CURVE));
+    this.keepOnAdd = (await read<boolean>("keepOnAdd", false)) === true;
+    this.keepCategories = keepCategoriesOf(await read<unknown>("keepCategories", []));
     this.pageGap = await read("pageGap", this.pageGap);
     this.keepAwake = await read("keepAwake", this.keepAwake);
     this.tapZones = await read("tapZones", this.tapZones);
@@ -286,7 +294,9 @@ class Settings {
           ? autoscrollSpeedOf(value)
           : key === "autoscrollCurve"
             ? autoscrollCurveOf(value)
-            : value;
+            : key === "keepCategories"
+              ? keepCategoriesOf(value)
+              : value;
     const plain = $state.snapshot(normalised) as Prefs[K];
     (this as unknown as Record<string, unknown>)[key] = plain;
     void this.store?.setPref(KEY + key, plain).catch(() => {});
