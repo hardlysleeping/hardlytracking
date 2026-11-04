@@ -107,10 +107,18 @@ extension APKs run on the machine with nothing else to install. Builds come from
 | macOS 11+ | `..._macos-arm64.dmg` (Apple silicon) · `..._macos-x86_64.dmg` (Intel) | `..._macos-arm64-portable.zip` · `..._macos-x86_64-portable.zip` — a zipped `.app` |
 | Linux x64 | `.deb` (Debian/Ubuntu, glibc 2.35+) · `.AppImage` | `..._linux-x86_64-portable.tar.gz` — the binary and its `runtime/` folder |
 
-Releases are assembled by CI from a tag: `desktop.yml` publishes the installers and the IPA is attached
-by hand, because that workflow is manual-only and uploads an artifact rather than a release asset. The
+Phones get the same web app in a native shell: `HardlyTracking_<version>_unsigned.ipa` for iPhone
+(unsigned — Sideloadly or AltStore re-signs it with your own Apple ID) and
+`HardlyTracking_<version>_android.apk` for Android. The APK is **signed and installs as it is**; it is
+one universal build, minSdk 23. On a phone there is no embedded extension host yet, so it pairs with a
+PC running HardlyTracking (Settings → Phone access) the way the iPhone build does, and the built-in
+Internet Archive source works on its own.
+
+Releases are assembled by CI from a tag: `desktop.yml` publishes the installers, `android-apk.yml`
+builds and attaches the signed APK, and the IPA is attached by hand, because that workflow is
+manual-only and uploads an artifact rather than a release asset. The
 order of operations, the three files the version lives in, and the queue failure that skipped a release
-once are in `docs/releasing.md`.
+once are in `docs/releasing.md`; the Android shell and its signing key are in `docs/android.md`.
 
 Every file carries the extension host — the server jar and a JVM for that platform — so nothing else
 has to be installed. The portable builds are the same tree the installers are built from, which means

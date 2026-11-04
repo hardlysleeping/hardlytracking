@@ -1,0 +1,113 @@
+name: Android APK
+
+# The phone build: the same Svelte app in a Capacitor WebView, packaged as a signed, installable APK.
+#
+# A tag pushes it onto the release next to the desktop installers and the IPA; a manual run is an
+# artifact only, for trying a build without publishing one. It runs on a plain Linux runner because
+# Android needs no Mac — an unsigned APK is useless, so the signing key is a repository secret and the
+# verify step refuses to upload anything that `apksigner` cannot prove.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    # It may be the first job to reach the release page, which needs write access.
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # Capacitor 7's Android plugins are compiled against a Java 21 toolchain, so the JDK is not a
+      # detail: 17 fails at `compileReleaseJavaWithJavac` with "Cannot find a Java installation".
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Install
+        run: npm ci
+
+      - name: Build the web app
+        run: npm run build
+
+      - name: Copy the build into the Android shell
+        run: npx cap sync android
+
+      # The key never enters the tree: it is written to the runner's temp dir, and gradle reads it
+      # through ANDROID_KEYSTORE_PATH. Base64 because a binary blob cannot live in a secret otherwise.
+      - name: The signing key
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          set -euo pipefail
+          if [ -z "${ANDROID_KEYSTORE_BASE64:-}" ]; then
+            echo "::error::ANDROID_KEYSTORE_BASE64 is not set — an unsigned APK cannot install."
+            exit 1
+          fi
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/hardlytracking-release.jks"
+          ls -l "$RUNNER_TEMP/hardlytracking-release.jks"
+
+      - name: Build the release APK
+        env:
+          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/hardlytracking-release.jks
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEYSTORE_ALIAS: ${{ secrets.ANDROID_KEYSTORE_ALIAS }}
+          ANDROID_KEYSTORE_KEY_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          cd android
+          ./gradlew assembleRelease --no-daemon
+
+      - name: Name it, and prove what is inside it
+        run: |
+          set -euo pipefail
+          version=$(node -p "require('./package.json').version")
+          apk=$(find android/app/build/outputs/apk/release -name '*.apk' -print -quit)
+          [ -n "$apk" ] || { echo "::error::no APK was produced"; exit 1; }
+          cp "$apk" "HardlyTracking_${version}_android.apk"
+
+          BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          # The package and version the APK itself claims, not what the build files were meant to say.
+          "$BT/aapt2" dump badging "HardlyTracking_${version}_android.apk" > /tmp/badging.txt
+          head -3 /tmp/badging.txt
+          grep -q "versionName='$version'" /tmp/badging.txt || { echo "::error::versionName is not $version"; exit 1; }
+          grep -q "package: name='ing.hardlysleep.hardlytracking'" /tmp/badging.txt || { echo "::error::wrong package"; exit 1; }
+
+          # An unsigned APK installs nowhere, and a debug-signed one cannot be updated by this key.
+          "$BT/apksigner" verify --print-certs "HardlyTracking_${version}_android.apk" | head -4
+
+          # The web bundle shipped inside it, rather than an empty shell that would open a blank page.
+          unzip -l "HardlyTracking_${version}_android.apk" | grep -q 'assets/public/index.html' \
+            || { echo "::error::the APK carries no web assets"; exit 1; }
+          ls -lh "HardlyTracking_${version}_android.apk"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: HardlyTracking-android-apk
+          if-no-files-found: error
+          path: HardlyTracking_*_android.apk
+
+      - name: Attach to the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          apk="HardlyTracking_${version}_android.apk"
+          # The desktop jobs and this one race for the release page; create it if nobody has yet.
+          if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false \
+              --title "HardlyTracking ${version}" --generate-notes || true
+          fi
+          gh release upload "$TAG" "$apk" --clobber --repo "$GITHUB_REPOSITORY"

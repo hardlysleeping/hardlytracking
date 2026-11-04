@@ -36,6 +36,7 @@
     "node": ">=22"
   },
   "dependencies": {
+    "@capacitor/android": "^7.6.10",
     "@capacitor/app": "^7.1.2",
     "@capacitor/core": "^7.6.10",
     "@capacitor/filesystem": "^7.1.9",

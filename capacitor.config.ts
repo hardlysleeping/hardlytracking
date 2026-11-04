@@ -29,6 +29,11 @@ const config: CapacitorConfig = {
   server: {
     iosScheme: "capacitor",
   },
+  android: {
+    // The WebView's own origin is https://localhost, so a paired PC on a plain-http LAN/tailnet
+    // address would be refused as mixed content before the request left the app.
+    allowMixedContent: true,
+  },
   plugins: {
     // The on-device extension runtime serves `/dalvik` on `http://127.0.0.1:8747`, which is a
     // different origin from `capacitor://localhost`. CapacitorHttp sends those calls through native
