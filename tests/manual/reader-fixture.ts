@@ -1,5 +1,5 @@
 // Isolated, generated images only. No profile open, real library, or downloads.
-import { mount } from 'svelte';
+import { mount, unmount } from 'svelte';
 import '../../src/app.css';
 import ReaderFixture from './ReaderFixture.svelte';
 import { library } from '../../src/state/library.svelte';
@@ -23,8 +23,10 @@ library.pages = async(id)=>{await new Promise(r=>setTimeout(r,Number(args.get('p
 library.chapters = async()=>{await new Promise(r=>setTimeout(r,Number(args.get('metadataDelay')??0)));return [];};
 library.ownsProgress = ()=>true;
 library.remember = async()=>{};
-library.beginSession = async()=>`fixture:session`;
-library.endSession = async()=>{};
+// Session lifecycle is recorded, not written: the cutoff the Reader passes is the thing under test.
+const sessions: {kind:string; id:string|null; page:number; completed?:boolean; at:number|undefined; now:number}[] = [];
+library.beginSession = async()=>{const id='fixture:session';sessions.push({kind:'begin',id,page:-1,at:undefined,now:Date.now()});return id;};
+library.endSession = async(id,page,completed,at)=>{sessions.push({kind:'end',id,page,completed,at,now:Date.now()});};
 downloads.local = async()=>args.has('partial') ? {
  chapterId:'fixture:chapter',total:12,
  urls:Array.from({length:12},(_,i)=>i===0?`data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}"><rect width="100%" height="100%" fill="green"/></svg>`)}`:null),
@@ -35,9 +37,11 @@ settings.pageGap = 12;
 if (args.has('ahead')) settings.readerAhead = Number(args.get('ahead')) as any;
 settings.tapZones = true;
 settings.set = ((key: string,value: unknown)=>{(settings as any)[key]=value;}) as any;
-(window as any).readerFixture = {events,settings};
+(window as any).readerFixture = {events,sessions,settings};
 const fixture = mount(ReaderFixture,{target:document.body});
 (window as any).readerFixture.changeChapter = fixture.changeChapter;
+// A teardown the test can trigger: the reader's own cleanup must close the session at the cutoff.
+(window as any).readerFixture.teardown = ()=>{ void unmount(fixture); };
 new MutationObserver(()=>{
  for(const img of document.querySelectorAll('img')) if(!img.dataset.observed){
   img.dataset.observed='true';img.addEventListener('load',()=>{

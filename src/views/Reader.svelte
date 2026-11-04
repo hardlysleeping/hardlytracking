@@ -24,7 +24,7 @@
   import { go, pathTo } from "../lib/nav";
   import { pageSrc } from "../lib/pages";
   import { RUNTIME_DEADLINE_MS, withDeadline } from "../lib/deadline";
-  import { INACTIVITY_TIMEOUT_MS, shouldEndForBackground } from "../lib/history";
+  import { INACTIVITY_TIMEOUT_MS, sessionEndAt, shouldEndForBackground, type SessionClose } from "../lib/history";
   import Sheet from "../components/Sheet.svelte";
   import { plugins } from "../state/plugins.svelte";
   import { READ_AHEAD_CHOICES, readAheadOf } from "../lib/reader-ahead";
@@ -168,6 +168,11 @@
    */
   let sessionId: string | null = null;
   let lastPage = 0;
+  /**
+   * When the page last settled: the last evidence that reading was happening rather than a session
+   * simply being open. A close that follows an idle stretch ends here, not at the timer's late fire.
+   */
+  let plateauAt: number | null = null;
   let idleTimer: ReturnType<typeof setTimeout> | null = null;
   let hiddenAt: number | null = null;
 
@@ -210,16 +215,20 @@
    * Close the open session at the page it reached, with whether the chapter was finished.
    *
    * Closing twice is a no-op: the store refuses to rewrite a closed session, so a chapter change
-   * followed by the reader closing cannot double-count the time.
+   * followed by the reader closing cannot double-count the time. The end timestamp is not "now" but
+   * the last moment reading was real — see `sessionEndAt` — so an absence or an idle stretch is not
+   * billed as pages.
    */
-  function closeSession(): void {
+  function closeSession(reason: SessionClose = "reader"): void {
     if (idleTimer !== null) clearTimeout(idleTimer);
     idleTimer = null;
     const id = sessionId;
     sessionId = null;
     if (id === null) return;
+    const at = sessionEndAt(reason, Date.now(), { plateauAt, hiddenAt });
+    plateauAt = null;
     const finished = pages.length > 0 && lastPage >= pages.length - 1;
-    void library.endSession(id, lastPage, finished);
+    void library.endSession(id, lastPage, finished, at);
   }
 
   /** Restart the inactivity clock: any page turn is evidence of reading. */
@@ -228,7 +237,8 @@
     if (sessionId === null) return;
     idleTimer = setTimeout(() => {
       idleTimer = null;
-      closeSession();
+      // The wait itself is what the timeout measured: the session ends at the last page turn.
+      closeSession("idle");
     }, INACTIVITY_TIMEOUT_MS);
   }
 
@@ -241,15 +251,16 @@
         return;
       }
       const hidden = hiddenAt === null ? 0 : Date.now() - hiddenAt;
-      hiddenAt = null;
-      // A quick glance at another app is the same sitting; a long absence is not.
-      if (shouldEndForBackground(hidden)) closeSession();
+      // A quick glance at another app is the same sitting; a long absence is not, and it ends the
+      // session at the moment the page left the screen rather than at the moment it came back.
+      if (shouldEndForBackground(hidden)) closeSession("away");
       else armIdle();
+      hiddenAt = null;
     };
     document.addEventListener("visibilitychange", onVisibility);
     return () => {
       document.removeEventListener("visibilitychange", onVisibility);
-      closeSession();
+      closeSession("away");
     };
   });
 
@@ -421,6 +432,8 @@
         return;
       }
       sessionId = opened;
+      // The clock that an idle close is measured from starts when the chapter is actually on screen.
+      plateauAt = Date.now();
       armIdle();
       // `tick()` from Svelte flushes the DOM in a microtask; the old local version was a
       // `requestAnimationFrame`, so in a tab that was not painting "Fetching pages…" never cleared
@@ -473,6 +486,7 @@
 
   function saveSoon(): void {
     lastPage = index;
+    plateauAt = Date.now();
     armIdle();
     if (saveTimer !== null) clearTimeout(saveTimer);
     saveTimer = setTimeout(() => {

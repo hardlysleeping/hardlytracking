@@ -783,10 +783,16 @@ class LibraryState {
     }
   }
 
-  async endSession(id: string | null, endPage: number, completed = false): Promise<void> {
+  /**
+   * Close a session at `at` — the last moment the reader was honestly reading.
+   *
+   * The view owns that timestamp because only it sees the page leave the screen and the last page
+   * turn; the store only moves the row. Omitted, the store ends the session now.
+   */
+  async endSession(id: string | null, endPage: number, completed = false, at?: number): Promise<void> {
     if (id === null || this.profile === null) return;
     try {
-      await this.profile.store.endSession(id, { endPage, completed });
+      await this.profile.store.endSession(id, { endPage, completed, at });
     } catch {
       /* ignore */
     }

@@ -76,6 +76,21 @@ The grace period is deliberately much shorter than the inactivity timeout: a not
 same sitting, a chapter left open overnight is not eight hours of reading. A session that was never
 closed stays open in the database and is reported as `open`, not silently repaired.
 
+**A session ends at the last moment reading was real, not at the wall clock of the close.**
+`durationSeconds` is `endedAt - startedAt` and the store takes `endedAt` from the caller's `at`, so
+the Reader — the only thing that sees the page leave the screen — sends it (`sessionEndAt`):
+
+```
+reader   the page is on screen and the reader leaves: now, exactly as before
+away     the page went hidden, or the reader is torn down while hidden: the moment it went hidden
+idle     the inactivity timeout fired: the last page turn (plateau), never the timer's late fire
+```
+
+A backgrounded app, a sleeping tablet or a throttled webview therefore adds no absence to the stored
+span: an hour away after 60 s of reading stores 60 s, and growing the absence does not grow it. The
+pages, completion, progress, read marks and history rows are untouched by the cutoff — it only
+decides where the clock stops.
+
 ## Remembering the screen, not just the data
 
 `viewState` is per collection: `sort`, `view`, `coverSize`, `onlyUnread`, `onlySource`, `query`,

@@ -37,6 +37,31 @@ export function shouldEndForBackground(hiddenMs: number): boolean {
   return hiddenMs >= BACKGROUND_GRACE_MS;
 }
 
+/** Why a session is closing. Each reason has its own honest cutoff — see `sessionEndAt`. */
+export type SessionClose = "reader" | "idle" | "away";
+
+/**
+ * The timestamp a closing session records as its end.
+ *
+ * A stored duration is `endedAt - startedAt`, so this is the only lever a view has over whether time
+ * nobody spent reading is billed to it. `reader` keeps the wall clock exactly as it was: the page is
+ * on screen and the reader chose to leave. `idle` stops at the last page turn, because the
+ * inactivity window that followed it is the very thing the timeout was measuring — a throttled
+ * webview can fire that timer minutes late, and a tab left open must not bill the wait. `away`
+ * stops at the moment the page left the screen, so a backgrounded app or a sleeping tablet cannot
+ * add its absence however long the return takes.
+ */
+export function sessionEndAt(
+  reason: SessionClose,
+  now: number,
+  marks: { plateauAt?: number | null; hiddenAt?: number | null } = {},
+): number {
+  const mark = reason === "away" ? marks.hiddenAt : reason === "idle" ? marks.plateauAt : null;
+  if (mark === null || mark === undefined || !Number.isFinite(mark)) return now;
+  // A sampled clock (or a mark from before an import) never pushes an end past now or before a start.
+  return Math.min(mark, now);
+}
+
 /** Pages actually read in a session: a backward re-read counts its pages too, never negative. */
 export function pagesRead(startPage: number, endPage: number): number {
   return Math.abs(endPage - startPage) + 1;
