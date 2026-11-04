@@ -510,6 +510,16 @@ export function createArchiveProvider(options: ArchiveProviderOptions = {}): Sou
     return await response.blob();
   };
 
+  /**
+   * Identifiers archive.org itself has denied to us in this session.
+   *
+   * The index keeps answering for an item that has been taken down or restricted: it appears in a
+   * search page, often near the top, and only the metadata request discovers it is gone. Remembering
+   * the refusal means the next list does not offer it again — a dead row cannot stay the first
+   * result of a feed for as long as the app is open.
+   */
+  const gone = new Set<string>();
+
   const search = async (query: string, page: number, sort: string): Promise<Paged<Series>> => {
     const params = buildQuery({ query, sort });
     params.set("page", String(Math.max(1, Math.floor(page))));
@@ -517,7 +527,11 @@ export function createArchiveProvider(options: ArchiveProviderOptions = {}): Sou
     if (!response.ok) throw new Error(`archive.org search failed (HTTP ${response.status})`);
     const body = (await response.json()) as { response?: { docs?: SearchDoc[]; numFound?: number; start?: number } };
     const docs = body.response?.docs ?? [];
-    const items = docs.map(rowToSeries).filter((row): row is Series => row !== null);
+    const items = docs
+      .map(rowToSeries)
+      .filter((row): row is Series => row !== null)
+      // An item archive.org has already refused is not a result, however recently it was indexed.
+      .filter((row) => !gone.has(nativeId(row.id, "archive")));
     const start = body.response?.start ?? 0;
     const found = body.response?.numFound ?? 0;
     return paged(items, start + docs.length < found);
@@ -525,7 +539,17 @@ export function createArchiveProvider(options: ArchiveProviderOptions = {}): Sou
 
   const item = async (identifier: string): Promise<ItemMetadata> => {
     const response = await fetchImpl(`${base}/metadata/${encodeURIComponent(identifier)}`);
-    if (!response.ok) throw new Error(`archive.org item ${identifier} failed (HTTP ${response.status})`);
+    if (!response.ok) {
+      // 404 and 403 are the two ways a taken-down item answers. Both are final for this session,
+      // and both are named as what they are rather than as a transport failure.
+      if (response.status === 404 || response.status === 403) {
+        gone.add(identifier);
+        throw new Error(
+          `This item is no longer available from archive.org (HTTP ${response.status}). It has been hidden from the Archive's lists.`,
+        );
+      }
+      throw new Error(`archive.org item ${identifier} failed (HTTP ${response.status})`);
+    }
     return metadataToItem(identifier, await response.json());
   };
 

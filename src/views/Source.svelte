@@ -17,6 +17,7 @@
   import SeriesDetail from "./Series.svelte";
   let expandedId = $state<string | null>(null);
   import SeriesActions from "../components/SeriesActions.svelte";
+  import BrowseDisplay from "../components/BrowseDisplay.svelte";
   import SourceSettings from "../components/SourceSettings.svelte";
   import SourceFilterSheet from "../components/SourceFilterSheet.svelte";
   import { settings } from "../state/settings.svelte";
@@ -286,10 +287,21 @@
   {/if}
   {#if busy && items.length === 0}<p class="empty">Loading…</p>{/if}
 
+  <!-- The same display controls as the Library and Search, on the same stored choice: a source's
+       own grid was drawing with no column setting at all, which auto-filled to two covers on a
+       phone and offered nothing to change. -->
+  {#if visibleItems.length > 0 || items.length > 0}
+    <BrowseDisplay />
+  {/if}
+
   <!-- A tap exposes this item's issues in the result grid, not a menu hiding the contents. -->
   <SeriesGrid
     series={visibleItems}
     cover={132}
+    view={settings.libraryView}
+    columns={settings.browseColumns}
+    density={settings.browseDensity}
+    horizontal={settings.browseHorizontal}
     empty={mode === "search" ? "This source found nothing." : "This source returned nothing."}
     expandAfter={visibleExpanded}
     expanded={issuePanel}
