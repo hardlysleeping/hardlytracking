@@ -9,6 +9,7 @@
    * `Categories…` stays at the end of the row, because that is where the owner reaches for the
    * eye, the pin and renaming.
    */
+  import { privacy } from "../state/privacy.svelte";
   import Sheet from "./Sheet.svelte";
   import type { Category } from "../lib/categories";
   import { MAX_TABS, isTabPinned, tabRow } from "../lib/library/collections";
@@ -25,13 +26,14 @@
   }
   let { categories, visible, selected, onselect, onedit }: Props = $props();
 
-  const row = $derived(tabRow(categories, visible));
+  const safeVisible = $derived(visible.filter((c) => !privacy.locked || !c.hidden));
+  const row = $derived(tabRow(categories.filter((c) => !privacy.locked || !c.hidden), safeVisible));
 
   /** The sheet lists collections in the user's own order — the rail's pin does not reorder it. */
-  const listed = $derived([...visible].sort((a, b) => a.order - b.order));
+  const listed = $derived([...safeVisible].sort((a, b) => a.order - b.order));
 
   /** A collection picked from `+N` still has to read as current, even if it is not in the row. */
-  const current = $derived(selected === null ? null : visible.find((category) => category.id === selected) ?? null);
+  const current = $derived(selected === null ? null : safeVisible.find((category) => category.id === selected) ?? null);
 
   let sheetOpen = $state(false);
 </script>

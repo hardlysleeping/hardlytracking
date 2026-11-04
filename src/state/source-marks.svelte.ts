@@ -21,12 +21,16 @@ import {
 import { type SourceMark } from "../lib/marks";
 import type { LibraryStore } from "../lib/db/store";
 
+import { privacy } from "./privacy.svelte";
+
 const HIDDEN_VIEW_KEY = "sources.hiddenView";
 const PIN_VIEW_KEY = "sources.pinView";
 
 class SourceMarksState {
   marks = $state<SourceMark[]>([]);
-  hiddenView = $state<HiddenView>("hidden");
+  #hiddenView = $state<HiddenView>("hidden");
+  get hiddenView(): HiddenView { return privacy.locked ? "hidden" : this.#hiddenView; }
+  set hiddenView(value: HiddenView) { if (!privacy.locked) this.#hiddenView = value; }
   pinView = $state<PinView>("all");
   loaded = $state(false);
 
@@ -38,7 +42,7 @@ class SourceMarksState {
     this.marks = await store.listSourceMarks();
     const hidden = await store.getPref<string>(HIDDEN_VIEW_KEY);
     const pin = await store.getPref<string>(PIN_VIEW_KEY);
-    if (isHiddenView(hidden)) this.hiddenView = hidden;
+    if (isHiddenView(hidden)) this.#hiddenView = hidden;
     if (isPinView(pin)) this.pinView = pin;
     this.loaded = true;
   }
@@ -77,6 +81,7 @@ class SourceMarksState {
   }
 
   async cycleHiddenView(): Promise<void> {
+    if (privacy.locked) return;
     this.hiddenView = nextHiddenView(this.hiddenView);
     await this.#store?.setPref(HIDDEN_VIEW_KEY, this.hiddenView);
   }
@@ -104,10 +109,11 @@ class SourceMarksState {
   }
 
   async #write(sourceId: string, change: Partial<Pick<SourceMark, "hidden" | "pinned">>): Promise<void> {
-    if (this.#store === null) return;
+    if (this.#store === null || privacy.locked) return;
     const current = this.markOf(sourceId);
     await this.#store.putSourceMark({ ...current, ...change });
-    this.marks = await this.#store.listSourceMarks();
+    const marks = await this.#store.listSourceMarks();
+    if (!privacy.locked) this.marks = marks;
   }
 }
 

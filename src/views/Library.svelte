@@ -7,6 +7,10 @@
    * densities, filters and a selection mode. Nothing here writes to a source — the only writes are
    * read marks, category membership and removing a row from the shelf.
    */
+  import LibraryBand from "../components/LibraryBand.svelte";
+  import { privacy } from "../state/privacy.svelte";
+  import { visibility } from "../state/visibility.svelte";
+  $effect(() => { const store = library.profile?.store; if (store) void visibility.load(store); });
   import { tick } from "svelte";
   import { library } from "../state/library.svelte";
   import { libraryMemory } from "../state/libraryview.svelte";
@@ -52,7 +56,7 @@
    * `libraryMemory` so Library → Series → back comes back here, and the durable copy in settings
    * so a relaunch does too.
    */
-  const selected = $derived(libraryMemory.collection);
+  const selected = $derived(privacy.locked && categories.items.some((c) => c.id === libraryMemory.collection && c.hidden) ? null : libraryMemory.collection);
   const query = $derived(libraryMemory.query);
   const searching = $derived(libraryMemory.searching);
   /** `This collection` narrows the tab you are on; `All library` looks past it (§29). */
@@ -243,7 +247,7 @@
   });
 
   const visible = $derived(
-    library.library.map((series) => ({ ...series, categoryIds: series.categoryIds ?? [] })),
+    library.library.map((series) => ({ ...series, categoryIds: series.categoryIds ?? [] })).filter((row) => visibility.allows(row)),
   );
 
   /** The chips obey the eye, exactly as the rail does. */
@@ -380,7 +384,7 @@
   const continueRows = $derived(
     eligible(
       visibleRows(
-        continuing,
+        continuing.filter((row) => visibility.allows({ id: row.seriesId })),
         contextOf({
           categories: categories.items,
           sources: sourceMarks.marks,
@@ -431,10 +435,10 @@
 
   /** The numbers the `⋯` sheet reports, from what the screen already counted. */
   const stats = $derived<LibraryStats>({
-    series: library.library.length,
-    unread: [...counts.unread.values()].reduce((sum, count) => sum + count, 0),
-    downloaded: downloads.rows.length,
-    categories: categories.items.map((category) => ({
+    series: visible.length,
+    unread: visible.reduce((sum, row) => sum + (counts.unread.get(row.id) ?? 0), 0),
+    downloaded: downloads.rows.filter((row) => visibility.allows({ id: row.seriesId })).length,
+    categories: categories.items.filter((c) => !privacy.locked || !c.hidden).map((category) => ({
       name: category.name,
       count: visible.filter((row) => (row.categoryIds ?? []).includes(category.id)).length,
     })),
@@ -575,6 +579,14 @@
     handle.addEventListener("pointercancel", done);
   }
 
+  $effect(() => {
+    if (!privacy.locked) return;
+    selection = null;
+    pendingCollections = {};
+    picked = null;
+    categoriesOpen = false;
+  });
+
   function toggleSelection(): void {
     selection = selection === null ? new Set() : null;
   }
@@ -654,6 +666,7 @@
   async function applyCollections(): Promise<void> {
     const store = library.profile?.store;
     if (store === undefined || selection === null) return;
+    if (privacy.locked) return;
     const changes = Object.entries(pendingCollections);
     if (changes.length === 0) {
       categoriesOpen = false;
@@ -691,6 +704,7 @@
     busy = read ? "Marking read…" : "Marking unread…";
     try {
       for (const seriesId of selection) {
+        if (privacy.locked && !visible.some((row) => row.id === seriesId)) continue;
         const chapters = await store.listChapters(seriesId);
         for (const chapter of chapters) {
           await store.setRead(chapter.id, read);
@@ -711,7 +725,10 @@
     if (selection === null) return;
     busy = "Removing…";
     try {
-      for (const seriesId of selection) await library.unsave(seriesId);
+      for (const seriesId of selection) {
+        if (privacy.locked && !visible.some((row) => row.id === seriesId)) continue;
+        await library.unsave(seriesId);
+      }
       await library.refreshLibrary();
       await recount();
       selection = null;
@@ -724,7 +741,7 @@
 <section class="view">
   <LibraryHeader
     count={rows.length}
-    total={library.library.length}
+    total={visible.length}
     {searching}
     text={query}
     scope={searchScope}
@@ -744,6 +761,8 @@
   {#if offline}
     <p class="offline" role="status">{OFFLINE_NOTE}</p>
   {/if}
+
+  <LibraryBand />
 
   <div class="body">
     {#if layout.categoryNav.mode === "sidebar"}
@@ -971,7 +990,7 @@
   {#if selection !== null}
     <p class="muted">{selection.size} selected — tick the collections they belong in.</p>
     <div class="picklist">
-      {#each categories.items as category (category.id)}
+      {#each categories.items.filter((c) => !privacy.locked || !c.hidden) as category (category.id)}
         {@const state = sheetState(category.id)}
         <button
           class="chip"

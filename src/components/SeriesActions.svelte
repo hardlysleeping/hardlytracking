@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { privacy } from "../state/privacy.svelte";
   /**
    * What tapping a title in a source should offer: read it, keep it, download it, or file it.
    *
@@ -58,7 +59,7 @@
   /** The plugin entries this sheet shows: series-page actions, from plugins that are running. */
   const pluginActions = $derived(plugins.actionsFor("series"));
 
-  const model = $derived(pickerModel(categories.items, { categoryIds }, library.library));
+  const model = $derived(pickerModel(categories.items.filter((c) => !privacy.locked || !c.hidden), { categoryIds }, library.library));
   const names = $derived(
     model.rows.filter((entry) => entry.checked).map((entry) => entry.name),
   );
@@ -184,6 +185,7 @@
   }
 
   async function toggle(rowId: string): Promise<void> {
+    if (privacy.locked) return;
     if (series === null) return;
     if (!(await ensureSaved())) return;
     const next = toggleAssignment(categoryIds, rowId);
@@ -192,11 +194,12 @@
     // The counts and every "In library" row read `library.library`; without this the shelf you just
     // filed into still says 0 and the one you left still counts this title.
     await library.refreshLibrary();
-    const label = assignmentLabel(next.map((entry) => categories.items.find((c) => c.id === entry)?.name ?? "").filter(Boolean));
+    const label = assignmentLabel(next.map((entry) => categories.items.find((c) => c.id === entry && (!privacy.locked || !c.hidden))?.name ?? "").filter(Boolean));
     say(next.length === 0 ? "Moved to Uncategorized" : `Filed under ${label}`);
   }
 
   async function create(): Promise<void> {
+    if (privacy.locked) return;
     const name = newName.trim();
     if (name === "" || creating) return;
     creating = true;
@@ -212,6 +215,7 @@
       creating = false;
     }
   }
+  $effect(() => { if (privacy.locked) { view = "actions"; notice = ""; } });
 </script>
 
 <Sheet open={series !== null} title={view === "actions" ? (series?.title ?? "") : "Categories"} onclose={onclose}>
@@ -250,7 +254,7 @@
           <span class="words"><strong>Download</strong><em>{downloadLabel(queued, busy === "download", loaded, downloading)}</em></span>
         </button>
 
-        <button class="act" onclick={() => (view = "categories")}>
+        <button class="act" disabled={privacy.locked} onclick={() => (view = "categories")}>
           <span class="glyph bookmark" aria-hidden="true">
             <svg viewBox="0 0 24 24"><path d="M7 4h10v16l-5-3.5L7 20z" /></svg>
           </span>

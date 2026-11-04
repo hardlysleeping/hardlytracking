@@ -6,6 +6,7 @@
    * (global search), and the extension manager (get more sources). Extensions are a first-class
    * door rather than an advanced setting, because extension compatibility is what this app is.
    */
+  import { privacy } from "../state/privacy.svelte";
   import { library } from "../state/library.svelte";
   import { go, pathTo } from "../lib/nav";
   import { settings } from "../state/settings.svelte";
@@ -31,7 +32,7 @@
    * hidden one is not searchable either, which is the point of hiding it.
    */
   const allowedSources = $derived(
-    filterByLevel(library.sources, (source) => levelOfSource(source.nsfw), settings.contentLevel, settings.adultDeclared),
+    filterByLevel(library.sources, (source) => levelOfSource(source.nsfw), settings.contentLevel, settings.adultDeclared).filter((source) => !privacy.locked || (sourceMarks.loaded && !sourceMarks.markOf(source.id).hidden)),
   );
   const levelNotice = $derived(hiddenNotice(library.sources.length - allowedSources.length, settings.contentLevel));
 
@@ -81,6 +82,7 @@
       </div>
     </div>
   {:else}
+    {#if !privacy.locked}
     <div class="band">
       <button
         class="seat"
@@ -103,6 +105,7 @@
         <span class="word">{sourceMarks.pinLabel}</span>
       </button>
     </div>
+    {/if}
 
     <input class="field search" type="search" placeholder="Find a source" bind:value={query} aria-label="Find a source" />
 
@@ -118,6 +121,7 @@
                 {#if source.nsfw}<span class="nsfw">18+</span>{/if}
               </button>
               <button
+                disabled={privacy.locked}
                 class="eyebtn"
                 class:hidden={sourceMarks.markOf(source.id).hidden}
                 aria-label={`${sourceMarks.markOf(source.id).hidden ? "Show" : "Hide"} ${source.name}`}

@@ -7,6 +7,7 @@
    * a stroke-only pin glyph in the pinned tone, and the fixed words
    * Pinned / Pin / Unpin. The behaviour behind it is `lib/categories`.
    */
+  import { privacy } from "../state/privacy.svelte";
   import { categories } from "../state/categories.svelte";
   import { EYE_PATHS, MARKER_PATH, PIN_WORDS, visibleCategories, viewSummary } from "../lib/categories";
 
@@ -30,6 +31,7 @@
 </script>
 
 <aside class="rail">
+  {#if !privacy.locked}
   <div class="band">
     <button
       class="seat eye"
@@ -52,6 +54,7 @@
       <span class="word">{categories.pinLabel}</span>
     </button>
   </div>
+  {/if}
 
   <ul class="rows">
     {#each shown as category (category.id)}
@@ -61,6 +64,7 @@
         </button>
 
         <button
+          disabled={privacy.locked}
           class="eye small"
           class:hidden={category.hidden}
           aria-label={category.hidden ? `Show ${category.name}` : `Hide ${category.name}`}
@@ -73,6 +77,7 @@
         </button>
 
         <button
+          disabled={privacy.locked}
           class="pin-seat small"
           class:pinned={category.pinned}
           aria-label={`${category.pinned ? PIN_WORDS.remove : PIN_WORDS.add} ${category.name}`}
@@ -85,13 +90,13 @@
     {/each}
   </ul>
 
-  {#if creating}
+  {#if creating && !privacy.locked}
     <form class="new" onsubmit={(event) => { event.preventDefault(); void submit(); }}>
       <input bind:value={name} placeholder="Category name" aria-label="New category name" />
       <button class="ghost" type="submit">Add</button>
     </form>
   {:else}
-    <button class="ghost add" onclick={() => (creating = true)}>New category</button>
+    <button disabled={privacy.locked} class="ghost add" onclick={() => (creating = true)}>New category</button>
   {/if}
 
   <p class="status">{viewSummary(categories.hiddenView, categories.pinView, categories.hiddenCount, categories.pinnedCount)}</p>

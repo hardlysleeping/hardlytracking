@@ -21,12 +21,16 @@ import {
 } from "../lib/categories";
 import type { LibraryStore } from "../lib/db/store";
 
+import { privacy } from "./privacy.svelte";
+
 const HIDDEN_VIEW_KEY = "categories.hiddenView";
 const PIN_VIEW_KEY = "categories.pinView";
 
 class CategoriesState {
   items = $state<Category[]>([]);
-  hiddenView = $state<HiddenView>("hidden");
+  #hiddenView = $state<HiddenView>("hidden");
+  get hiddenView(): HiddenView { return privacy.locked ? "hidden" : this.#hiddenView; }
+  set hiddenView(value: HiddenView) { if (!privacy.locked) this.#hiddenView = value; }
   pinView = $state<PinView>("all");
   loaded = $state(false);
 
@@ -38,7 +42,7 @@ class CategoriesState {
     this.items = await store.listCategories();
     const hidden = await store.getPref<string>(HIDDEN_VIEW_KEY);
     const pin = await store.getPref<string>(PIN_VIEW_KEY);
-    if (isHiddenView(hidden)) this.hiddenView = hidden;
+    if (isHiddenView(hidden)) this.#hiddenView = hidden;
     if (isPinView(pin)) this.pinView = pin;
     this.loaded = true;
   }
@@ -61,7 +65,7 @@ class CategoriesState {
 
   async create(name: string): Promise<Category | null> {
     const trimmed = name.trim();
-    if (trimmed === "" || this.#store === null) return null;
+    if (privacy.locked || trimmed === "" || this.#store === null) return null;
     const category: Category = {
       id: `cat:${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`,
       name: trimmed,
@@ -70,37 +74,41 @@ class CategoriesState {
       pinned: false,
     };
     await this.#store.putCategory(category);
-    this.items = await this.#store.listCategories();
+    await this.#refreshAfterEdit();
     return category;
   }
 
   async remove(categoryId: string): Promise<void> {
+    if (privacy.locked) return;
     if (this.#store === null) return;
     await this.#store.removeCategory(categoryId);
-    this.items = await this.#store.listCategories();
+    await this.#refreshAfterEdit();
   }
 
   async rename(categoryId: string, name: string): Promise<void> {
+    if (privacy.locked) return;
     const trimmed = name.trim();
     const current = this.items.find((c) => c.id === categoryId);
     if (trimmed === "" || current === undefined || this.#store === null) return;
     await this.#store.putCategory({ ...current, name: trimmed });
-    this.items = await this.#store.listCategories();
+    await this.#refreshAfterEdit();
   }
 
   async setHidden(categoryId: string, hidden: boolean): Promise<void> {
+    if (privacy.locked) return;
     const current = this.items.find((c) => c.id === categoryId);
     if (current === undefined || this.#store === null) return;
     await this.#store.putCategory({ ...current, hidden });
-    this.items = await this.#store.listCategories();
+    await this.#refreshAfterEdit();
   }
 
   /** The pin is its own mark: pinning never touches the eye, and vice versa. */
   async togglePin(categoryId: string): Promise<void> {
+    if (privacy.locked) return;
     const current = this.items.find((c) => c.id === categoryId);
     if (current === undefined || this.#store === null) return;
     await this.#store.putCategory({ ...current, pinned: !current.pinned });
-    this.items = await this.#store.listCategories();
+    await this.#refreshAfterEdit();
   }
 
   /**
@@ -110,6 +118,7 @@ class CategoriesState {
    * Keeping them apart is what lets a user pin a shelf without rearranging their tab row.
    */
   async setTabPinned(categoryId: string, tabPinned: boolean): Promise<void> {
+    if (privacy.locked) return;
     const current = this.items.find((c) => c.id === categoryId);
     if (current === undefined || this.#store === null) return;
     if ((current.tabPinned === true) === tabPinned) return;
@@ -117,7 +126,7 @@ class CategoriesState {
     if (tabPinned) next.tabPinned = true;
     else delete next.tabPinned;
     await this.#store.putCategory(next);
-    this.items = await this.#store.listCategories();
+    await this.#refreshAfterEdit();
   }
 
   async toggleTabPin(categoryId: string): Promise<void> {
@@ -127,6 +136,7 @@ class CategoriesState {
   }
 
   async cycleHiddenView(): Promise<void> {
+    if (privacy.locked) return;
     this.hiddenView = nextHiddenView(this.hiddenView);
     await this.#store?.setPref(HIDDEN_VIEW_KEY, this.hiddenView);
   }
@@ -137,12 +147,19 @@ class CategoriesState {
   }
 
   async assign(seriesId: string, categoryIds: string[]): Promise<void> {
+    if (privacy.locked) return;
     await this.#store?.setSeriesCategories(seriesId, categoryIds);
+  }
+
+  async #refreshAfterEdit(): Promise<void> {
+    const items = await this.#store!.listCategories();
+    // An edit started before Lock must not reopen a shelf when its write completes.
+    if (!privacy.locked) this.items = items;
   }
 
   categoriesOfSeries(series: { categoryIds?: string[] }): Category[] {
     const ids = series.categoryIds ?? [];
-    return this.items.filter((c) => ids.includes(c.id));
+    return this.items.filter((c) => ids.includes(c.id) && (!privacy.locked || !c.hidden));
   }
 }
 

@@ -18,7 +18,7 @@ test("the shelf's memory is module state, not component state", () => {
 });
 
 test("the collection is durable, and written through one setter", () => {
-  assert.match(view, /const selected = \$derived\(libraryMemory\.collection\)/);
+  assert.match(view, /const selected = \$derived\(privacy\.locked.*libraryMemory\.collection/);
   assert.match(view, /function setCollection\(id: string \| null\): void \{\s*libraryMemory\.collection = id;\s*settings\.set\("libraryCollection", id\);/);
   // Every way of choosing a collection goes through it, or the durable copy goes stale.
   assert.doesNotMatch(view, /\(selected = /);

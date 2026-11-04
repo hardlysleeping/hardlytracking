@@ -6,6 +6,8 @@
    * continue, download), everything rarer is behind one overflow. Chapters get their own toolbar
    * because a 300-chapter list with no filter is a scroll, not a list.
    */
+  import { privacy } from "../state/privacy.svelte";
+  import { visibility } from "../state/visibility.svelte";
   import { library } from "../state/library.svelte";
   import { categories } from "../state/categories.svelte";
   import { downloads } from "../state/downloads.svelte";
@@ -134,6 +136,7 @@
   }
 
   async function toggleCategory(categoryId: string): Promise<void> {
+    if (privacy.locked) return;
     if (series === null) return;
     const current = series.categoryIds ?? [];
     const nextIds = current.includes(categoryId) ? current.filter((id) => id !== categoryId) : [...current, categoryId];
@@ -186,8 +189,10 @@
     if (days < 30) return `${days} days ago`;
     return new Date(chapter.uploadedAt).toLocaleDateString();
   }
+  $effect(() => { const store = library.profile?.store; if (store) void visibility.load(store); });
 </script>
 
+{#if visibility.allows({ id: seriesId })}
 <section class="view" class:embedded>
   <header class="bar">
     {#if !embedded}
@@ -228,8 +233,8 @@
         </div>
         {#if saved && categories.items.length > 0}
           <div class="cats">
-            {#each categories.items as category (category.id)}
-              <button class="chip" class:on={(series.categoryIds ?? []).includes(category.id)} onclick={() => void toggleCategory(category.id)}>
+            {#each categories.items.filter((c) => !privacy.locked || !c.hidden) as category (category.id)}
+              <button disabled={privacy.locked} class="chip" class:on={(series.categoryIds ?? []).includes(category.id)} onclick={() => void toggleCategory(category.id)}>
                 {category.name}
               </button>
             {/each}
@@ -364,6 +369,10 @@
     </div>
   {/if}
 </Sheet>
+
+{:else}
+  <p class="view" role="status">Hidden by local screen privacy. Unlock from Library to view.</p>
+{/if}
 
 <style>
   .view {

@@ -5,6 +5,7 @@
    * It is a shortcut back into a book, not an audit log — so each row is a cover, the chapter, how
    * long ago, and a Continue button. The groups are Today / Yesterday / This week / Earlier.
    */
+  import { privacy } from "../state/privacy.svelte";
   import { library } from "../state/library.svelte";
   import Cover from "../components/Cover.svelte";
   import { go, pathTo } from "../lib/nav";
@@ -36,7 +37,6 @@
   const mode = $derived(paneMode(settings.historyPane, viewport.width));
   const isSqueezed = $derived(squeezed(settings.historyPane, viewport.width));
   const ratio = $derived(paneRatio(settings.splitRatio, viewport.width));
-  const pickedRow = $derived(rows.find((row) => row.chapterId === picked) ?? rows[0] ?? null);
 
   /**
    * The source as a reader names it, never as the runtime spells it.
@@ -143,7 +143,7 @@
    * has been labelled.
    */
   const shown = $derived(
-    rows.filter((row) =>
+    rows.filter((row) => (!privacy.locked || (categories.loaded && sourceMarks.loaded)) &&
       !isHidden(
         { id: row.seriesId, categoryIds: row.categoryIds },
         contextOf({
@@ -154,6 +154,9 @@
       ),
     ),
   );
+
+  // A previously picked private row must not survive in the split detail pane.
+  const pickedRow = $derived(shown.find((row) => row.chapterId === picked) ?? shown[0] ?? null);
 
   const groups = $derived.by(() => {
     const startOfToday = new Date();

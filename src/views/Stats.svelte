@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { privacy } from "../state/privacy.svelte";
   import { library } from "../state/library.svelte";
   import { categories } from "../state/categories.svelte";
   import { sourceMarks } from "../state/source-marks.svelte";
@@ -25,7 +26,7 @@
     }
     return () => { cancelled = true; };
   });
-  const stats = $derived(data === null ? null : aggregateReadingStats(data, { categories: categories.items, sources: sourceMarks.marks }));
+  const stats = $derived(data === null || (privacy.locked && (!categories.loaded || !sourceMarks.loaded)) ? null : aggregateReadingStats(data, { categories: categories.items, sources: sourceMarks.marks }));
   function time(seconds: number): string {
     if (seconds === 0) return "0m";
     if (seconds < 60) return "<1m";

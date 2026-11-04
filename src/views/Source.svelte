@@ -7,6 +7,8 @@
    * where it sits.
    */
   import { untrack } from "svelte";
+  import { privacy } from "../state/privacy.svelte";
+  import { visibility } from "../state/visibility.svelte";
   import { library } from "../state/library.svelte";
   import { providerFor } from "../api/registry";
   import { needsLogin } from "../api/mihon-bridge";
@@ -32,6 +34,8 @@
   let actions = $state<Series | null>(null);
   let query = $state("");
   let items = $state<Series[]>([]);
+  const visibleItems = $derived(items.filter((row) => visibility.allows(row)));
+  const visibleExpanded = $derived(expandedId !== null && visibleItems.some((row) => row.id === expandedId) ? expandedId : null);
   let hasNext = $state(false);
   let page = $state(1);
   let busy = $state(false);
@@ -111,6 +115,8 @@
   });
 
   async function run(next = 1): Promise<void> {
+    if (!visibility.sourceAllowed(sourceId)) return;
+    const revision = privacy.revision;
     if (library.profile === null) return;
     if (mode === "search" && query.trim() === "") return;
     busy = true;
@@ -126,6 +132,7 @@
             : // The source's own form travels with the search, and only with the search: a Mihon
               // extension applies filters in `getSearchManga` and ignores them for popular/latest.
               await provider.search(sourceId, query.trim(), next, Object.keys(filterSelection).length > 0 ? filterSelection : undefined);
+      if (revision !== privacy.revision || !visibility.sourceAllowed(sourceId)) return;
       items = next === 1 ? result.items : [...items, ...result.items];
       hasNext = result.hasNext;
       page = next;
@@ -202,8 +209,10 @@
     mode = next;
     void run(1);
   }
+  $effect(() => { const store = library.profile?.store; if (store) void visibility.load(store); });
 </script>
 
+{#if visibility.sourceAllowed(sourceId)}
 <section class="view" class:embedded>
   <div class="pin">
   <header class="bar">
@@ -279,23 +288,23 @@
 
   <!-- A tap exposes this item's issues in the result grid, not a menu hiding the contents. -->
   <SeriesGrid
-    series={items}
+    series={visibleItems}
     cover={132}
     empty={mode === "search" ? "This source found nothing." : "This source returned nothing."}
-    expandAfter={expandedId}
+    expandAfter={visibleExpanded}
     expanded={issuePanel}
     onlongpress={(series) => (actions = series)}
     onpick={(series) => { expandedId = expandedId === series.id ? null : series.id; }}
   />
   {#snippet issuePanel()}
-    {#if expandedId !== null}
+    {#if visibleExpanded !== null}
       <div class="issue-panel">
         <button class="btn ghost" aria-label="Close item details" onclick={() => (expandedId = null)}>Close details</button>
-        <SeriesDetail seriesId={expandedId} embedded />
+        <SeriesDetail seriesId={visibleExpanded} embedded />
       </div>
     {/if}
   {/snippet}
-  <SeriesActions series={actions} onclose={() => (actions = null)} ondetails={(series) => go(pathTo("series", series.id))} />
+  <SeriesActions series={actions && visibility.allows(actions) ? actions : null} onclose={() => (actions = null)} ondetails={(series) => go(pathTo("series", series.id))} />
 
   {#if hasNext}
     <button class="btn more" disabled={busy} onclick={() => void run(page + 1)}>{busy ? "Loading…" : "Load more"}</button>
@@ -315,6 +324,10 @@
     onclose={() => (filterSheetOpen = false)}
     onapply={applyFilters}
   />
+{/if}
+
+{:else}
+  <p class="view" role="status">Hidden by local screen privacy. Unlock from Library to view.</p>
 {/if}
 
 <style>

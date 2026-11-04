@@ -11,6 +11,9 @@
    * candidates is five clicks, not five round trips through the series page and Back. The series page
    * is still one button away inside the pane — it is where chapters live, not where you decide.
    */
+  import { untrack } from "svelte";
+  import { privacy } from "../state/privacy.svelte";
+  import { visibility } from "../state/visibility.svelte";
   import { library } from "../state/library.svelte";
   import { providerFor } from "../api/registry";
   import type { Chapter, Series, Source } from "../api/source";
@@ -71,8 +74,27 @@
   // A source hidden by the content level cannot be searched either: hiding a list but not its
   // results would be the same content, one tap further in.
   const sources = $derived(
-    filterByLevel(library.sources, (source) => levelOfSource(source.nsfw), settings.contentLevel, settings.adultDeclared),
+    filterByLevel(library.sources, (source) => levelOfSource(source.nsfw), settings.contentLevel, settings.adultDeclared).filter((source) => visibility.sourceAllowed(source.id)),
   );
+
+  $effect(() => {
+    const store = library.profile?.store;
+    if (store) void visibility.load(store);
+  });
+
+  const visibleBlocks = $derived(blocks.filter((block) => visibility.sourceAllowed(block.source.id)).map((block) => ({ ...block, items: block.items.filter((row) => visibility.allows(row)) })));
+
+  $effect(() => {
+    if (!privacy.locked) return;
+    if (shown && !visibility.allows(shown)) { shown = null; detailed = null; }
+    if (actions && !visibility.allows(actions)) actions = null;
+    const allowedIds = new Set(visibleBlocks.flatMap((block) => block.items.map((row) => row.id)));
+    const allowedSources = new Set(sources.map((source) => source.id));
+    untrack(() => {
+      selected = new Set([...selected].filter((id) => allowedIds.has(id)));
+      chosen = new Set([...chosen].filter((id) => allowedSources.has(id)));
+    });
+  });
 
   /** Pinned sources, in the order the user pinned them, limited to what is actually installed. */
   const pinned = $derived(pinnedSources(sources, settings.pinnedSources));
@@ -83,7 +105,7 @@
   /** What this device already has. A search result is a proposal; the library is the decision. */
   const saved = $derived(new Set(library.library.map((row) => row.id)));
 
-  const rows = $derived(blocks.flatMap((block) => block.items));
+  const rows = $derived(visibleBlocks.flatMap((block) => block.items));
   let bookSizes = $state<Map<string, number>>(new Map());
   $effect(() => {
     const store = library.profile?.store;
@@ -134,6 +156,7 @@
   async function run(): Promise<void> {
     const needle = query.trim();
     if (needle === "" || library.profile === null) return;
+    const revision = privacy.revision;
     const mine = ++token;
     running = true;
     notice = "";
@@ -147,7 +170,7 @@
       pickedSources.map(async (source) => {
         const cached = await store.getSearchCache<CachedSearch>(searchCacheKey(source.id, needle));
         if (cached === undefined || !isFresh(cached)) return;
-        if (mine !== token) return;
+        if (mine !== token || revision !== privacy.revision || !visibility.sourceAllowed(source.id)) return;
         blocks = blocks.map((block) =>
           block.source.id === source.id ? { ...block, state: "done", items: cached.items, hasNext: false } : block,
         );
@@ -158,7 +181,7 @@
       pickedSources.map(async (source) => {
         try {
           const result = await providerFor(library.profile!.providers, source.id).search(source.id, needle, 1);
-          if (mine !== token) return;
+          if (mine !== token || revision !== privacy.revision || !visibility.sourceAllowed(source.id)) return;
           blocks = blocks.map((block) =>
             block.source.id === source.id ? { ...block, state: "done", items: result.items, hasNext: result.hasNext } : block,
           );
@@ -170,7 +193,7 @@
             at: Date.now(),
           } satisfies CachedSearch);
         } catch (error) {
-          if (mine !== token) return;
+          if (mine !== token || revision !== privacy.revision || !visibility.sourceAllowed(source.id)) return;
           blocks = blocks.map((block) =>
             block.source.id === source.id
               ? { ...block, state: "error", error: error instanceof Error ? error.message : String(error) }
@@ -184,23 +207,27 @@
 
   async function more(block: Block): Promise<void> {
     if (library.profile === null) return;
+    if (!visibility.sourceAllowed(block.source.id)) return;
+    const revision = privacy.revision;
     const next = block.page + 1;
     blocks = blocks.map((row) => (row.source.id === block.source.id ? { ...row, state: "loading" } : row));
     try {
       const result = await providerFor(library.profile.providers, block.source.id).search(block.source.id, query.trim(), next);
+      if (revision !== privacy.revision || !visibility.sourceAllowed(block.source.id)) return;
       blocks = blocks.map((row) =>
         row.source.id === block.source.id
           ? { ...row, state: "done", items: [...row.items, ...result.items], hasNext: result.hasNext, page: next }
           : row,
       );
     } catch (error) {
+      if (revision !== privacy.revision || !visibility.sourceAllowed(block.source.id)) return;
       blocks = blocks.map((row) =>
         row.source.id === block.source.id ? { ...row, state: "error", error: error instanceof Error ? error.message : String(error) } : row,
       );
     }
   }
 
-  const found = $derived(blocks.reduce((sum, block) => sum + block.items.length, 0));
+  const found = $derived(visibleBlocks.reduce((sum, block) => sum + block.items.length, 0));
 
   /**
    * Open a result's pane, and ask the source for the whole record.
@@ -211,6 +238,7 @@
    * empty panel.
    */
   function show(series: Series): void {
+    if (!visibility.allows(series)) return;
     if (selectMode) {
       toggleSelect(series.id);
       return;
@@ -229,6 +257,7 @@
     void providerFor(library.profile.providers, wanted)
       .details(wanted)
       .then((full) => {
+        if (!visibility.allows(full)) return;
         details.set(wanted, full);
         if (shown?.id !== wanted) return;
         detailed = full;
@@ -290,7 +319,7 @@
   }
 
   /** The pane's record: the fuller one when it has arrived, the search row until then. */
-  const record = $derived(detailed ?? shown);
+  const record = $derived(shown && visibility.allows(shown) ? detailed ?? shown : null);
 
   // Opening a result must not scroll; the grid expands at the tapped row.
   const inLibrary = $derived(shown !== null && saved.has(shown.id));
@@ -584,7 +613,7 @@
         </p>
       {/if}
 
-      {#each blocks as block (block.source.id)}
+      {#each visibleBlocks as block (block.source.id)}
         <section class="block">
           <header>
             <h2>{block.source.name}{#if languageLabel(block.source.lang)}<span class="lang">{languageLabel(block.source.lang)}</span>{/if}</h2>
@@ -622,7 +651,7 @@
   </div>
 
   <SeriesActions
-    series={actions}
+    series={actions && visibility.allows(actions) ? actions : null}
     onclose={() => (actions = null)}
     ondetails={(series) => {
       actions = null;

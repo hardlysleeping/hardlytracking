@@ -16,6 +16,8 @@
    * action that makes sense. Nothing here is ever uploaded — a download lives in this device's
    * database and nowhere else.
    */
+  import { privacy } from "../state/privacy.svelte";
+  import { visibility } from "../state/visibility.svelte";
   import { downloads } from "../state/downloads.svelte";
   import { library } from "../state/library.svelte";
   import {
@@ -50,7 +52,10 @@
 
   const titles = $derived(new Map([...known, ...library.library.map((row) => [row.id, row.title] as [string, string])]));
 
-  const lines = $derived(manageRows(downloads.rows, downloads.queue, downloads.active));
+  $effect(() => { const store = library.profile?.store; if (store) void visibility.load(store); });
+  const visibleDownloads = $derived(downloads.rows.filter((row) => visibility.allows({ id: row.seriesId })));
+  const visibleQueue = $derived(downloads.queue.filter((row) => visibility.allows({ id: row.seriesId })));
+  const lines = $derived(manageRows(visibleDownloads, visibleQueue, downloads.active && visibility.allows({ id: downloads.active.seriesId ?? "" }) ? downloads.active : null));
 
   /** How many chapters a series has, so "3 of 12 issues" is a fact rather than a row count. */
   let totals = $state<Record<string, number>>({});
@@ -96,9 +101,9 @@
   const shown = $derived(tab === "queue" ? queueLines : finishedLines);
   const groups = $derived(groupBySeries(shown, titles));
 
-  const kept = $derived(downloads.rows.filter(isComplete).length);
-  const waiting = $derived(downloads.queue.filter((item) => item.state !== "failed").length);
-  const failed = $derived(downloads.queue.filter((item) => item.state === "failed").length);
+  const kept = $derived(visibleDownloads.filter(isComplete).length);
+  const waiting = $derived(visibleQueue.filter((item) => item.state !== "failed").length);
+  const failed = $derived(visibleQueue.filter((item) => item.state === "failed").length);
 
   /** The row or series waiting for a second tap. Destructive actions are never one tap. */
   let confirming = $state<string | null>(null);
@@ -174,11 +179,14 @@
 
   /** Queue a series' chapters: only the unseen ones, or everything that is not already here. */
   async function fetchSeries(seriesId: string, mode: "new" | "all"): Promise<void> {
+    if (!visibility.allows({ id: seriesId })) return;
+    const revision = privacy.revision;
     if (fetching !== null) return;
     fetching = seriesId;
     notice = "";
     try {
       const { queued, total } = await downloads.fetchSeries(seriesId, mode);
+      if (revision !== privacy.revision) return;
       counted.set(seriesId, total);
       totals = { ...totals, [seriesId]: total };
       const name = titles.get(seriesId) ?? "That series";
@@ -187,7 +195,7 @@
           ? `${name}: nothing left to fetch (${total} issue${total === 1 ? "" : "s"})`
           : `${name}: queued ${queued} of ${total} issue${total === 1 ? "" : "s"}`;
     } catch (error) {
-      notice = `${titles.get(seriesId) ?? "That series"}: ${error instanceof Error ? error.message : String(error)}`;
+      if (revision === privacy.revision) notice = `${titles.get(seriesId) ?? "That series"}: ${error instanceof Error ? error.message : String(error)}`;
     } finally {
       fetching = null;
     }
@@ -202,7 +210,8 @@
    * cannot be resolved says why instead of vanishing.
    */
   async function addPasted(): Promise<void> {
-    if (pasting || paste.trim() === "") return;
+    if (privacy.locked || pasting || paste.trim() === "") return;
+    const revision = privacy.revision;
     pasting = true;
     reports = [];
     const found: Array<{ ok: boolean; text: string }> = [];
@@ -221,6 +230,7 @@
             target.kind === "archive"
               ? await library.details(target.seriesId)
               : bestMatch(await library.searchSource(target.sourceId, target.query), target.query);
+          if (revision !== privacy.revision) return;
           if (series === null) {
             found.push({
               ok: false,
@@ -232,6 +242,7 @@
             reports = [...found];
             continue;
           }
+          if (revision !== privacy.revision || !visibility.allows(series)) return;
           await library.rememberSeriesMeta(series);
           const { queued, total } = await downloads.fetchSeries(series.id, "new");
           counted.set(series.id, total);
@@ -249,28 +260,29 @@
             text: `${hostOf(target.url) ?? target.url}: ${error instanceof Error ? error.message : String(error)}`,
           });
         }
-        reports = [...found];
+        if (revision === privacy.revision) reports = [...found];
       }
       if (found.some((entry) => entry.ok)) paste = "";
     } finally {
       pasting = false;
     }
   }
+  $effect(() => { if (privacy.locked) { reports = []; notice = ""; paste = ""; } });
 </script>
 
 <section class="view">
   <header class="top">
     <h1>Downloads</h1>
     <span class="count">
-      {size(downloads.bytes)} · {kept} chapter{kept === 1 ? "" : "s"}{waiting > 0 ? ` · ${waiting} queued` : ""}{failed > 0 ? ` · ${failed} failed` : ""}
+      {size(visibleDownloads.reduce((sum, row) => sum + row.bytes, 0))} · {kept} chapter{kept === 1 ? "" : "s"}{waiting > 0 ? ` · ${waiting} queued` : ""}{failed > 0 ? ` · ${failed} failed` : ""}
     </span>
   </header>
 
-  {#if downloads.error}<p class="banner">{downloads.error}</p>{/if}
+  {#if downloads.error && !privacy.locked}<p class="banner">{downloads.error}</p>{/if}
 
   <!-- Downloading now: pinned above both lists, because the running chapter is the one thing that
        changes while you watch. -->
-  {#if downloads.active !== null}
+  {#if downloads.active !== null && visibility.allows({ id: downloads.active.seriesId ?? "" })}
     <section class="now">
       <header>
         <h2>Downloading now</h2>
