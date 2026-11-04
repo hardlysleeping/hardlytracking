@@ -144,6 +144,40 @@
     series = { ...series, categoryIds: nextIds };
   }
 
+  /**
+   * A hold opens the chapter menu; the tap that follows the hold must not also start reading.
+   *
+   * `contextmenu` covers a desktop right-click and the iOS long-press gesture, but a plain hold on a
+   * row that never fires it — a WebKit scroll view, a pointer with no context menu — used to do
+   * nothing at all. A timer armed from either a pointer or a touch gives the same result everywhere,
+   * and any movement past a few pixels cancels it so a scroll never opens a menu.
+   */
+  let heldId = "";
+  let holdTimer: ReturnType<typeof setTimeout> | null = null;
+  let holdOrigin: { x: number; y: number } | null = null;
+
+  function beginHold(event: PointerEvent, chapter: Chapter): void {
+    if (event.pointerType === "mouse" && event.button !== 0) return;
+    holdOrigin = { x: event.clientX, y: event.clientY };
+    if (holdTimer !== null) clearTimeout(holdTimer);
+    holdTimer = setTimeout(() => {
+      holdTimer = null;
+      heldId = chapter.id;
+      chapterMenu = chapter;
+    }, 450);
+  }
+
+  function moveHold(event: PointerEvent): void {
+    if (holdOrigin === null || holdTimer === null) return;
+    if (Math.abs(event.clientX - holdOrigin.x) > 8 || Math.abs(event.clientY - holdOrigin.y) > 8) endHold();
+  }
+
+  function endHold(): void {
+    if (holdTimer !== null) clearTimeout(holdTimer);
+    holdTimer = null;
+    holdOrigin = null;
+  }
+
   async function setRead(chapter: Chapter, read: boolean): Promise<void> {
     const store = library.profile?.store;
     if (store === undefined) return;
@@ -161,6 +195,36 @@
     if (read && series !== null && settings.continueAfterFinish === "next-unread") {
       await library.advance(series.id, chapter.id);
     }
+  }
+
+  /**
+   * The rows a hold can act on, in the order drawn.
+   *
+   * "Above" and "below" mean where they sit on this screen, not which issue number is larger: a
+   * list sorted newest-first puts the older issues *below*. A range that ignored the sort would mark
+   * exactly the opposite of what the reader pointed at.
+   */
+  function rangeOf(chapter: Chapter, side: "above" | "below"): Chapter[] {
+    const index = shown.findIndex((row) => row.id === chapter.id);
+    if (index < 0) return [chapter];
+    return side === "above" ? shown.slice(0, index + 1) : shown.slice(index);
+  }
+
+  /** Mark every row in a range read, skipping the ones already done. */
+  async function markMany(rows: readonly Chapter[]): Promise<void> {
+    busy = true;
+    try {
+      for (const row of rows.filter((candidate) => !candidate.read)) await setRead(row, true);
+    } finally {
+      busy = false;
+      chapterMenu = null;
+    }
+  }
+
+  /** Downloaded or not, for the one button that toggles it in a menu. */
+  function toggleDownload(chapter: Chapter): void {
+    if (downloads.isDownloaded(chapter.id)) void downloads.remove(chapter.id);
+    else downloads.enqueue(seriesId, chapter);
   }
 
   async function markAll(): Promise<void> {
@@ -283,15 +347,46 @@
                 class:read={chapter.read}
                 role="button"
                 tabindex="0"
-                onclick={() => go(pathTo("read", seriesId, chapter.id))}
+                onclick={() => {
+                  // The tap that ends a hold belongs to the menu, not to the reader.
+                  if (heldId === chapter.id) {
+                    heldId = "";
+                    return;
+                  }
+                  go(pathTo("read", seriesId, chapter.id));
+                }}
                 onkeydown={(event) => {
                   if (event.key === "Enter" || event.key === " ") {
                     event.preventDefault();
                     go(pathTo("read", seriesId, chapter.id));
                   }
+                  // Keyboard parity with the hold: a menu without a pointer.
+                  if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
+                    event.preventDefault();
+                    chapterMenu = chapter;
+                  }
                 }}
+                onpointerdown={(event) => beginHold(event, chapter)}
+                onpointermove={moveHold}
+                onpointerup={endHold}
+                onpointercancel={endHold}
+                onpointerleave={endHold}
+                ontouchstart={(event) => {
+                  const touch = event.touches[0];
+                  if (touch === undefined) return;
+                  beginHold({ clientX: touch.clientX, clientY: touch.clientY, pointerType: "touch", button: 0 } as PointerEvent, chapter);
+                }}
+                ontouchmove={(event) => {
+                  const touch = event.touches[0];
+                  if (touch === undefined) return;
+                  moveHold({ clientX: touch.clientX, clientY: touch.clientY } as PointerEvent);
+                }}
+                ontouchend={endHold}
+                ontouchcancel={endHold}
                 oncontextmenu={(event) => {
                   event.preventDefault();
+                  endHold();
+                  heldId = chapter.id;
                   chapterMenu = chapter;
                 }}
               >
@@ -305,6 +400,17 @@
                 </span>
                 <span class="mark" aria-hidden="true">{chapter.read ? "✓" : ""}</span>
                 <span class="rowacts">
+                  <button
+                    class="mini"
+                    aria-label={`More actions for ${chapterTitle(chapter)}`}
+                    title="More actions"
+                    onclick={(event) => {
+                      event.stopPropagation();
+                      chapterMenu = chapter;
+                    }}
+                  >
+                    ⋯
+                  </button>
                   <button
                     class="mini"
                     aria-label={`Download ${chapterTitle(chapter)}`}
@@ -354,6 +460,10 @@
 <Sheet open={chapterMenu !== null} title={chapterMenu === null ? "Chapter" : chapterTitle(chapterMenu)} onclose={() => (chapterMenu = null)}>
   {#if chapterMenu}
     {@const chapter = chapterMenu}
+    {@const above = rangeOf(chapter, "above")}
+    {@const below = rangeOf(chapter, "below")}
+    {@const aboveUnread = above.filter((row) => !row.read).length}
+    {@const belowUnread = below.filter((row) => !row.read).length}
     <div class="menu">
       <button class="menu-item" onclick={() => go(pathTo("read", seriesId, chapter.id))}>Read</button>
       {#if chapter.read}
@@ -361,11 +471,21 @@
       {:else}
         <button class="menu-item" onclick={() => void setRead(chapter, true)}>Mark read</button>
       {/if}
-      {#if downloads.isDownloaded(chapter.id)}
-        <button class="menu-item" onclick={() => void downloads.remove(chapter.id)}>Delete download</button>
-      {:else}
-        <button class="menu-item" onclick={() => downloads.enqueue(seriesId, chapter)}>Download</button>
+      <!-- Ranges follow the order on screen: above is what is drawn above this row, which is the
+           newer issues when the list is newest-first. -->
+      {#if aboveUnread > 1}
+        <button class="menu-item" disabled={busy} onclick={() => void markMany(above)}>
+          Mark this and the {aboveUnread - (chapter.read ? 0 : 1)} above read
+        </button>
       {/if}
+      {#if belowUnread > 1}
+        <button class="menu-item" disabled={busy} onclick={() => void markMany(below)}>
+          Mark this and the {belowUnread - (chapter.read ? 0 : 1)} below read
+        </button>
+      {/if}
+      <button class="menu-item" disabled={busy} onclick={() => toggleDownload(chapter)}>
+        {downloads.isDownloaded(chapter.id) ? "Delete download" : "Download"}
+      </button>
     </div>
   {/if}
 </Sheet>
