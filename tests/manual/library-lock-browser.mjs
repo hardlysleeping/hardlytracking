@@ -2,7 +2,7 @@
 // PLAYWRIGHT_MODULE=/path/to/playwright/index.mjs node tests/manual/library-lock-browser.mjs
 import assert from 'node:assert/strict';
 import { mkdir, writeFile } from 'node:fs/promises';
-const {chromium} = await import(process.env.PLAYWRIGHT_MODULE ?? '/var/home/bazzite/.hermes/cache/scratch/ht-reader-browser/node_modules/playwright/index.mjs');
+const {chromium} = await import(process.env.PLAYWRIGHT_MODULE ?? 'playwright');
 const browser = await chromium.launch({headless:true});
 const out = new URL('../../data/library-lock-qa/',import.meta.url);
 await mkdir(out,{recursive:true});

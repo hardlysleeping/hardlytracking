@@ -36,9 +36,7 @@ npx svelte-check --threshold error
 npm run build
 ```
 
-The browser runner defaults to the owner's available Playwright module at
-`/var/home/bazzite/.hermes/cache/scratch/ht-reader-browser/node_modules/playwright/index.mjs`;
-override `PLAYWRIGHT_MODULE` elsewhere. Fixture entry is
+The browser runner imports `playwright` by default; set `PLAYWRIGHT_MODULE` to an external installation's `index.mjs` if browser tooling is kept outside the project. Fixture entry is
 `tests/manual/library-lock-fixture.html`; setup is `library-lock-fixture.ts` and
 `LibraryLockFixture.svelte` beside it. No `library.open()`, real profile, passcode,
 real library, source network mutation, or persistent fixture database is used.
@@ -71,4 +69,9 @@ WebKit, actual notch behavior, or native safe-area integration.
   paid Sync belongs to More, More's shared sync account controls. These depend on
   parent-owned App/navigation work and were not repaired here. Baseline output is
   `data/library-lock-qa/baseline-test.log`.
-- No push, release, or card closure.
+## Parent integrated verification
+
+- Parent reran the memory-only browser runner, including the same ReaderGate component App uses: locked direct-entry refused, unlock mounts, live lock unmounts all reader images/actions, public reading retained while locked.
+- Pro Max 440×956 @3x / 956×440, simulated insets, 44px controls, default red/blue, private DOM absence, stale Search responses, and fold restoration pass with zero browser page errors. Portrait open/locked screenshots visually reviewed.
+- Clean committed-tree gates after feature-only routing integration: 1,018 tests passed, TypeScript passed, Svelte zero errors/nine existing warnings, production build passed. No unrelated messaging files are included in that tree.
+- Physical iOS 26/WebKit and device native-runtime behavior remain unverified. No new IPA is part of this code-only continuation.

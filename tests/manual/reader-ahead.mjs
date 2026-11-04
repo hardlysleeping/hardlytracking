@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { writeFile } from 'node:fs/promises';
-const {chromium}=await import(process.env.PLAYWRIGHT_MODULE??'/var/home/bazzite/.hermes/cache/scratch/ht-reader-browser/node_modules/playwright/index.mjs');
+const {chromium}=await import(process.env.PLAYWRIGHT_MODULE??'playwright');
 const base=process.env.QA_BASE??'http://127.0.0.1:5313';
 const browser=await chromium.launch({headless:true,args:['--no-sandbox']});
 const report=[];
