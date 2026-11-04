@@ -17,23 +17,11 @@ records rather than CSS-hiding them. Hidden collection labels are removed from
 tabs, pickers and sheets. Writes that could unhide/reclassify shelves are refused
 while locked. Search/source request completions carry a privacy revision check.
 
-## Required parent integration (not edited here)
+## Reader route integration
 
-`src/App.svelte` currently mounts Reader at the read-route branch:
+`src/App.svelte` mounts `ReaderGate` for every read route. The gate loads saved mappings from the current profile's store and mounts `Reader` only when `visibility.allows({ id: seriesId })`. Locking reacts immediately by unmounting protected reader images, actions and pending component work; it is not a CSS overlay. A neutral curtain links back to Library without printing the protected title or chapter.
 
-```svelte
-{:else if route.name === "read" && route.id !== null && route.chapterId !== null}
-  <Reader seriesId={route.id} chapterId={route.chapterId} />
-```
-
-The parent must import `visibility`, load its mappings from the opened profile's
-store (as the edited views do), and mount Reader only when
-`visibility.allows({ id: route.id })`. Otherwise show a neutral curtain with a way
-back to Library. This must react to Lock while an existing Reader is mounted,
-unmount its content, and guard direct `#/read/...` navigation. Add a fixture for
-both transitions. **Until this integration lands, a direct Reader URL remains a
-bypass, so this commit is not an app-wide privacy completion or a closed card.**
-Reader/App/settings/navigation and unrelated messaging were not edited.
+The memory-only fixture exercises this same component for locked direct-entry, unlock-to-mount, live lock-to-unmount, and a public reader that remains usable while locked. Two AST/source regressions keep App routed through this gate and the Reader mounted only inside its allowed branch. Unrelated messaging edits in App remain uncommitted.
 
 ## Reproduce (synthetic memory database only)
 

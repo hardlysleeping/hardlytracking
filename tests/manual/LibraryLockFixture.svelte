@@ -8,9 +8,10 @@
   import Source from '../../src/views/Source.svelte';
   import Series from '../../src/views/Series.svelte';
   import LibraryBand from '../../src/components/LibraryBand.svelte';
+  import ReaderGate from '../../src/components/ReaderGate.svelte';
   let view = $state('Library');
 </script>
-<nav aria-label="Fixture views">{#each ['Library','Search','History','Stats','Downloads','Browse','Source','Series'] as item}<button onclick={() => view = item}>{item}</button>{/each}</nav>
+<nav aria-label="Fixture views">{#each ['Library','Search','History','Stats','Downloads','Browse','Source','Series','Reader','Public reader'] as item}<button onclick={() => view = item}>{item}</button>{/each}</nav>
 {#if view !== 'Library'}<LibraryBand />{/if}
 <main>
 {#if view === 'Library'}<Library />
@@ -20,6 +21,8 @@
 {:else if view === 'Downloads'}<Downloads />
 {:else if view === 'Browse'}<Browse />
 {:else if view === 'Source'}<Source sourceId="mihon:src:99" />
+{:else if view === 'Reader'}<ReaderGate seriesId="local:private" chapterId="local:private:ch" />
+{:else if view === 'Public reader'}<ReaderGate seriesId="local:public" chapterId="local:public:ch" />
 {:else}<Series seriesId="local:private" />{/if}
 </main>
 <style>

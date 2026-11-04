@@ -83,7 +83,24 @@ try {
  await page.getByRole('button',{name:'Search',exact:true}).last().click();await page.waitForTimeout(100);await lock();
  await page.evaluate(()=>window.lockFixture.release());await page.getByRole('button',{name:'Search',exact:true}).last().waitFor();assert.equal(await page.getByRole('button',{name:'Search',exact:true}).last().isEnabled(),true);await absent();
  evidence.push({check:'Search fetched/expanded and late async responses filtered',pass:true});
- await view('Library');await geometry('iphone17-pro-max-landscape',956,440,{top:0,bottom:21,left:62,right:62});
+ // Same ReaderGate that App mounts for direct #/read routes: direct-entry and live-lock transitions.
+ await view('Reader');
+ await page.getByText('This title is hidden while the privacy lock is on.',{exact:true}).waitFor();
+ assert.equal(await page.locator('.reader').count(),0);
+ await absent();
+ await page.evaluate(()=>window.lockFixture.privacy.unlock());
+ await page.locator('.reader img[src]').first().waitFor();
+ await page.evaluate(()=>window.lockFixture.privacy.lock());
+ await page.getByText('This title is hidden while the privacy lock is on.',{exact:true}).waitFor();
+ assert.equal(await page.locator('.reader, .reader img, .reader .chrome').count(),0);
+ await absent();
+ await view('Public reader');
+ await page.locator('.reader img[src]').first().waitFor();
+ assert.equal(await page.locator('.reader-curtain').count(),0);
+ evidence.push({check:'Direct private reader refused; unlocking mounts; locking unmounts images/controls; public reader retained while locked',pass:true});
+ // Leave immersive Reader through the same route-state change the real App router makes.
+ await page.evaluate(()=>{document.querySelector('nav[aria-label="Fixture views"] button').click();});
+ await geometry('iphone17-pro-max-landscape' ,956,440,{top:0,bottom:21,left:62,right:62});
  await unlock();await geometry('iphone17-pro-max-landscape-open',956,440,{top:0,bottom:21,left:62,right:62});
  await geometry('compat-390',390,844,{top:47,bottom:34,left:0,right:0});
  await geometry('compat-320',320,640,{top:0,bottom:0,left:0,right:0});

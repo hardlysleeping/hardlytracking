@@ -19,7 +19,7 @@
   import Series from "./views/Series.svelte";
   import Source from "./views/Source.svelte";
   import Search from "./views/Search.svelte";
-  import Reader from "./views/Reader.svelte";
+  import ReaderGate from "./components/ReaderGate.svelte";
   import Extensions from "./views/Extensions.svelte";
   import Software from "./views/Software.svelte";
   import Settings from "./views/Settings.svelte";
@@ -143,7 +143,7 @@ import { sourceMarks } from "./state/source-marks.svelte";
 {#if settings.ready && !settings.welcomed}
   <Welcome />
 {:else if route.name === "read" && route.id !== null && route.chapterId !== null}
-  <Reader seriesId={route.id} chapterId={route.chapterId} />
+  <ReaderGate seriesId={route.id} chapterId={route.chapterId} />
 {:else}
   <AppShell {active} routeKey={`${route.name}:${route.id ?? ""}:${route.chapterId ?? ""}`}>
     {#if library.storageFallback}
