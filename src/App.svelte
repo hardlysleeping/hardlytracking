@@ -12,7 +12,9 @@
   import Updates from "./views/Updates.svelte";
   import Browse from "./views/Browse.svelte";
   import History from "./views/History.svelte";
+  import Stats from "./views/Stats.svelte";
   import More from "./views/More.svelte";
+  import Sync from "./views/Sync.svelte";
   import Plugins from "./views/Plugins.svelte";
   import Series from "./views/Series.svelte";
   import Source from "./views/Source.svelte";
@@ -194,8 +196,12 @@ import { sourceMarks } from "./state/source-marks.svelte";
       <Browse />
     {:else if route.name === "history"}
       <History />
+    {:else if route.name === "stats"}
+      <Stats />
     {:else if route.name === "more"}
       <More />
+    {:else if route.name === "sync"}
+      <Sync />
     {:else if route.name === "extensions"}
       <Extensions repo={pendingRepo} />
     {:else if route.name === "software" && route.id !== null}

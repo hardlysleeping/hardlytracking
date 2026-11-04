@@ -47,6 +47,12 @@ export const DESTINATIONS: Destination[] = [
     icon: "M12 8v5l3 2M3.5 12a8.5 8.5 0 1 0 2.6-6.1M3 3v4h4",
   },
   {
+    id: "stats",
+    label: "Stats",
+    href: "/stats",
+    icon: "M5 20V12M12 20V4M19 20V8",
+  },
+  {
     id: "more",
     label: "More",
     href: "/more",
@@ -62,6 +68,7 @@ const UNDER: Record<string, string> = {
   extensions: "browse",
   software: "browse",
   settings: "more",
+  sync: "more",
   downloads: "more",
   backup: "more",
   account: "more",

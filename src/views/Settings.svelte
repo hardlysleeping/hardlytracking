@@ -9,12 +9,26 @@
   import { settings } from "../state/settings.svelte";
   import { library } from "../state/library.svelte";
   import { downloads } from "../state/downloads.svelte";
-  import { appearance, THEME_OPTIONS } from "../lib/theme.svelte";
+  import ThemePanel from "../components/ThemePanel.svelte";
+  import BrowseDisplay from "../components/BrowseDisplay.svelte";
   import { DENSITY_OPTIONS, coverWidth, deviceClass } from "../lib/layout-modes";
   import { viewport } from "../lib/layout.svelte";
   import { go } from "../lib/nav";
   import { onMount } from "svelte";
   import SyncAccount from "../components/SyncAccount.svelte";
+  import TrackersPanel from "../components/TrackersPanel.svelte";
+  const tabs = ["general", "trackers"] as const;
+  let activeTab = $state<"general" | "trackers">("general");
+  function tabKeys(event: KeyboardEvent): void {
+    const at = tabs.indexOf(activeTab);
+    const next = event.key === "ArrowRight" ? (at + 1) % tabs.length
+      : event.key === "ArrowLeft" ? (at + tabs.length - 1) % tabs.length
+      : event.key === "Home" ? 0 : event.key === "End" ? tabs.length - 1 : -1;
+    if (next < 0) return;
+    event.preventDefault();
+    activeTab = tabs[next];
+    document.getElementById(`settings-tab-${activeTab}`)?.focus();
+  }
   import { hostInfo, hostToken, htServerEnabled, pairingLink, remoteHost, type HostInfo } from "../lib/host";
   import { imageCache } from "../lib/cache/images";
   import { CACHE_LIMIT_CHOICES, describeCache, formatBytes, type CacheEntry } from "../lib/cache/policy";
@@ -187,13 +201,22 @@ import { CONTENT_LEVELS, type ContentLevel } from "../lib/content/levels";
     <h1>Settings</h1>
   </header>
 
+  <div class="settings-tabs" role="tablist" tabindex="-1" aria-label="Settings sections" onkeydown={tabKeys}>
+    {#each tabs as tab}
+      <button class="chip" class:on={activeTab === tab} role="tab" id={`settings-tab-${tab}`} aria-controls={`settings-panel-${tab}`} aria-selected={activeTab === tab} tabindex={activeTab === tab ? 0 : -1} onclick={() => (activeTab = tab)}>
+        {tab === "general" ? "General" : "Trackers"}
+      </button>
+    {/each}
+  </div>
+  {#if activeTab === "trackers"}
+    <div role="tabpanel" id="settings-panel-trackers" aria-labelledby="settings-tab-trackers" tabindex="0">
+      <TrackersPanel />
+    </div>
+  {:else}
+    <div role="tabpanel" id="settings-panel-general" aria-labelledby="settings-tab-general" tabindex="0">
   <section class="group">
     <h2>Appearance</h2>
-    <div class="chips">
-      {#each THEME_OPTIONS as option (option.id)}
-        <button class="chip" class:on={appearance.theme === option.id} onclick={() => appearance.apply(option.id)}>{option.label}</button>
-      {/each}
-    </div>
+    <ThemePanel />
   </section>
 
   <section class="group">
@@ -235,14 +258,7 @@ import { CONTENT_LEVELS, type ContentLevel } from "../lib/content/levels";
 
   <section class="group">
     <h2>Library</h2>
-    <label class="row">
-      <span>Layout</span>
-      <select class="field" value={settings.libraryView} onchange={(event) => settings.set("libraryView", event.currentTarget.value as typeof settings.libraryView)}>
-        <option value="grid">Cover grid</option>
-        <option value="compact">Compact grid</option>
-        <option value="list">List</option>
-      </select>
-    </label>
+    <BrowseDisplay />
     <label class="row">
       <span>Cover size</span>
       <input
@@ -572,9 +588,13 @@ import { CONTENT_LEVELS, type ContentLevel } from "../lib/content/levels";
   </section>
 
   <SyncAccount />
+    </div>
+  {/if}
 </section>
 
 <style>
+  .settings-tabs { display: flex; flex-wrap: wrap; gap: var(--s2); margin-bottom: var(--s3); }
+  .settings-tabs button { min-height: 44px; }
   .age {
     margin-top: var(--s2);
     padding: var(--s3);
@@ -779,4 +799,5 @@ import { CONTENT_LEVELS, type ContentLevel } from "../lib/content/levels";
     color: var(--accent);
     font-style: normal;
   }
+
 </style>
