@@ -10,7 +10,6 @@
   import { library } from "../state/library.svelte";
   import { downloads } from "../state/downloads.svelte";
   import { inbox } from "../state/inbox.svelte";
-  import ThemePanel from "../components/ThemePanel.svelte";
   import BrowseDisplay from "../components/BrowseDisplay.svelte";
   import { DENSITY_OPTIONS, coverWidth, deviceClass } from "../lib/layout-modes";
   import { viewport } from "../lib/layout.svelte";
@@ -18,18 +17,6 @@
   import { onMount } from "svelte";
   import SyncAccount from "../components/SyncAccount.svelte";
   import TrackersPanel from "../components/TrackersPanel.svelte";
-  const tabs = ["general", "trackers"] as const;
-  let activeTab = $state<"general" | "trackers">("general");
-  function tabKeys(event: KeyboardEvent): void {
-    const at = tabs.indexOf(activeTab);
-    const next = event.key === "ArrowRight" ? (at + 1) % tabs.length
-      : event.key === "ArrowLeft" ? (at + tabs.length - 1) % tabs.length
-      : event.key === "Home" ? 0 : event.key === "End" ? tabs.length - 1 : -1;
-    if (next < 0) return;
-    event.preventDefault();
-    activeTab = tabs[next];
-    document.getElementById(`settings-tab-${activeTab}`)?.focus();
-  }
   import { hostInfo, hostToken, htServerEnabled, pairingLink, remoteHost, type HostInfo } from "../lib/host";
   import { imageCache } from "../lib/cache/images";
   import { CACHE_LIMIT_CHOICES, describeCache, formatBytes, type CacheEntry } from "../lib/cache/policy";
@@ -206,26 +193,11 @@ import KeepOfflinePanel from "../components/KeepOfflinePanel.svelte";
     <h1>Settings</h1>
   </header>
 
-  <div class="settings-tabs" role="tablist" tabindex="-1" aria-label="Settings sections" onkeydown={tabKeys}>
-    {#each tabs as tab}
-      <button class="chip" class:on={activeTab === tab} role="tab" id={`settings-tab-${tab}`} aria-controls={`settings-panel-${tab}`} aria-selected={activeTab === tab} tabindex={activeTab === tab ? 0 : -1} onclick={() => (activeTab = tab)}>
-        {tab === "general" ? "General" : "Trackers"}
-      </button>
-    {/each}
-  </div>
-  {#if activeTab === "trackers"}
-    <div role="tabpanel" id="settings-panel-trackers" aria-labelledby="settings-tab-trackers" tabindex="0">
-      <TrackersPanel />
-    </div>
-  {:else}
-    <div role="tabpanel" id="settings-panel-general" aria-labelledby="settings-tab-general" tabindex="0">
-  <section class="group">
-    <h2>Appearance</h2>
-    <ThemePanel />
-  </section>
-
-  <section class="group">
-    <h2>Content</h2>
+  <!-- One page of sections, each of which unfolds where it stands. The General/Trackers tabs made
+       the same page dress up as two pages and hid half the settings behind a press; a section that
+       opens in place keeps everything one scroll away and nothing needs its own route. -->
+  <details class="group" open>
+    <summary><h2>Content</h2></summary>
     <div class="row">
       <span>Show sources rated<em class="sub">{CONTENT_LEVELS.find((l) => l.id === settings.contentLevel)?.hint ?? ""}</em></span>
       <div class="chips">
@@ -259,10 +231,10 @@ import KeepOfflinePanel from "../components/KeepOfflinePanel.svelte";
         <button class="btn ghost" onclick={withdrawAdult}>Turn off</button>
       </div>
     {/if}
-  </section>
+  </details>
 
-  <section class="group">
-    <h2>Library</h2>
+  <details class="group" open>
+    <summary><h2>Library</h2></summary>
     <BrowseDisplay />
     <label class="row">
       <span>Cover size</span>
@@ -312,15 +284,15 @@ import KeepOfflinePanel from "../components/KeepOfflinePanel.svelte";
       <span>Show “Continue reading”</span>
       <input type="checkbox" checked={settings.showContinue} onchange={(event) => settings.set("showContinue", event.currentTarget.checked)} />
     </label>
-  </section>
+  </details>
 
-  <section class="group">
-    <h2>Keep offline</h2>
+  <details class="group" open>
+    <summary><h2>Keep offline</h2></summary>
     <KeepOfflinePanel />
-  </section>
+  </details>
 
-  <section class="group">
-    <h2>Performance</h2>
+  <details class="group" open>
+    <summary><h2>Performance</h2></summary>
     <div class="row">
       <span>Work level<em class="sub">{describeLevel(settings.cpuLevel)}</em></span>
       <div class="chips">
@@ -406,10 +378,10 @@ import KeepOfflinePanel from "../components/KeepOfflinePanel.svelte";
       <span>Keep the screen awake</span>
       <input type="checkbox" checked={settings.keepAwake} onchange={(event) => settings.set("keepAwake", event.currentTarget.checked)} />
     </label>
-  </section>
+  </details>
 
-  <section class="group">
-    <h2>History</h2>
+  <details class="group" open>
+    <summary><h2>History</h2></summary>
     <label class="row">
       <span>Pause reading history<em class="sub">No new sessions and no new history entries — incognito reading. Progress, read marks and Continue Reading keep working.</em></span>
       <input type="checkbox" checked={settings.historyPaused} onchange={(event) => settings.set("historyPaused", event.currentTarget.checked)} />
@@ -491,10 +463,10 @@ import KeepOfflinePanel from "../components/KeepOfflinePanel.svelte";
     {#if cleared !== null}
       <p class="hint">{cleared}</p>
     {/if}
-  </section>
+  </details>
 
-  <section class="group">
-    <h2>Phone access</h2>
+  <details class="group" open>
+    <summary><h2>Phone access</h2></summary>
     <p class="hint">
       This machine can be the runtime for your phone: it serves the app and its extensions over the network,
       so the phone needs nothing installed on it.
@@ -524,10 +496,10 @@ import KeepOfflinePanel from "../components/KeepOfflinePanel.svelte";
       </span>
       <button class="chip" onclick={() => go("/extensions")}>Open in Extensions</button>
     </div>
-  </section>
+  </details>
 
-  <section class="group">
-    <h2>Storage</h2>
+  <details class="group" open>
+    <summary><h2>Storage</h2></summary>
     <div class="space">
       <div class="spaceline">
         <span>{space === null ? "Reading this device's storage…" : `${formatBytes(space.used)} used of ${formatBytes(space.quota)} this app may use`}</span>
@@ -586,16 +558,16 @@ import KeepOfflinePanel from "../components/KeepOfflinePanel.svelte";
       <span>Manage downloads</span>
       <span class="chev">›</span>
     </button>
-  </section>
+  </details>
 
-  <section class="group">
-    <h2>Backup</h2>
+  <details class="group" open>
+    <summary><h2>Backup</h2></summary>
     <button class="row link" onclick={() => go("/backup")}>
       <span>Backup &amp; restore</span>
       <span class="chev">›</span>
     </button>
     <p class="hint">Manual backup is free and always available. Automatic sync is a paid extra and never required to read.</p>
-  </section>
+  </details>
 
   {#if inbox.signedIn}
     <!--
@@ -625,14 +597,15 @@ import KeepOfflinePanel from "../components/KeepOfflinePanel.svelte";
     </section>
   {/if}
 
+  <details class="group" open>
+    <summary><h2>Trackers</h2></summary>
+    <TrackersPanel />
+  </details>
+
   <SyncAccount />
-    </div>
-  {/if}
 </section>
 
 <style>
-  .settings-tabs { display: flex; flex-wrap: wrap; gap: var(--s2); margin-bottom: var(--s3); }
-  .settings-tabs button { min-height: 44px; }
   .age {
     margin-top: var(--s2);
     padding: var(--s3);
@@ -694,12 +667,42 @@ import KeepOfflinePanel from "../components/KeepOfflinePanel.svelte";
     border-bottom: 1px solid var(--line);
   }
 
+  /* A section header is the handle for its own settings: it opens and closes in place, so the
+     page never swaps to a second page for half of itself. The marker is the app's own caret, not
+     the platform triangle, so it matches the Library band's fold. */
+  summary {
+    display: flex;
+    align-items: center;
+    gap: var(--s2);
+    min-height: 44px;
+    margin-bottom: var(--s2);
+    cursor: pointer;
+    list-style: none;
+  }
+
+  summary::-webkit-details-marker { display: none; }
+
+  summary::after {
+    content: "";
+    width: 8px;
+    height: 8px;
+    margin-left: auto;
+    border-right: 1.5px solid currentColor;
+    border-bottom: 1.5px solid currentColor;
+    transform: rotate(45deg);
+    transition: transform 140ms ease;
+    color: var(--text-3);
+  }
+
+  details:not([open]) > summary::after { transform: rotate(-45deg); }
+  summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--r1); }
+
   h2 {
+    margin: 0;
     font-size: var(--t-xs);
     text-transform: uppercase;
     letter-spacing: 0.08em;
     color: var(--text-3);
-    margin-bottom: var(--s2);
   }
 
   .row {

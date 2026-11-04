@@ -213,6 +213,13 @@
     else startAuto();
   }
 
+  /**
+   * The reader is stuck when it has nothing to read: a failed load, or a page list that came back
+   * empty. Chrome hides itself on a timer, and a hidden header is a reader with no way out — so in
+   * that state the header stays on screen however long the reader sits there.
+   */
+  const stuck = $derived(error !== null || (!busy && pages.length === 0));
+
   /** Autoscroll only makes sense where the page scrolls vertically as one column. */
   const canAutoscroll = $derived(settings.readerMode === "vertical" || settings.readerMode === "webtoon");
 
@@ -636,7 +643,7 @@
 <svelte:window onkeydown={onKey} />
 
 <section class="reader" class:hide={!chrome}>
-  <header class="chrome top" class:shown={chrome}>
+  <header class="chrome top" class:shown={chrome || stuck}>
     <button class="btn ghost icon" aria-label="Back to series" onclick={() => go(pathTo("series", owner))}>
       <svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7" /></svg>
     </button>
@@ -652,17 +659,34 @@
     </button>
   </header>
 
-  {#if error}<p class="banner">{error}</p>{/if}
+  {#if error}
+    <div class="banner">
+      <p>{error}</p>
+      <!-- A dead chapter must still leave a way back: the header can be hidden by the idle timer,
+           and a banner with no exit is a screen the reader is trapped on. -->
+      <div class="banneracts">
+        <button class="btn" onclick={() => void load(chapterId)}>Try again</button>
+        <button class="btn ghost" onclick={() => go(pathTo("series", owner))}>Back to the series</button>
+        <button class="btn ghost" onclick={() => go("/library")}>Library</button>
+      </div>
+    </div>
+  {/if}
   {#if partialNotice}<p class="banner note">{partialNotice}</p>{/if}
   {#if busy}<p class="loading">Fetching pages…</p>{/if}
   <!-- A chapter that loaded and produced nothing used to be a blank screen with "—" in the footer:
        no error, no pages, nothing to press. It is the shape of a page list that came back empty —
        a row whose file is gone, a source that answered with nothing — and it must say so. -->
   {#if !busy && error === null && pages.length === 0}
-    <p class="banner note">
-      This chapter has no pages. Its file is no longer on this device, or the source that owns it
-      returned nothing.
-    </p>
+    <div class="banner note">
+      <p>
+        This chapter has no pages. Its file is no longer on this device, or the source that owns it
+        returned nothing.
+      </p>
+      <div class="banneracts">
+        <button class="btn ghost" onclick={() => go(pathTo("series", owner))}>Back to the series</button>
+        <button class="btn ghost" onclick={() => go("/library")}>Library</button>
+      </div>
+    </div>
   {/if}
 
   {#if pages.length > 0}
@@ -1108,11 +1132,32 @@
 
   .banner {
     position: absolute;
-    top: 64px;
+    top: calc(var(--safe-t) + 56px);
     left: 50%;
     transform: translateX(-50%);
     z-index: 7;
-    max-width: 90vw;
+    /* A banner that explains a failure also has to offer the way out, so it is a card with a
+       wrapping action row rather than one line of text. */
+    display: grid;
+    gap: var(--s2);
+    width: min(92vw, 460px);
+    margin: 0;
     background: color-mix(in srgb, var(--danger) 20%, #000);
+    text-align: left;
+  }
+
+  .banner p {
+    margin: 0;
+    line-height: 1.5;
+  }
+
+  .banneracts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--s2);
+  }
+
+  .banneracts .btn {
+    min-height: 40px;
   }
 </style>

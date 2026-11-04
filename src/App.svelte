@@ -23,6 +23,7 @@
   import Extensions from "./views/Extensions.svelte";
   import Software from "./views/Software.svelte";
   import Settings from "./views/Settings.svelte";
+  import Messages from "./views/Messages.svelte";
   import Downloads from "./views/Downloads.svelte";
   import Backup from "./views/Backup.svelte";
   import Welcome from "./components/Welcome.svelte";
@@ -35,6 +36,7 @@ import { sourceMarks } from "./state/source-marks.svelte";
   import { settings } from "./state/settings.svelte";
   import { downloads } from "./state/downloads.svelte";
   import { appearance } from "./lib/theme.svelte";
+  import Appearance from "./views/Appearance.svelte";
   import { startChrome } from "./lib/chrome.svelte";
   import { viewport } from "./lib/layout.svelte";
   import { destinationOf } from "./lib/destinations";
@@ -208,8 +210,12 @@ import { sourceMarks } from "./state/source-marks.svelte";
       <Software pkg={route.id} repo={route.repo} />
     {:else if route.name === "plugins"}
       <Plugins />
+    {:else if route.name === "appearance"}
+      <Appearance />
     {:else if route.name === "settings"}
       <Settings />
+    {:else if route.name === "messages"}
+      <Messages />
     {:else if route.name === "downloads"}
       <Downloads />
     {:else if route.name === "backup"}

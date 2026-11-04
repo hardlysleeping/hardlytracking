@@ -18,14 +18,25 @@ function state(file, name, privacy) {
   return new Function('$state', ...args, ...Object.keys(policy), js + `;return ${name};`)(x => x, ...values, ...Object.values(policy));
 }
 
-test('lock is immediate, idempotent, and restores either prior fold, not a forced fold', () => {
-  const privacy = state('privacy', 'privacy');
+test('lock folds the band at once, the tab still works while locked, and unlocking restores the chosen fold', () => {
   for (const folded of [false, true]) {
+    const privacy = state('privacy', 'privacy');
     privacy.bandCollapsed = folded;
-    privacy.lock(); privacy.lock(); privacy.toggleBand();
+    privacy.lock(); privacy.lock();
+    // Locking is one press and it folds: the curtain is down, so the controls go with it.
     assert.equal(privacy.locked, true); assert.equal(privacy.bandCollapsed, true);
+    // Unlocking gives back the fold the reader had before they locked, not a forced one.
     privacy.unlock(); assert.equal(privacy.bandCollapsed, folded);
   }
+  // The tab is the way back to the band, so it opens while the curtain is down — and a fold the
+  // reader chose there is theirs: unlocking must not shut the band they just opened.
+  const privacy = state('privacy', 'privacy');
+  privacy.bandCollapsed = true;
+  privacy.lock();
+  privacy.toggleBand();
+  assert.equal(privacy.bandCollapsed, false);
+  privacy.unlock();
+  assert.equal(privacy.bandCollapsed, false);
 });
 
 test('a delayed preference load while locked remembers intent without revealing it', async () => {

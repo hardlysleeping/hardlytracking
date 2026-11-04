@@ -47,12 +47,6 @@ export const DESTINATIONS: Destination[] = [
     icon: "M12 8v5l3 2M3.5 12a8.5 8.5 0 1 0 2.6-6.1M3 3v4h4",
   },
   {
-    id: "stats",
-    label: "Stats",
-    href: "/stats",
-    icon: "M5 20V12M12 20V4M19 20V8",
-  },
-  {
     id: "more",
     label: "More",
     href: "/more",
@@ -68,7 +62,10 @@ const UNDER: Record<string, string> = {
   extensions: "browse",
   software: "browse",
   settings: "more",
+  appearance: "more",
+  stats: "more",
   sync: "more",
+  messages: "more",
   downloads: "more",
   backup: "more",
   account: "more",
@@ -86,5 +83,8 @@ export function backHref(route: Route): string | null {
   if (route.name === "source" || route.name === "extensions") return "/browse";
   // A package page is reached from the Extensions list, which is the index of packages.
   if (route.name === "software") return "/extensions";
+  // Messages are reached from the bell in Settings, so back goes there, not to More.
+  if (route.name === "messages") return "/settings";
+  if (route.name === "appearance" || route.name === "stats") return "/more";
   return "/more";
 }

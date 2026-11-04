@@ -279,7 +279,14 @@ export function createKomgaProvider(options: KomgaOptions): SourceProvider {
       sort: "metadata.numberSort,asc",
     });
     const data = await json<KomgaPaged<KomgaRawBook>>(`/api/v1/books?${params.toString()}`);
-    const rows = data.content ?? [];
+    // Komga answers an unrecognised `series_id` by ignoring the filter rather than refusing it, so
+    // one bad id handed back the whole library as "this title's issues". Every book names its own
+    // series, so the answer is checked against the question: a row that belongs to someone else is
+    // not this chapter list, whatever the request said.
+    const asked = native;
+    const rows = (data.content ?? []).filter(
+      (row) => typeof row.seriesId !== "string" || row.seriesId === "" || row.seriesId === asked,
+    );
     lastBooks.set(seriesId, rows);
     return rows;
   }

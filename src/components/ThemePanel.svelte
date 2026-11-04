@@ -14,9 +14,10 @@
     { key: "lockClosed", label: "Lock closed", help: "A locked control" },
     { key: "unlock", label: "Unlock", help: "Unlock confirmation" },
     { key: "sync", label: "Sync", help: "Sync actions and progress" },
-    { key: "trim", label: "Trim", help: "Read marks and quiet edges" },
-    { key: "link", label: "Link", help: "Open-at-source actions" },
-    { key: "star", label: "Star", help: "Starred marks" },
+    // Read, link and star were carried over from the reader's colour model and never belonged
+    // here: they are three one-off actions, not meanings a reader assigns to their own marks.
+    // The seats that matter are the ones that describe state — hidden, pinned, locked, unlocked,
+    // syncing — plus the accent everything selected wears.
   ];
   async function pick(event: Event) {
     const input = event.currentTarget as HTMLInputElement;
@@ -45,7 +46,7 @@
       {/each}
     </div>
     <label class="toggle"><input type="checkbox" checked={appearance.current.accentEdges} onchange={e => appearance.set("accentEdges", e.currentTarget.checked)} />Accent-colored edges</label>
-    <label class="toggle"><input type="checkbox" checked={appearance.current.monotoneActions} onchange={e => appearance.set("monotoneActions", e.currentTarget.checked)} />Monotone actions <span class="muted">(read, link and star only)</span></label>
+
   </fieldset>
   <fieldset>
     <legend>Meaningful colors</legend>
@@ -62,7 +63,6 @@
       {#each colours.filter(c => c.key !== "accent") as item}
         <span data-tone={item.key.replace(/[A-Z]/g, c => "-" + c.toLowerCase())}>{item.label}</span>
       {/each}
-      <span class="theme-action-star">★ Star action</span><span class="theme-action-read">✓ Read action</span><span class="theme-action-link">↗ Link action</span>
     </div>
   </fieldset>
   <fieldset>

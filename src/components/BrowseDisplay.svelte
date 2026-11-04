@@ -4,33 +4,57 @@
   import { browseMode, columnsFor, maxColumns } from "../lib/browse-display";
   const mode = $derived(browseMode(settings.libraryView));
   const columns = $derived(columnsFor(settings.browseColumns, viewport.width, viewport.height));
+  const ceiling = $derived(maxColumns(viewport.width, viewport.height));
 </script>
+
+<!-- Every control here is a chip in the same row grammar as the layout buttons. A <select> and a
+     checkbox drew two unrelated boxes beside those chips and read as three different kinds of
+     control for one setting; a chip that stays pressed says the same thing and looks like its
+     neighbours. The helper sentence went with them — the slider and its "N across" output are the
+     explanation. -->
 <div class="display" aria-label="Browse display">
   <div class="modes" role="group" aria-label="Layout">
     {#each ["row", "grid", "card"] as view}
       <button class="chip" class:on={mode === view} aria-pressed={mode === view}
         onclick={() => settings.set("libraryView", view as "row" | "grid" | "card")}>{view === "row" ? "Row" : view === "grid" ? "Grid" : "Card"}</button>
     {/each}
+    {#if mode === "grid"}
+      {#each [["compact", "Compact"], ["larger", "Larger"]] as pair}
+        <button class="chip" class:on={settings.browseDensity === pair[0]} aria-pressed={settings.browseDensity === pair[0]}
+          onclick={() => settings.set("browseDensity", pair[0] as "compact" | "larger")}>{pair[1]}</button>
+      {/each}
+    {/if}
+    <button class="chip" class:on={settings.browseHorizontal} aria-pressed={settings.browseHorizontal}
+      onclick={() => settings.set("browseHorizontal", !settings.browseHorizontal)}>Sideways</button>
   </div>
   {#if mode === "grid"}
-    <label>Density <select aria-label="Grid density" value={settings.browseDensity}
-      onchange={(e) => settings.set("browseDensity", e.currentTarget.value as "compact" | "larger")}>
-      <option value="compact">Compact</option><option value="larger">Larger</option>
-    </select></label>
-    <label class="columns">Columns <output>{columns}×{columns}</output>
-      <input aria-label="Grid columns" type="range" min="2" max={maxColumns(viewport.width, viewport.height)} step="1" value={columns}
+    <label class="columns">
+      <output>{columns} across</output>
+      <input aria-label="Grid columns" type="range" min="2" max={ceiling} step="1" value={columns}
         oninput={(e) => settings.set("browseColumns", Number(e.currentTarget.value))} />
     </label>
-    <small>Columns, not a result limit</small>
   {/if}
-  <label><input type="checkbox" checked={settings.browseHorizontal}
-    onchange={(e) => settings.set("browseHorizontal", e.currentTarget.checked)} /> Horizontal browsing</label>
 </div>
+
 <style>
-  .display { display:flex; flex-wrap:wrap; align-items:center; gap:10px; min-width:0; max-width:100%; margin:0 0 var(--s3); }
-  .modes { display:flex; flex-wrap:wrap; gap:4px; }
-  label { display:flex; flex-wrap:wrap; align-items:center; gap:6px; font-size:var(--t-sm); min-width:0; }
-  select { max-width:100%; color:var(--text-1); background:var(--surface); border:1px solid var(--line); padding:6px; border-radius:var(--r1); }
-  .columns input { width:110px; min-width:0; }
-  small { color:var(--text-3); font-size:var(--t-xs); }
+  .display {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--s2);
+    min-width: 0;
+    max-width: 100%;
+    margin: 0 0 var(--s3);
+  }
+  .modes { display: flex; flex-wrap: wrap; gap: var(--s1); min-width: 0; }
+  .columns {
+    display: flex;
+    align-items: center;
+    gap: var(--s2);
+    min-width: 0;
+    font-size: var(--t-sm);
+    color: var(--text-2);
+  }
+  .columns output { min-width: 5.5ch; font-variant-numeric: tabular-nums; }
+  .columns input { width: 116px; min-width: 0; margin: 0; }
 </style>
