@@ -10,8 +10,16 @@
   interface Props {
     series: { title: string; cover?: string; coverHeaders?: Record<string, string> };
     size?: "grid" | "hero" | "row";
+    /**
+     * The URL this tile actually resolved to, for a caller that wants the same picture elsewhere.
+     *
+     * Reporting the resolved value (not `series.cover`) is the point: a login-protected or owned
+     * cover only exists as a cache blob URL, and re-resolving it separately would double the work
+     * and could disagree with what is on screen. Decorative use only — the tile stays the source.
+     */
+    onresolve?: (src: string | undefined) => void;
   }
-  let { series, size = "grid" }: Props = $props();
+  let { series, size = "grid", onresolve }: Props = $props();
   let broken = $state(false);
 
   /**
@@ -43,11 +51,13 @@
     const url = series.cover;
     if (url === undefined || url === "") {
       src = undefined;
+      onresolve?.(undefined);
       return;
     }
     let live = true;
     const needsLogin = series.coverHeaders !== undefined;
     src = loadable(url, needsLogin);
+    onresolve?.(src);
     // A cover that failed anonymously can still be fetched with the login, so a changed series must
     // not stay broken from the previous attempt.
     broken = false;
@@ -61,7 +71,10 @@
         if (!entries.some((entry) => entry.isIntersecting)) return;
         observer.disconnect();
         void imageCache.resolve(url, headers === undefined ? {} : { headers }).then((resolved) => {
-          if (live && resolved !== url) src = resolved;
+          if (live && resolved !== url) {
+            src = resolved;
+            onresolve?.(resolved);
+          }
         });
       },
       { rootMargin: "200% 0px" },

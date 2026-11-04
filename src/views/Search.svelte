@@ -60,6 +60,13 @@
   /** The title whose quick actions are open, or null. */
   let actions = $state<Series | null>(null);
   let detailed = $state<Series | null>(null);
+  /**
+   * The opened card's own cover, reported by the hero tile after the cache resolved it.
+   *
+   * Only a decorative backdrop uses this; the card is fully readable with it absent. Reset when the
+   * card opens or closes so a previous title's artwork can never bleed into the next one.
+   */
+  let heroSrc = $state<string | null>(null);
   let detailState = $state<"idle" | "loading" | "error">("idle");
   let detailError = $state("");
   /** Details already fetched, so reopening a pane is instant and never asks twice. */
@@ -246,6 +253,7 @@
     shown = series;
     detailed = details.get(series.id) ?? null;
     detailError = "";
+    heroSrc = null;
     const cached = details.get(series.id);
     if (cached !== undefined) {
       detailState = "idle";
@@ -275,6 +283,7 @@
     detailed = null;
     detailState = "idle";
     detailError = "";
+    heroSrc = null;
   }
 
   function toggleSelect(id: string): void {
@@ -403,13 +412,21 @@
 {#snippet detailCard()}
   {#if record !== null}
     <div class="detail" aria-label={`${record.title} details`}>
+      {#if heroSrc !== null}
+        <!-- Decorative: the same picture the hero tile resolved, blurred behind the card. -->
+        <div
+          class="dblur"
+          aria-hidden="true"
+          style:--glass={`url("${heroSrc.replaceAll('"', "%22")}")`}
+        ></div>
+      {/if}
         <div class="dhead">
         <span class="dkind">{record.provider}</span>
         <span class="sp"></span>
         <button class="dclose" onclick={close} title="Close" aria-label="Close">✕</button>
       </div>
       <div class="dscroll">
-        <div class="dcover"><Cover series={record} size="hero" /></div>
+        <div class="dcover"><Cover series={record} size="hero" onresolve={(src) => (heroSrc = src ?? null)} /></div>
         <h3>{record.title}</h3>
         <div class="dmeta">
           {#if record.author}<span>{record.author}</span>{/if}
@@ -799,6 +816,8 @@
   .detail {
     display: grid;
     grid-template-rows: auto minmax(0, 1fr);
+    position: relative;
+    isolation: isolate;
     border: 1px solid var(--line-strong);
     border-radius: var(--r3);
     background: var(--surface);
@@ -806,6 +825,53 @@
     /* It grows where the tile was; a still grid with the answer drawn somewhere else is the thing
        this replaced. Reduced motion gets the card without the movement. */
     animation: open-card 160ms ease-out;
+  }
+
+  /* The opened cover, blurred, behind its own card: it ties the pane to the tile that was tapped
+     without becoming a second thing to read. Presentation only — it is never the state.
+
+     Two layers, both inside a clipping box the size of the card: a negative inset here would grow
+     the card's scrollWidth and let a stray sideways scroll drag the artwork off its own text. */
+  .dblur {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    overflow: hidden;
+    pointer-events: none;
+  }
+
+  .dblur::before {
+    content: "";
+    position: absolute;
+    inset: -40px;
+    background-image: var(--glass);
+    background-size: cover;
+    background-position: center top;
+    filter: blur(34px) saturate(1.3);
+    opacity: 0.55;
+  }
+
+  /* The veil that keeps title, metadata and issues on a readable surface over any artwork. */
+  .dblur::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+      color-mix(in srgb, var(--surface) 58%, transparent),
+      var(--surface) 82%
+    );
+  }
+
+  .dhead,
+  .dscroll {
+    position: relative;
+    z-index: 1;
+  }
+
+  @media (prefers-reduced-transparency: reduce) {
+    .dblur {
+      display: none;
+    }
   }
 
   @keyframes open-card {
