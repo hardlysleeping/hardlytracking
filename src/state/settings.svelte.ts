@@ -13,6 +13,14 @@ import { DEFAULT_BADGES } from "../lib/library/badges";
 import type { Margins, PanePreference } from "../lib/view-options";
 import type { SourceFilterSelection } from "../api/source";
 import { DEFAULT_CPU_LEVEL, type CpuLevel } from "../lib/performance";
+import {
+  autoscrollCurveOf,
+  autoscrollSpeedOf,
+  DEFAULT_AUTOSCROLL_CURVE,
+  DEFAULT_AUTOSCROLL_SPEED,
+  type AutoscrollCurve,
+  type AutoscrollSpeed,
+} from "../lib/autoscroll";
 import { levelOr, type ContentLevel } from "../lib/content/levels";
 
 import { DEFAULT_READ_AHEAD, readAheadOf, type ReadAhead } from "../lib/reader-ahead";
@@ -85,6 +93,8 @@ export interface Prefs {
   readerMode: ReaderMode;
   readerFit: Fit;
   readerAhead: ReadAhead;
+  autoscrollSpeed: AutoscrollSpeed;
+  autoscrollCurve: AutoscrollCurve;
   pageGap: number;
   keepAwake: boolean;
   tapZones: boolean;
@@ -166,6 +176,8 @@ class Settings {
   readerMode = $state<ReaderMode>("vertical");
   readerFit = $state<Fit>("width");
   readerAhead = $state<ReadAhead>(DEFAULT_READ_AHEAD);
+  autoscrollSpeed = $state<AutoscrollSpeed>(DEFAULT_AUTOSCROLL_SPEED);
+  autoscrollCurve = $state<AutoscrollCurve>(DEFAULT_AUTOSCROLL_CURVE);
   /** Space between pages in vertical/webtoon mode, px. */
   pageGap = $state(0);
   keepAwake = $state(true);
@@ -233,6 +245,8 @@ class Settings {
     this.readerMode = await read("readerMode", this.readerMode);
     this.readerFit = await read("readerFit", this.readerFit);
     this.readerAhead = readAheadOf(await read<unknown>("readerAhead", DEFAULT_READ_AHEAD));
+    this.autoscrollSpeed = autoscrollSpeedOf(await read<unknown>("autoscrollSpeed", DEFAULT_AUTOSCROLL_SPEED));
+    this.autoscrollCurve = autoscrollCurveOf(await read<unknown>("autoscrollCurve", DEFAULT_AUTOSCROLL_CURVE));
     this.pageGap = await read("pageGap", this.pageGap);
     this.keepAwake = await read("keepAwake", this.keepAwake);
     this.tapZones = await read("tapZones", this.tapZones);
@@ -265,7 +279,15 @@ class Settings {
    * `$state` proxy (`DataCloneError`), and a filter or a sort spec is an object.
    */
   set<K extends keyof Prefs>(key: K, value: Prefs[K]): void {
-    const plain = $state.snapshot(key === "readerAhead" ? readAheadOf(value) : value) as Prefs[K];
+    const normalised =
+      key === "readerAhead"
+        ? readAheadOf(value)
+        : key === "autoscrollSpeed"
+          ? autoscrollSpeedOf(value)
+          : key === "autoscrollCurve"
+            ? autoscrollCurveOf(value)
+            : value;
+    const plain = $state.snapshot(normalised) as Prefs[K];
     (this as unknown as Record<string, unknown>)[key] = plain;
     void this.store?.setPref(KEY + key, plain).catch(() => {});
   }

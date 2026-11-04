@@ -49,6 +49,8 @@ function freshSettings(){
   if(id.includes('performance'))return{DEFAULT_CPU_LEVEL:'balanced'};
   if(id.includes('content/levels'))return{levelOr:value=>value};
   if(id.includes('browse-display'))return{browseMode:value=>value,columnsFor:value=>value};
+  // Settings also normalises the autoscroll choices; the real validators are cheap and pure.
+  if(id.includes('lib/autoscroll'))return{autoscrollCurveOf:value=>value,autoscrollSpeedOf:value=>value,DEFAULT_AUTOSCROLL_CURVE:'linear',DEFAULT_AUTOSCROLL_SPEED:'steady'};
   throw new Error(`Unexpected dependency ${id}`);
  }};
  vm.runInNewContext(stripped,ctx);

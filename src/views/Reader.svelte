@@ -28,6 +28,7 @@
   import Sheet from "../components/Sheet.svelte";
   import { plugins } from "../state/plugins.svelte";
   import { READ_AHEAD_CHOICES, readAheadOf } from "../lib/reader-ahead";
+  import { advancePx, AUTOSCROLL_CURVES, AUTOSCROLL_SPEEDS, progressOf } from "../lib/autoscroll";
   import { ReaderQueue, ReaderTap, readerOrder, type ReaderJob } from "../lib/reader";
 
   interface Props {
@@ -155,6 +156,71 @@
   let hideTimer: ReturnType<typeof setTimeout> | null = null;
 
   let scroller = $state<HTMLDivElement | null>(null);
+
+  /**
+   * Autoscroll: off until started, and it moves the scroller itself.
+   *
+   * The loop advances by elapsed time, so the pace the slider names is the pace on a 60 Hz panel, a
+   * 120 Hz panel and a throttled webview alike. It stops when the chapter ends, when the reader
+   * touches the page, when the app goes away and when the reader leaves — a page that keeps
+   * scrolling under a hidden screen is a bug, not a feature.
+   */
+  let autoRunning = $state(false);
+  let autoFrame: number | null = null;
+  let autoLast = 0;
+  /** Sub-pixel remainder, so a slow pace is not rounded away frame by frame. */
+  let autoCarry = 0;
+
+  function stopAuto(): void {
+    autoRunning = false;
+    if (autoFrame !== null) cancelAnimationFrame(autoFrame);
+    autoFrame = null;
+    autoLast = 0;
+    autoCarry = 0;
+  }
+
+  function autoStep(now: number): void {
+    const host = scroller;
+    if (!autoRunning || host === null) {
+      autoFrame = null;
+      return;
+    }
+    const elapsed = autoLast === 0 ? 16 : now - autoLast;
+    autoLast = now;
+    const progress = progressOf(host.scrollTop, host.scrollHeight, host.clientHeight);
+    if (progress >= 1) {
+      stopAuto();
+      return;
+    }
+    autoCarry += advancePx(elapsed, settings.autoscrollSpeed, settings.autoscrollCurve, progress);
+    const whole = Math.floor(autoCarry);
+    if (whole > 0) {
+      autoCarry -= whole;
+      host.scrollBy({ top: whole, behavior: "instant" });
+    }
+    autoFrame = requestAnimationFrame(autoStep);
+  }
+
+  function startAuto(): void {
+    if (autoRunning || scroller === null) return;
+    autoRunning = true;
+    autoLast = 0;
+    autoFrame = requestAnimationFrame(autoStep);
+  }
+
+  function toggleAuto(): void {
+    if (autoRunning) stopAuto();
+    else startAuto();
+  }
+
+  /** Autoscroll only makes sense where the page scrolls vertically as one column. */
+  const canAutoscroll = $derived(settings.readerMode === "vertical" || settings.readerMode === "webtoon");
+
+  // A mode change or a new chapter ends the run: the page it was scrolling no longer exists.
+  $effect(() => {
+    void settings.readerMode;
+    return () => stopAuto();
+  });
   let saveTimer: ReturnType<typeof setTimeout> | null = null;
 
   /**
@@ -248,6 +314,8 @@
     const onVisibility = (): void => {
       if (document.visibilityState === "hidden") {
         hiddenAt = Date.now();
+        // A page that scrolls itself under a hidden screen is motion nobody asked to see.
+        stopAuto();
         return;
       }
       const hidden = hiddenAt === null ? 0 : Date.now() - hiddenAt;
@@ -260,6 +328,7 @@
     document.addEventListener("visibilitychange", onVisibility);
     return () => {
       document.removeEventListener("visibilitychange", onVisibility);
+      stopAuto();
       closeSession("away");
     };
   });
@@ -605,7 +674,12 @@
       data-fit={settings.readerFit}
       bind:this={scroller}
       onscroll={onScroll}
-      onpointerdown={surfaceDown}
+      onpointerdown={(event) => {
+        // Taking hold of the page takes the wheel back: a scroll that keeps moving under a finger
+        // is the reader arguing with the app.
+        stopAuto();
+        surfaceDown(event);
+      }}
       onpointermove={(event) => tap.move(event.pointerId, event.clientX, event.clientY)}
       onpointerup={surfaceUp}
       onpointercancel={() => tap.cancel()}
@@ -659,6 +733,16 @@
       />
     </div>
     <!-- Both chapter buttons sit at the bottom edge, where a thumb already is. -->
+    {#if canAutoscroll}
+      <div class="autoline">
+        <button class="btn" class:on={autoRunning} aria-pressed={autoRunning} onclick={toggleAuto}>
+          {autoRunning ? "Pause autoscroll" : "Autoscroll"}
+        </button>
+        {#if autoRunning}
+          <span class="autospeed">{AUTOSCROLL_SPEEDS.find((option) => option.id === settings.autoscrollSpeed)?.label}</span>
+        {/if}
+      </div>
+    {/if}
     <div class="turn">
       <button class="btn" disabled={previous === null} onclick={() => previous && go(pathTo("read", owner, previous.id))}>‹ Previous chapter</button>
       <button class="btn" disabled={following === null} onclick={() => following && go(pathTo("read", owner, following.id))}>Next chapter ›</button>
@@ -691,6 +775,20 @@
       {/each}
     </div>
     <p class="hint">Pages load one at a time, starting with the page you are reading. None fetches only the current page.</p>
+  </div>
+  <div class="group">
+    <span class="label">Autoscroll speed</span>
+    <div class="chips" role="group" aria-label="Autoscroll speed">
+      {#each AUTOSCROLL_SPEEDS as option (option.id)}
+        <button class="chip" class:on={settings.autoscrollSpeed === option.id} onclick={() => settings.set("autoscrollSpeed", option.id)}>{option.label}</button>
+      {/each}
+    </div>
+    <div class="chips" role="group" aria-label="How the pace changes near the end">
+      {#each AUTOSCROLL_CURVES as option (option.id)}
+        <button class="chip" class:on={settings.autoscrollCurve === option.id} onclick={() => settings.set("autoscrollCurve", option.id)}>{option.label}</button>
+      {/each}
+    </div>
+    <p class="hint">Off until you start it from the reading controls. It pauses when you touch the page, when the app goes to the background, and it stops at the end of the chapter.</p>
   </div>
   <label class="row">
     <span>Page spacing</span>
@@ -878,6 +976,36 @@
     display: flex;
     align-items: center;
     gap: var(--s3);
+  }
+
+  /* Autoscroll sits above the chapter buttons: it is a mode, and a mode needs one control, not a
+     hidden gesture. 44 px is the smallest target a thumb can hit without aiming. */
+  .autoline {
+    display: flex;
+    align-items: center;
+    gap: var(--s2);
+    margin-bottom: var(--s2);
+  }
+
+  .autoline .btn {
+    min-height: 44px;
+    flex: 1;
+    justify-content: center;
+    color: var(--text-1);
+    border-color: var(--line-strong);
+    background: color-mix(in srgb, var(--surface) 70%, transparent);
+  }
+
+  .autoline .btn.on {
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 22%, var(--surface));
+  }
+
+  .autospeed {
+    font-size: var(--t-xs);
+    color: var(--text-3);
+    min-width: 3.5em;
+    text-align: right;
   }
 
   .turn {
