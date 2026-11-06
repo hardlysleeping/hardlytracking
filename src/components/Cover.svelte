@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from "svelte";
   import { imageCache } from "../lib/cache/images";
   import { isCoverKey } from "../lib/files/cover";
   /**
@@ -63,13 +64,16 @@
     const url = series.cover;
     if (url === undefined || url === "") {
       src = undefined;
-      onresolve?.(undefined);
+      untrack(() => onresolve?.(undefined));
       return;
     }
     let live = true;
     const needsLogin = series.coverHeaders !== undefined;
-    src = loadable(url, needsLogin);
-    onresolve?.(src);
+    const initial = loadable(url, needsLogin);
+    src = initial;
+    // Do not read `src` here: that subscribes this loader to its own async result, resetting
+    // the blob to the network URL (or undefined for authenticated covers) on every resolution.
+    untrack(() => onresolve?.(initial));
     // A cover that failed anonymously can still be fetched with the login, so a changed series must
     // not stay broken from the previous attempt.
     broken = false;

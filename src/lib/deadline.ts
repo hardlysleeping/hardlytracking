@@ -153,27 +153,23 @@ export function deadlined(fetchImpl: typeof fetch, ms = RUNTIME_DEADLINE_MS, lab
  * The underlying work keeps running — there is nothing safe to cancel — but the caller stops
  * waiting, and the chip stops counting it.
  */
-export function withDeadline<T>(work: Promise<T>, ms = RUNTIME_DEADLINE_MS, label = "the source"): Promise<T> {
+export function withDeadline<T>(work: Promise<T>, ms = RUNTIME_DEADLINE_MS, label = "the source", signal?: AbortSignal): Promise<T> {
   return new Promise<T>((resolve, reject) => {
-    const end = activity.begin(label);
-    const timer = setTimeout(() => {
-      // The work keeps running (there is nothing safe to cancel), but nobody is waiting for it any
-      // more — and the chip must stop counting it, or a hung call leaves "waiting on the source"
-      // on screen forever.
+    const end = signal?.aborted ? () => {} : activity.begin(label);
+    let settled = false;
+    const finish = (callback: () => void) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', abort);
       end();
-      reject(new DeadlineError(label, ms));
-    }, ms);
-    work.then(
-      (value) => {
-        clearTimeout(timer);
-        end();
-        resolve(value);
-      },
-      (error) => {
-        clearTimeout(timer);
-        end();
-        reject(error);
-      },
-    );
+      callback();
+    };
+    const abort = () => finish(() => reject(signal?.reason));
+    const timer = setTimeout(() => finish(() => reject(new DeadlineError(label, ms))), ms);
+    // Always observe the work, even when already cancelled: an abandoned rejection is not unhandled.
+    work.then(value => finish(() => resolve(value)), error => finish(() => reject(error)));
+    if (signal?.aborted) abort();
+    else signal?.addEventListener('abort', abort, {once: true});
   });
 }

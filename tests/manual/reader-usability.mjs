@@ -47,8 +47,13 @@ try{
  await drag();
  const after=await page.locator('.scroller').evaluate(el=>el.scrollTop);
  assert.ok(after>before+100);assert.equal(await page.locator('.reader').evaluate(el=>el.classList.contains('hide')),true);
+ // Loading deliberately pins the exit header even when .reader.hide is set. Prove this is
+ // a ready reader and its rendered chrome really hid, rather than weakening the toggle check.
+ assert.equal(await page.locator('.loading').count(),0);
+ assert.equal(await page.locator('header').evaluate(el=>getComputedStyle(el).opacity),'0');
  result.gestures.closedDrag={before,after};
  await page.touchscreen.tap(195,400);assert.equal(await page.locator('.reader').evaluate(el=>el.classList.contains('hide')),false);
+ await page.waitForFunction(()=>getComputedStyle(document.querySelector('header')).opacity==='1');
  const openBefore=await page.locator('.scroller').evaluate(el=>el.scrollTop);await drag();
  assert.ok(await page.locator('.scroller').evaluate(el=>el.scrollTop)>openBefore+100);
  result.gestures.openDrag=true;

@@ -309,6 +309,9 @@ export async function openDalvik(
 ): Promise<{ dalvik: DalvikHost | null; provider: SourceProvider | null; warning: string | null }> {
   const client = new DalvikClient({
     baseUrl,
+    // Runtime-owned proxy URLs belong to the host we actually reached, even if its
+    // advertised hostname/port differs (localhost versus the native bridge's 127.0.0.1).
+    rewriteRuntimeAssets: true,
     ...(config.fetchImpl === undefined ? {} : { fetchImpl: config.fetchImpl }),
   });
   try {

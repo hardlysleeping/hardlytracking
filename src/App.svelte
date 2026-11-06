@@ -9,7 +9,6 @@
   import { onMount } from "svelte";
   import AppShell from "./components/AppShell.svelte";
   import Library from "./views/Library.svelte";
-  import Updates from "./views/Updates.svelte";
   import Browse from "./views/Browse.svelte";
   import History from "./views/History.svelte";
   import Stats from "./views/Stats.svelte";
@@ -27,6 +26,7 @@
   import Downloads from "./views/Downloads.svelte";
   import Backup from "./views/Backup.svelte";
   import Welcome from "./components/Welcome.svelte";
+  import GlobalWarning from "./components/GlobalWarning.svelte";
   import SlowNotice from "./components/SlowNotice.svelte";
 
   import { bootReport, library } from "./state/library.svelte";
@@ -154,17 +154,14 @@ import { sourceMarks } from "./state/source-marks.svelte";
         completely normal until someone closes the app and finds nothing they did survived. One
         sentence, dismissible by fixing the cause, not by tapping an X.
       -->
-      <p class="nostore" role="status">{library.error}</p>
+      <GlobalWarning message={library.error ?? "Device storage is unavailable."} />
     {:else if library.error !== null && library.error !== dismissedWarning}
       <!--
         A host that did not start is not silence. It used to be written into `library.error` and drawn
         nowhere, so the phone looked like it had simply lost the feature. One line, dismissible —
         the same sentence on every launch until the host works is still worth a tap.
       -->
-      <p class="nostore" role="status">
-        {library.error}
-        <button class="dismiss" onclick={() => (dismissedWarning = library.error)} aria-label="Dismiss">×</button>
-      </p>
+      <GlobalWarning message={library.error} ondismiss={() => (dismissedWarning = library.error)} />
     {/if}
     {#if !library.ready && library.openError === null && active === "library"}
       <!--
@@ -193,7 +190,7 @@ import { sourceMarks } from "./state/source-marks.svelte";
         <p><button class="btn ghost" onclick={() => void library.retry()}>Try again</button></p>
       </div>
     {:else if route.name === "updates"}
-      <Updates />
+      <Library initialTab="updates" />
     {:else if route.name === "browse"}
       <Browse />
     {:else if route.name === "history"}
@@ -246,16 +243,6 @@ import { sourceMarks } from "./state/source-marks.svelte";
     font-size: var(--t-sm);
   }
 
-  .nostore .dismiss {
-    float: right;
-    margin-left: var(--s3);
-    padding: 0 var(--s2);
-    border: 0;
-    background: none;
-    color: inherit;
-    font-size: var(--t-md);
-    cursor: pointer;
-  }
 
   .boot .bootline {
     margin: 0;
@@ -267,12 +254,4 @@ import { sourceMarks } from "./state/source-marks.svelte";
     font-size: var(--t-xs);
   }
 
-  .nostore {
-    margin: 0;
-    padding: var(--s3) var(--s4);
-    border-bottom: 1px solid var(--line-strong);
-    background: var(--surface);
-    color: var(--text-1);
-    font-size: var(--t-sm);
-  }
 </style>

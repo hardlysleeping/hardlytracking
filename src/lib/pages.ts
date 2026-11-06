@@ -31,10 +31,10 @@ import { DeadlineError, withDeadline } from "./deadline";
  * refuses private addresses, and a Komga is nearly always one — so a page that carries a header is
  * fetched here instead and handed back as a blob. Both paths end in one string the reader uses.
  */
-export async function pageSrc(page: Page): Promise<string> {
+export async function pageSrc(page: Page, signal?: AbortSignal): Promise<string> {
   // A page this device can produce itself (an image inside a CBZ, a PDF page): the reader asks for it
   // when it is near the viewport, and the blob URL is reused while the page stays in the window.
-  if (page.open !== undefined) return localPageSrc(page);
+  if (page.open !== undefined) return localPageSrc(page, signal);
   if (page.headers === undefined || Object.keys(page.headers).length === 0) return page.url;
   // Two reasons to fetch the bytes here instead of pointing at the proxy: there is no proxy (a
   // packaged app), or the source is on the private network and `/api/img` refuses those by design.
@@ -82,7 +82,8 @@ const localPages = new Map<string, string>();
  */
 const LOCAL_PAGE_DEADLINE_MS = 45_000;
 
-async function localPageSrc(page: Page): Promise<string> {
+async function localPageSrc(page: Page, signal?: AbortSignal): Promise<string> {
+  signal?.throwIfAborted();
   const cached = localPages.get(page.url);
   if (cached !== undefined) {
     localPages.delete(page.url);
@@ -92,13 +93,14 @@ async function localPageSrc(page: Page): Promise<string> {
   const label = `page ${page.index + 1}`;
   let blob: Blob;
   try {
-    blob = await withDeadline(page.open!(), LOCAL_PAGE_DEADLINE_MS, label);
+    blob = await withDeadline(page.open!(), LOCAL_PAGE_DEADLINE_MS, label, signal);
   } catch (error) {
     if (error instanceof DeadlineError) {
       throw new Error(`${label} is still being drawn after ${Math.round(error.ms / 1000)} s — this book's page encoding is slow to decode`);
     }
     throw error;
   }
+  signal?.throwIfAborted();
   const url = URL.createObjectURL(blob);
   localPages.set(page.url, url);
   while (localPages.size > LOCAL_PAGE_LIMIT) {

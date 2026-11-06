@@ -5,6 +5,9 @@
    * It is a shortcut back into a book, not an audit log — so each row is a cover, the chapter, how
    * long ago, and a Continue button. The groups are Today / Yesterday / This week / Earlier.
    */
+  import Sheet from "../components/Sheet.svelte";
+  import { incognito } from "../state/incognito.svelte";
+  import { historySwipe, selectedHistoryIds } from "../lib/history-controls";
   import { privacy } from "../state/privacy.svelte";
   import { library } from "../state/library.svelte";
   import Cover from "../components/Cover.svelte";
@@ -31,6 +34,52 @@
 
   let rows = $state<Row[]>([]);
   let loading = $state(true);
+  let selecting = $state(false);
+  let selected = $state<Set<string>>(new Set());
+  let revealed = $state<string | null>(null);
+  let pending = $state<string[]>([]);
+  let removing = $state(false);
+  let error = $state<string | null>(null);
+  let start: { x: number; y: number; id: number } | null = null;
+  let swiped = false;
+
+  function toggleSelected(id: string): void {
+    const next = new Set(selected);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    selected = next;
+  }
+
+  function pointerStart(event: PointerEvent): void {
+    if (!event.isPrimary || event.button !== 0) return;
+    start = { x: event.clientX, y: event.clientY, id: event.pointerId };
+    swiped = false;
+  }
+
+  function pointerEnd(event: PointerEvent, chapterId: string): void {
+    if (start === null || start.id !== event.pointerId) return;
+    const swipe = historySwipe(event.clientX - start.x, event.clientY - start.y);
+    start = null;
+    if (swipe === null || selecting) return;
+    swiped = true;
+    revealed = swipe === "reveal" ? chapterId : null;
+  }
+
+  async function removePending(): Promise<void> {
+    removing = true;
+    error = null;
+    try {
+      // Privacy marks may have changed while the confirmation was open.
+      const ids = pending.filter((id) => shown.some((row) => row.chapterId === id));
+      await library.removeHistoryEntries(ids);
+      const removed = new Set(ids);
+      rows = rows.filter((row) => !removed.has(row.chapterId));
+      selected = new Set([...selected].filter((id) => !removed.has(id)));
+      pending = [];
+      revealed = null;
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e);
+    } finally { removing = false; }
+  }
   /** The row shown in the detail pane when there is one. */
   let picked = $state<string | null>(null);
 
@@ -59,6 +108,9 @@
 
   /** A row opens the reader everywhere except in the split, where it fills the pane. */
   function open(row: Row): void {
+    if (swiped) { swiped = false; return; }
+    if (selecting) { toggleSelected(row.chapterId); return; }
+    if (revealed !== null) { revealed = null; return; }
     if (mode === "split") {
       picked = row.chapterId;
       return;
@@ -155,6 +207,8 @@
     ),
   );
 
+  const selectedIds = $derived(selectedHistoryIds(selected, shown));
+
   // A previously picked private row must not survive in the split detail pane.
   const pickedRow = $derived(shown.find((row) => row.chapterId === picked) ?? shown[0] ?? null);
 
@@ -188,10 +242,23 @@
 </script>
 
 <section class="view">
+  <div class="pin">
   <header class="top">
     <h1>History</h1>
     <span class="count">{shown.length}</span>
+    <button class="btn" aria-pressed={incognito.active} onclick={() => incognito.toggle()}>Incognito{incognito.active ? " on" : " off"}</button>
+    <button class="btn" aria-pressed={selecting} onclick={() => { selecting = !selecting; selected = new Set(); revealed = null; }}>{selecting ? "Done" : "Select"}</button>
   </header>
+  {#if incognito.active}<p class="privacy-note" role="status">Incognito is on until you turn it off or restart the app. History and reading sessions are paused; progress and read marks still save.</p>{:else if settings.historyPaused}<p class="privacy-note">History is paused in Settings.</p>{/if}
+  {#if selecting}
+    <div class="selection-actions">
+      <span>{selectedIds.length} selected</span>
+      <button class="btn" onclick={() => selected = new Set(shown.map((row) => row.chapterId))}>Select all</button>
+      <button class="btn" disabled={selectedIds.length === 0} onclick={() => pending = [...selectedIds]}>Remove selected</button>
+    </div>
+  {/if}
+  </div>
+  {#if error && pending.length === 0}<p class="banner" role="alert">{error}</p>{/if}
 
   {#if loading}
     <p class="empty">Reading history…</p>
@@ -205,22 +272,30 @@
     {#if isSqueezed}
       <p class="squeeze">Two panes need a wider window — showing one until there is room.</p>
     {/if}
-    <div class="panes" class:split={mode === "split"} style:--ratio={ratio}>
+    <div class="panes" class:split={mode === "split" && !selecting} style:--ratio={ratio}>
     {#each groups as group (group.label)}
       <section class="group">
         <h2>{group.label}</h2>
         <ul class="rows">
           {#each group.rows as row (row.chapterId)}
-            <li>
-              <div class="row" class:on={mode === "split" && pickedRow?.chapterId === row.chapterId}>
-                <button class="hit" aria-label={`${row.title} — ${row.chapterName}`} onclick={() => open(row)}></button>
+            <li class="entry" class:revealed={revealed === row.chapterId}>
+              {#if revealed === row.chapterId}
+                <button class="btn remove" onclick={() => pending = [row.chapterId]}>Remove</button>
+              {/if}
+              <div class="row" class:on={selecting ? selected.has(row.chapterId) : mode === "split" && pickedRow?.chapterId === row.chapterId}>
+                <button class="hit" aria-label={`${selecting ? "Select " : ""}${row.title} — ${row.chapterName}`} aria-pressed={selecting ? selected.has(row.chapterId) : undefined}
+                  onpointerdown={pointerStart} onpointerup={(event) => pointerEnd(event, row.chapterId)} onpointercancel={() => { start = null; swiped = false; }}
+                  onclick={() => open(row)}></button>
+                {#if selecting}<span class="check" aria-hidden="true">{selected.has(row.chapterId) ? "☑" : "☐"}</span>{/if}
                 <Cover series={{ title: row.title, cover: row.cover }} size="row" />
                 <div class="info">
                   <span class="t">{row.title}</span>
                   <span class="s">{row.chapterName} · page {row.page + 1} · {ago(row.at)}</span>
                 </div>
-                {#if mode !== "split"}
-                  <button class="btn ghost" onclick={() => open(row)}>Continue</button>
+                {#if !selecting}
+                  {#if mode !== "split"}<button class="btn ghost action" onclick={() => open(row)}>Continue</button>{/if}
+                  <button class="btn ghost action" aria-label={`Actions for ${row.title} — ${row.chapterName}`} aria-expanded={revealed === row.chapterId}
+                    onclick={() => { swiped = false; revealed = revealed === row.chapterId ? null : row.chapterId; }}>⋯</button>
                 {/if}
               </div>
             </li>
@@ -229,7 +304,7 @@
       </section>
     {/each}
 
-    {#if mode === "split" && pickedRow !== null}
+    {#if mode === "split" && pickedRow !== null && !selecting}
       <aside class="detail" aria-label="Selected entry">
         <div class="dcover">
           <Cover series={{ title: pickedRow.title, cover: pickedRow.cover }} size="hero" />
@@ -250,7 +325,25 @@
   {/if}
 </section>
 
+<Sheet open={pending.length > 0} title="Remove reading history?" onclose={() => { if (!removing) { pending = []; error = null; } }}>
+  <p>Remove {pending.length} {pending.length === 1 ? "entry" : "entries"} and their reading sessions? Progress, read marks, bookmarks and downloads will stay.</p>
+  {#if error}<p class="banner" role="alert">{error}</p>{/if}
+  <div class="selection-actions">
+    <button class="btn" disabled={removing} onclick={() => { pending = []; error = null; }}>Cancel</button>
+    <button class="btn" disabled={removing} onclick={() => void removePending()}>{removing ? "Removing…" : "Remove"}</button>
+  </div>
+</Sheet>
+
 <style>
+  .entry { position: relative; overflow: hidden; border-radius: var(--r2); }
+  .entry .row { background: var(--surface); transition: transform 160ms ease; }
+  .entry.revealed .row { transform: translateX(-100px); }
+  .remove { position: absolute; right: 0; top: 0; bottom: 0; width: 96px; }
+  .hit { touch-action: pan-y; }
+  .action { position: relative; z-index: 1; }
+  .privacy-note { font-size: var(--t-sm); color: var(--text-2); margin-bottom: var(--s3); }
+  .selection-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); margin-block: var(--s3); }
+  @media (prefers-reduced-motion: reduce) { .entry .row { transition: none; } }
   .panes.split {
     display: grid;
     grid-template-columns: minmax(0, calc(var(--ratio) * 100% - 12px)) minmax(0, 1fr);
@@ -333,13 +426,16 @@
   }
 
   .view {
-    padding: var(--s4) var(--s4) var(--s7);
+    padding: var(--s3) var(--s4) var(--s7);
+    --pad-x: var(--s4);
+    --pad-y: var(--s3);
     max-width: 820px;
   }
 
   .top {
     display: flex;
-    align-items: baseline;
+    align-items: center;
+    flex-wrap: wrap;
     gap: var(--s2);
     margin-bottom: var(--s4);
   }

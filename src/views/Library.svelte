@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Updates from "./Updates.svelte";
   /**
    * The library: the shelf, and the controls that narrow it.
    *
@@ -49,7 +50,7 @@
   import SeriesPage from "./Series.svelte";
   import type { Series } from "../api/source";
 
-  let { current = null }: { current?: string | null } = $props();
+  let { current = null, initialTab = "titles" }: { current?: string | null; initialTab?: "titles" | "updates" } = $props();
 
   /**
    * Which category the rail is pointing at; `null` is the whole library. It lives in
@@ -739,6 +740,8 @@
 </script>
 
 <section class="view">
+  <div class="pin">
+  {#if initialTab === "updates"}<h1 class="library-title">Library</h1>{:else}
   <LibraryHeader
     count={rows.length}
     total={visible.length}
@@ -757,7 +760,15 @@
     ontext={(value) => (libraryMemory.query = value)}
     onscope={(scope) => (libraryMemory.scope = scope)}
   />
-
+  {/if}
+  <nav class="library-tabs" aria-label="Library sections">
+    <button class="btn" aria-current={initialTab === "titles" ? "page" : undefined} onclick={() => go("/library")}>Titles</button>
+    <button class="btn" aria-current={initialTab === "updates" ? "page" : undefined} onclick={() => go("/updates")}>Updates</button>
+  </nav>
+  </div>
+  {#if initialTab === "updates"}
+    <Updates />
+  {:else}
   {#if offline}
     <p class="offline" role="status">{OFFLINE_NOTE}</p>
   {/if}
@@ -904,6 +915,7 @@
       </div>
     </div>
   {/if}
+  {/if}
 </section>
 
 <SortSheet
@@ -1027,6 +1039,9 @@
 </Sheet>
 
 <style>
+  .library-title { font-size: var(--t-2xl); font-weight: 650; }
+  .library-tabs { display: flex; gap: var(--s2); padding-block: var(--s2); }
+  .library-tabs [aria-current="page"] { color: var(--accent); border-color: var(--accent); }
   /* One line, in place: no dialog, no empty screen, nothing else on this page changes. */
   .offline {
     margin: 0 var(--s3) var(--s2);

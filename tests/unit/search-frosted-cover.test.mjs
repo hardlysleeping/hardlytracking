@@ -19,10 +19,12 @@ test("the tile reports the URL it resolved, not the raw cover field", () => {
   // A login-protected or owned cover only exists as a cache blob URL; reporting `series.cover`
   // would give the pane a URL that cannot be drawn while the tile draws fine.
   assert.match(flat(cover), /onresolve\?: \(src: string \| undefined\) => void;/);
-  assert.match(flat(cover), /src = loadable\(url, needsLogin\); onresolve\?\.\(src\);/);
+  // The synchronous report must not subscribe the loader to its own async `src` result.
+  assert.match(flat(cover), /const initial = loadable\(url, needsLogin\); src = initial;/);
+  assert.match(flat(cover), /untrack\(\(\) => onresolve\?\.\(initial\)\);/);
   assert.match(flat(cover), /src = resolved; onresolve\?\.\(resolved\);/);
   // No cover at all must also be reported, or a pane opened over a previous title keeps its glass.
-  assert.match(flat(cover), /src = undefined; onresolve\?\.\(undefined\);/);
+  assert.match(flat(cover), /src = undefined; untrack\(\(\) => onresolve\?\.\(undefined\)\);/);
 });
 
 test("the expanded card reuses the hero tile's resolution instead of resolving again", () => {

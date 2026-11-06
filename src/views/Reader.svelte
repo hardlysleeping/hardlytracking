@@ -42,7 +42,9 @@
 
   const ahead = $derived(readAheadOf(settings.readerAhead));
   const pageWindow = $derived(Math.max(4, ahead));
-  const queue = new ReaderQueue();
+  let queue = new ReaderQueue();
+  let loadController: AbortController | null = null;
+  let disposed = false;
   const jobs = new Map<number, ReaderJob>();
   let pageAspect = $state(0);
   let aspects = $state<Record<number, number>>({});
@@ -50,6 +52,7 @@
   let generation = 0;
 
   function schedulePages(): void {
+    if (disposed) return;
     queue.set(readerOrder(index, pages.length, ahead, ahead === 0 ? 0 : 1).flatMap(i => {
       const job = jobs.get(i);
       return job ? [job] : [];
@@ -61,7 +64,8 @@
     void tick().then(schedulePages);
   });
   $effect(() => () => {
-    generation++; queue.cancel();
+    disposed = true;
+    generation++; loadController?.abort(); queue.cancel();
     if (saveTimer !== null) clearTimeout(saveTimer);
   });
 
@@ -69,9 +73,9 @@
     let live = true;
     const job: ReaderJob = { async run(signal) {
       try {
-        // page.open / imageCache do not accept AbortSignal. Keep the one worker occupied until
-        // they settle, then discard obsolete results; never start an old chapter's queued pages.
-        const src = await withDeadline(pageSrc(page), 45_000, `page ${page.index + 1}`);
+        // Producers may not accept AbortSignal. Cancel our wait/activity immediately and discard
+        // late results; native work may finish internally but cannot own the next chapter's UI.
+        const src = await withDeadline(pageSrc(page, signal), 45_000, `page ${page.index + 1}`, signal);
         if (!live || signal.aborted) return;
         await new Promise<void>((resolve, reject) => {
           const cleanup = () => {
@@ -102,7 +106,8 @@
             scroller?.scrollBy(horizontal ? {left: after.left - before.left, behavior:'instant'} : {top: after.top - before.top, behavior:'instant'});
           }
         }
-        await withDeadline(node.decode(), 45_000, `decoding page ${page.index + 1}`);
+        await withDeadline(node.decode(), 45_000, `decoding page ${page.index + 1}`, signal);
+        if (!live || signal.aborted) return;
         // Two frames: the first commits layout, the second runs after that frame was painted.
         // Background tabs deliberately do not start more page work until painting resumes.
         await new Promise<void>(resolve => {
@@ -218,7 +223,7 @@
    * empty. Chrome hides itself on a timer, and a hidden header is a reader with no way out — so in
    * that state the header stays on screen however long the reader sits there.
    */
-  const stuck = $derived(error !== null || (!busy && pages.length === 0));
+  const stuck = $derived(busy || error !== null || pages.length === 0);
 
   /** Autoscroll only makes sense where the page scrolls vertically as one column. */
   const canAutoscroll = $derived(settings.readerMode === "vertical" || settings.readerMode === "webtoon");
@@ -281,7 +286,9 @@
 
   $effect(() => {
     const id = chapterId;
+    void seriesId; // A corrected route/profile also owns a distinct load lifecycle.
     if (library.profile !== null) untrack(() => { void load(id); });
+    return () => { generation++; loadController?.abort(); queue.cancel(); };
   });
 
   /**
@@ -368,14 +375,15 @@
    * With the extension host down, a downloaded chapter must still open — the name and the
    * prev/next buttons are a nicety, and a failed fetch must not take the chapter with it.
    */
-  async function chapterList(seriesId: string): Promise<Chapter[]> {
+  async function chapterList(seriesId: string, signal: AbortSignal): Promise<Chapter[]> {
     try {
-      return await withDeadline(library.chapters(seriesId), RUNTIME_DEADLINE_MS, "the chapter list");
+      return await withDeadline(library.chapters(seriesId), RUNTIME_DEADLINE_MS, "the chapter list", signal);
     } catch {
+      signal.throwIfAborted();
       // A stored list is the fallback when the source is down — and it too can hang, if the database
       // is the thing that stopped answering. An empty chapter list is a reader that still reads.
       try {
-        return (await withDeadline(library.profile?.store.listChapters(seriesId) ?? Promise.resolve([]), RUNTIME_DEADLINE_MS, "the stored chapter list")) ?? [];
+        return (await withDeadline(library.profile?.store.listChapters(seriesId) ?? Promise.resolve([]), RUNTIME_DEADLINE_MS, "the stored chapter list", signal)) ?? [];
       } catch {
         return [];
       }
@@ -388,18 +396,19 @@
    * Local URLs paint without waiting on missing pages. Gaps join the sequential queue and report
    * their own failure when offline, while the available pages remain readable.
    */
-  function openLocal(local: LocalChapter): void {
+  function openLocal(local: LocalChapter, signal: AbortSignal): void {
     // Local bytes paint immediately. Only a missing page asks for remote metadata/bytes, inside
     // the same one-worker queue as every other page; no Promise.all gate over the whole chapter.
     let remote: Promise<Page[]> | null = null;
     pages = local.urls.map((url, index) => url !== null ? {index, url} : {
       index, url: `missing:${local.chapterId}:${index}`,
       open: async () => {
-        remote ??= withDeadline(library.pages(local.chapterId), RUNTIME_DEADLINE_MS, 'the missing pages');
+        signal.throwIfAborted();
+        remote ??= withDeadline(library.pages(local.chapterId), RUNTIME_DEADLINE_MS, 'the missing pages', signal);
         const fallback = (await remote)[index];
         if (!fallback) throw new Error(`Page ${index + 1} is not on this device`);
-        const src = await pageSrc(fallback);
-        const response = await fetch(src);
+        const src = await pageSrc(fallback, signal);
+        const response = await fetch(src, {signal});
         if (!response.ok) throw new Error(`Page ${index + 1}: ${response.status}`);
         return response.blob();
       },
@@ -414,12 +423,13 @@
    * One lookup, bounded like every other database step here. The route's answer is the fallback: a
    * chapter the library has no row for keeps the series the URL named instead of getting nothing.
    */
-  async function ownerOf(routeId: string, id: string): Promise<string> {
+  async function ownerOf(routeId: string, id: string, signal: AbortSignal): Promise<string> {
     try {
       const row = await withDeadline(
         library.profile?.store.getChapter(id) ?? Promise.resolve(undefined),
         RUNTIME_DEADLINE_MS,
         "the library database",
+        signal,
       );
       const stated = row?.seriesId ?? "";
       return stated === "" ? routeId : stated;
@@ -430,6 +440,9 @@
 
   async function load(id: string): Promise<void> {
     if (library.profile === null) return;
+    loadController?.abort();
+    const controller = loadController = new AbortController();
+    const signal = controller.signal;
     const token = ++generation;
     const stale = Symbol('obsolete chapter');
     const guard = async <T,>(work: Promise<T>): Promise<T> => {
@@ -441,6 +454,11 @@
     if (saveTimer !== null) clearTimeout(saveTimer);
     saveTimer = null;
     queue.cancel();
+    // A new chapter must not wait behind an old non-abortable page producer.
+    queue = new ReaderQueue();
+    stopAuto();
+    settingsOpen = false;
+    chrome = true;
     jobs.clear();
     pageAspect = 0;
     aspects = {};
@@ -465,13 +483,13 @@
       // no way out, which is indistinguishable from a frozen app. Each one now says which part it
       // was waiting on, in the same 30 s the rest of the app uses for a source that has gone quiet.
       // A downloaded chapter wins: it is the one that works with no network.
-      const local = await guard(withDeadline(downloads.local(id), RUNTIME_DEADLINE_MS, "this device's downloads"));
+      const local = await guard(withDeadline(downloads.local(id), RUNTIME_DEADLINE_MS, "this device's downloads", signal));
       const nextPages = local === null
-        ? await guard(withDeadline(library.pages(id), RUNTIME_DEADLINE_MS, 'the page list')) : null;
-      const progress = await guard(withDeadline(library.profile.store.getProgress(id), RUNTIME_DEADLINE_MS, 'the library database'));
+        ? await guard(withDeadline(library.pages(id), RUNTIME_DEADLINE_MS, 'the page list', signal)) : null;
+      const progress = await guard(withDeadline(library.profile.store.getProgress(id), RUNTIME_DEADLINE_MS, 'the library database', signal));
       index = Math.min(progress?.page ?? 0, Math.max((local?.urls.length ?? nextPages?.length ?? 0) - 1, 0));
       fromDownload = local !== null;
-      if (local !== null) openLocal(local);
+      if (local !== null) openLocal(local, signal);
       else pages = nextPages ?? [];
       // Only the resumed/current page may start first. Metadata/history are not a paint gate.
       busy = false;
@@ -479,17 +497,17 @@
       if (token !== generation) return;
       scrollToPage(index, 'auto');
       read = library.ownsProgress(id)
-        ? await guard(withDeadline(library.profile.store.isRead(id), RUNTIME_DEADLINE_MS, "the library database"))
+        ? await guard(withDeadline(library.profile.store.isRead(id), RUNTIME_DEADLINE_MS, "the library database", signal))
         : false;
 
       // A URL that names another series is corrected before anything is written with it: from here
       // on the address bar, the back link and the two chapter buttons all use `owner`.
-      owner = await guard(ownerOf(seriesId, id));
+      owner = await guard(ownerOf(seriesId, id, signal));
       if (owner !== seriesId) history.replaceState(null, "", `#${pathTo("read", owner, id)}`);
 
       // The chapter list is a nicety for the name and the prev/next buttons; with the host down
       // it must not stop a downloaded chapter from opening, so the stored list is the fallback.
-      const list = await guard(chapterList(owner));
+      const list = await guard(chapterList(owner, signal));
       chapters = list;
       chapterName =
         list.find((row) => row.id === id)?.name ??
@@ -497,12 +515,17 @@
       // Opening a chapter is the moment history exists; it is not a read mark. Neither write is
       // worth a reader that never opens, so both are bounded: a place that cannot be saved in 30 s
       // is reported, and the pages are still shown.
-      await guard(withDeadline(library.remember(owner, id, index, pages.length), RUNTIME_DEADLINE_MS, "saving your place"));
+      await guard(withDeadline(library.remember(owner, id, index, pages.length), RUNTIME_DEADLINE_MS, "saving your place", signal));
       // One session per chapter opened: the previous one is closed at the page it reached, so a
       // chapter-to-chapter jump does not leave a session running forever.
       closeSession();
       lastPage = index;
-      const opened = await withDeadline(library.beginSession(owner, id, index), RUNTIME_DEADLINE_MS, "saving your place");
+      const openedAtPage = index;
+      const opening = library.beginSession(owner, id, openedAtPage);
+      void opening.then(opened => {
+        if (signal.aborted && opened !== null) void library.endSession(opened, openedAtPage, false);
+      }, () => {});
+      const opened = await withDeadline(opening, RUNTIME_DEADLINE_MS, "saving your place", signal);
       if (token !== generation) {
         if (opened !== null) void library.endSession(opened, index, false);
         return;
@@ -587,6 +610,8 @@
 
   async function toggleRead(): Promise<void> {
     if (library.profile === null) return;
+    const token = generation;
+    const nextRead = !read;
     try {
       if (library.ownsProgress(chapterId)) {
         await library.profile.store.setRead(chapterId, !read);
@@ -594,9 +619,9 @@
         const provider = providerFor(library.profile.providers, chapterId);
         await provider.setRead(chapterId, !read);
       }
-      read = !read;
+      if (token === generation) read = nextRead;
     } catch (e) {
-      error = e instanceof Error ? e.message : String(e);
+      if (token === generation) error = e instanceof Error ? e.message : String(e);
     }
   }
 
@@ -862,7 +887,7 @@
     display: flex;
     align-items: center;
     gap: var(--s2);
-    padding: var(--s2) var(--s3);
+    padding: var(--s2) calc(var(--s3) + var(--safe-r)) var(--s2) calc(var(--s3) + var(--safe-l));
     background: color-mix(in srgb, #000 72%, transparent);
     backdrop-filter: blur(14px);
     transition: opacity var(--dur), transform var(--dur);
@@ -921,8 +946,15 @@
   }
 
   .scroller {
-    position: relative;
-    flex: 1;
+    /* The surface, not just its controls, stays below the status bar. Reading may
+       use the full bottom edge; only interactive chrome reserves the home inset. */
+    --reader-width: calc(100vw - var(--safe-l) - var(--safe-r));
+    --reader-height: calc(100dvh - var(--safe-t));
+    position: absolute;
+    top: var(--safe-t);
+    bottom: 0;
+    left: var(--safe-l);
+    right: var(--safe-r);
     min-height: 0;
     overflow: auto;
     display: flex;
@@ -951,13 +983,13 @@
     justify-content: safe center;
     min-width: 100%;
     width: max-content;
-    min-height: calc(min(100vw, 900px) / var(--aspect));
+    min-height: calc(min(var(--reader-width), 900px) / var(--aspect));
   }
   .scroller.horizontal .page { scroll-snap-align: start; }
   img {
     display: block;
     flex: none;
-    width: min(100vw, 900px);
+    width: min(var(--reader-width), 900px);
     height: auto;
     max-width: none;
     user-select: none;
@@ -967,19 +999,21 @@
   img:not([src]) { visibility: hidden; }
   /* object-fit cannot resize an auto-sized image, and width/height are not valid values.
      Give each fit actual dimensions. Height may pan horizontally; Whole page never clips. */
-  .scroller[data-fit='height'] .page { min-height: 100dvh; }
-  .scroller[data-fit='height'] img { width: auto; height: 100dvh; }
+  .scroller[data-fit='height'] .page { min-height: var(--reader-height); }
+  .scroller[data-fit='height'] img { width: auto; height: var(--reader-height); }
   .scroller[data-fit='contain'] .page {
-    min-height: min(100dvh, calc(100vw / var(--aspect)));
+    width: 100%;
+    min-height: var(--reader-height);
+    align-items: center;
   }
   .scroller[data-fit='contain'] img {
     width: auto;
     height: auto;
-    max-width: 100vw;
-    max-height: 100dvh;
+    max-width: var(--reader-width);
+    max-height: var(--reader-height);
   }
-  /* Paged slots stay viewport-wide/high even for a small image. */
-  .scroller.horizontal .page { min-height: 100dvh; }
+  /* Paged slots stay surface-wide/high even for a small image. */
+  .scroller.horizontal .page { min-height: var(--reader-height); }
 
   .loading {
     position: absolute;
@@ -1033,13 +1067,15 @@
   }
 
   .turn {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
+    display: flex;
+    justify-content: space-between;
     gap: var(--s2);
   }
 
   .turn .btn {
-    min-height: 48px;
+    min-height: 44px;
+    padding: 0 var(--s2);
+    font-size: var(--t-sm);
     justify-content: center;
     color: var(--text-1);
     border-color: var(--line-strong);

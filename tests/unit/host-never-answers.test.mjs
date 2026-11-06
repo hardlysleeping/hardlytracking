@@ -116,6 +116,10 @@ test("openDalvik attaches a host that does answer, with no restart", async () =>
     assert.ok(attached.dalvik !== null, "no host attached");
     assert.equal(attached.dalvik.baseUrl, `http://127.0.0.1:${port}`);
     assert.equal(attached.provider?.kind, "dalvik");
+    // Embedded hosts can mint localhost URLs although the bridge is reached on 127.0.0.1.
+    // Only runtime-owned image/video routes should move; a source CDN must stay untouched.
+    assert.equal(attached.dalvik.client.asset('http://localhost:8747/image/fixture-cover'), `http://127.0.0.1:${port}/image/fixture-cover`);
+    assert.equal(attached.dalvik.client.asset('https://cdn.fixture.test/cover.png'), 'https://cdn.fixture.test/cover.png');
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }

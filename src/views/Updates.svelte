@@ -106,7 +106,7 @@
 
 <section class="view">
   <header class="top">
-    <h1>Updates</h1>
+    <h2 class="heading">Updates</h2>
     <button class="btn" disabled={loading} onclick={() => void refresh()}>{loading ? "Checking…" : "Check now"}</button>
   </header>
 
@@ -176,7 +176,7 @@
     margin-bottom: var(--s4);
   }
 
-  h1 {
+  .heading {
     font-size: var(--t-2xl);
     font-weight: 650;
   }

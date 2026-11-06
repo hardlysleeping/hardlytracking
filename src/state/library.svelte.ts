@@ -15,6 +15,7 @@ import type { RepoRow, ViewStateRow } from "../lib/db/store";
 import { BACKGROUND_GRACE_MS, viewStateKey } from "../lib/history";
 import { nextUnread, seriesOfPosition } from "../lib/library/continue";
 import { settings } from "./settings.svelte";
+import { incognito } from "./incognito.svelte";
 import { shouldKeepTitle } from "../lib/offline/policy";
 import { requestKeep } from "../lib/offline/sink";
 import { installTrackerSync } from "../lib/trackers/sync";
@@ -725,7 +726,7 @@ class LibraryState {
     for (const row of plan.markRead) {
       await store.setRead(row.chapterId, true, { push: false });
       // The server's own timestamp, so History says when it was read rather than when we noticed.
-      if (row.at !== undefined && !settings.historyPaused) {
+      if (row.at !== undefined && !(settings.historyPaused || incognito.active)) {
         await store.recordHistory(seriesId, row.chapterId, row.at);
       }
     }
@@ -763,7 +764,7 @@ class LibraryState {
     // turned history off, because Continue Reading is not surveillance.
     await store.setProgress(chapterId, page, total);
     await store.setPosition(seriesId, chapterId, page);
-    if (settings.historyPaused) return;
+    if (settings.historyPaused || incognito.active) return;
     await store.recordHistory(seriesId, chapterId);
   }
 
@@ -781,14 +782,16 @@ class LibraryState {
    * its own "reading session" in History.
    */
   async beginSession(seriesId: string, chapterId: string, page: number): Promise<string | null> {
-    if (this.profile === null || settings.historyPaused) return null;
+    if (this.profile === null || (settings.historyPaused || incognito.active)) return null;
     const store = this.profile.store;
     try {
       const last = await store.lastSessionFor(chapterId);
+      if (settings.historyPaused || incognito.active) return null;
       if (last !== undefined && last.endedAt === undefined && Date.now() - last.startedAt < BACKGROUND_GRACE_MS) {
         return last.id;
       }
       const mapping = await store.getMapping(seriesId);
+      if (settings.historyPaused || incognito.active) return null;
       return await store.beginSession({ seriesId, sourceId: mapping?.sourceId, chapterId, startPage: page });
     } catch {
       return null; // a session is a nicety; never let it break opening a chapter
@@ -847,6 +850,13 @@ class LibraryState {
     const removed = await store.clearHistory(range);
     this.historyClearedAt = Date.now();
     return removed;
+  }
+
+  async removeHistoryEntries(chapterIds: readonly string[]): Promise<void> {
+    const store = this.profile?.store;
+    if (store === undefined) throw new Error("The library is not open yet.");
+    await store.removeHistoryEntries(chapterIds);
+    this.historyClearedAt = Date.now();
   }
 
   /** The library's continue strip: newest positions, with the titles we already know. */

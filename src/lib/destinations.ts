@@ -23,12 +23,6 @@ export const DESTINATIONS: Destination[] = [
     icon: "M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z",
   },
   {
-    id: "updates",
-    label: "Updates",
-    href: "/updates",
-    icon: "M12 4v10m0 0-3.5-3.5M12 14l3.5-3.5M4 17v2a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-2",
-  },
-  {
     id: "browse",
     label: "Browse",
     href: "/browse",
@@ -56,6 +50,7 @@ export const DESTINATIONS: Destination[] = [
 
 /** Routes that are pushed on top of a destination, and the destination they sit on. */
 const UNDER: Record<string, string> = {
+  updates: "library",
   series: "library",
   read: "library",
   source: "browse",
@@ -79,7 +74,7 @@ export function destinationOf(route: Route): string {
 /** A pushed route gets a back arrow to its destination. */
 export function backHref(route: Route): string | null {
   if (DESTINATIONS.some((d) => d.id === route.name)) return null;
-  if (route.name === "series" || route.name === "read") return "/library";
+  if (route.name === "updates" || route.name === "series" || route.name === "read") return "/library";
   if (route.name === "source" || route.name === "extensions") return "/browse";
   // A package page is reached from the Extensions list, which is the index of packages.
   if (route.name === "software") return "/extensions";

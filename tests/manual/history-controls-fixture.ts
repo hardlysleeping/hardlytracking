@@ -1,0 +1,47 @@
+// Synthetic memory-only UI fixture: never opens the user's database or contacts a source.
+import { mount } from 'svelte';
+import History from '../../src/views/History.svelte';
+import Library from '../../src/views/Library.svelte';
+import '../../src/app.css';
+import { DEFAULT_THEME, themeVariables } from '../../src/lib/theme-model';
+import { memoryDatabase } from '../../src/lib/db/open';
+import { LibraryStore } from '../../src/lib/db/store';
+import { library } from '../../src/state/library.svelte';
+import { settings } from '../../src/state/settings.svelte';
+import { categories } from '../../src/state/categories.svelte';
+import { sourceMarks } from '../../src/state/source-marks.svelte';
+import { downloads } from '../../src/state/downloads.svelte';
+import { incognito } from '../../src/state/incognito.svelte';
+import type { Series, Chapter } from '../../src/api/source';
+for (const [key, value] of Object.entries(themeVariables(DEFAULT_THEME))) document.documentElement.style.setProperty(key, value);
+const store = new LibraryStore(memoryDatabase());
+const series: Series[] = ['Alpha', 'Beta', 'Gamma'].map(title => ({ id: `local:${title}`, provider: 'local', title, categoryIds: [] }));
+const chapters: Chapter[] = series.map(row => ({ id: `${row.id}:1`, seriesId: row.id, name: 'Fixture chapter', number: 1, pageCount: 10, read: false, uploadedAt: Date.now() }));
+for (const row of series) {
+  await store.addSeries(row);
+  const chapter = chapters.find(c => c.seriesId === row.id)!;
+  await store.putChapters(row.id, [chapter]);
+  await store.recordHistory(row.id, chapter.id);
+  await store.setProgress(chapter.id, 2, 10);
+  await store.setPosition(row.id, chapter.id, 2);
+  await store.beginSession({ seriesId: row.id, chapterId: chapter.id, startPage: 2 });
+}
+library.profile = { store, providers: [], warnings: [] } as any;
+library.library = series;
+library.ready = true;
+library.chapters = async id => chapters.filter(c => c.seriesId === id);
+library.refreshUpdates = async () => chapters.map(chapter => ({ seriesId: chapter.seriesId, title: series.find(r => r.id === chapter.seriesId)!.title, chapter }));
+library.continueReading = async () => [];
+library.viewState = async () => undefined;
+library.saveViewState = async () => {};
+downloads.load = async () => {};
+downloads.knownTotals = async () => ({});
+settings.set = ((key: string, value: unknown) => { (settings as any)[key] = value; }) as any;
+settings.historyPane = 'single' as any;
+settings.historyPaused = false;
+settings.showContinue = false;
+await categories.load(store); await sourceMarks.load(store);
+(window as any).historyFixture = { store, library, settings, incognito };
+const tab = new URL(location.href).searchParams.get('tab');
+if (tab === 'updates' || tab === 'titles') mount(Library, { target: document.body, props: { initialTab: tab } });
+else mount(History, { target: document.body });

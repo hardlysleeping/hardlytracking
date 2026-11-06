@@ -813,6 +813,27 @@ export class LibraryStore {
    * A range clear (`since`/`until`) keeps the rest; a full clear passes neither. Every deleted row
    * leaves a tombstone, so a sync merge cannot bring it back from another device.
    */
+  /** User deletion of selected chapter logs; bookmarks and read marks are deliberately untouched. */
+  async removeHistoryEntries(chapterIds: readonly string[]): Promise<{ sessions: number; history: number }> {
+    const ids = new Set(chapterIds);
+    const at = Date.now();
+    let sessions = 0;
+    let history = 0;
+    for (const row of await this.db.all<SessionRow>("sessions")) {
+      if (!ids.has(row.chapterId)) continue;
+      await this.db.remove("sessions", row.id);
+      await this.recordTombstone("session", row.id, at);
+      sessions += 1;
+    }
+    for (const row of await this.db.all<HistoryRow>("history")) {
+      if (!ids.has(row.chapterId)) continue;
+      await this.db.remove("history", row.chapterId);
+      await this.recordTombstone("history", row.chapterId, at);
+      history += 1;
+    }
+    return { sessions, history };
+  }
+
   async clearHistory(range: { since?: number; until?: number } = {}): Promise<{ sessions: number; history: number }> {
     const inRange = (at: number): boolean =>
       (range.since === undefined || at >= range.since) && (range.until === undefined || at < range.until);
