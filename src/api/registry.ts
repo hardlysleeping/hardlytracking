@@ -16,7 +16,7 @@
  * host.
  */
 import { apiUrl, htServerBase, hostToken, remoteHost } from "../lib/host";
-import { komgaEnabled, komgaSettings } from "../lib/komga";
+import { komgaEnabled, komgaServers as savedKomgaServers, type KomgaServer } from "../lib/komga";
 import { browserMihonTransport, createMihonProvider } from "./mihon";
 import { createSuwayomiProvider } from "./suwayomi";
 import { suwayomiEnabled, suwayomiSettings } from "../lib/suwayomi";
@@ -61,7 +61,14 @@ export interface RegistryConfig {
    * restart (the runtime's own jar is memory-only). Absent means no session is carried.
    */
   cookies?: CookieJar;
-  /** The user's own Komga, when one is configured; absent means "read the saved setting". */
+  /**
+   * The user's own Komga servers, when configured; absent means "read the saved list".
+   *
+   * `null` is no server; `undefined` is the saved setting. One provider is built per enabled entry,
+   * each with its own server id, so two logins on one box stay two sources.
+   */
+  komgaServers?: KomgaServer[] | null;
+  /** The single-server shape, kept for callers that predate the list. */
   komga?: { baseUrl: string; username: string; password: string } | null;
   /** The user's own WebDAV folder; absent means "read the saved setting". */
   webdav?: { url: string; username: string; password: string } | null;
@@ -236,26 +243,48 @@ export async function createProviders(config: RegistryConfig): Promise<ProviderS
   );
 
   /**
-   * Komga, when the user has entered an address and a login.
+   * Komga: one provider per enabled server.
    *
-   * A Komga that is configured but unreachable is a *warning*, not a silent empty shelf: the
-   * difference between "nothing here" and "your server is off" is the whole point of the flag.
+   * Two entries may share an address; what separates them is the id their ids carry, not the URL.
+   * A server that is enabled but unreachable is a *warning* naming its label, not a silent empty
+   * shelf: the difference between "nothing here" and "your server is off" is the whole point.
    */
-  const komga = config.komga === undefined ? komgaSettings() : config.komga;
-  if (komga !== null && (config.komgaEnabled === undefined ? komgaEnabled() : config.komgaEnabled())) {
-    const provider = createKomgaProvider({
-      ...komga,
-      ...(config.fetchImpl === undefined ? {} : { fetchImpl: config.fetchImpl }),
-    });
-    if (config.localFirst) {
-      providers.push(provider);
-    } else try {
-      // Explicit connection checks remain available outside local-first startup.
-      const sources = await provider.sources();
-      providers.push(provider);
-      if (sources.length === 0) warnings.push(`Komga ${komga.baseUrl}: signed in, but no libraries are visible to that user`);
-    } catch (error) {
-      warnings.push(`Komga ${komga.baseUrl}: ${error instanceof Error ? error.message : String(error)}`);
+  const komgaList: KomgaServer[] | null =
+    config.komgaServers !== undefined
+      ? config.komgaServers
+      : config.komga === undefined
+        ? savedKomgaServers()
+        : config.komga === null
+          ? []
+          : [{ id: "default", label: "Komga", enabled: true, ...config.komga }];
+  const komgaOn =
+    config.komgaServers !== undefined
+      ? true
+      : config.komgaEnabled === undefined
+        ? komgaEnabled()
+        : config.komgaEnabled();
+  if (komgaOn) {
+    for (const server of komgaList ?? []) {
+      if (!server.enabled || server.baseUrl === "" || server.username === "" || server.password === "") continue;
+      const provider = createKomgaProvider({
+        baseUrl: server.baseUrl,
+        username: server.username,
+        password: server.password,
+        serverId: server.id,
+        ...(config.fetchImpl === undefined ? {} : { fetchImpl: config.fetchImpl }),
+      });
+      if (config.localFirst) {
+        providers.push(provider);
+        continue;
+      }
+      try {
+        // Explicit connection checks remain available outside local-first startup.
+        const sources = await provider.sources();
+        providers.push(provider);
+        if (sources.length === 0) warnings.push(`Komga ${server.label}: signed in, but no libraries are visible to that user`);
+      } catch (error) {
+        warnings.push(`Komga ${server.label} (${server.baseUrl}): ${error instanceof Error ? error.message : String(error)}`);
+      }
     }
   }
 
@@ -343,7 +372,10 @@ export async function openDalvik(
 
 export function providerFor(providers: SourceProvider[], id: string): SourceProvider {
   const { provider } = splitId(id);
-  const found = providers.find((p) => p.kind === provider);
-  if (!found) throw new Error(`no ${provider} provider is configured`);
+  const sameKind = providers.filter((p) => p.kind === provider);
+  // Several providers can share a kind (one Komga per server); the owner of the id wins. Falling
+  // back to the first keeps every single-instance kind working, `owns` or no `owns`.
+  const found = sameKind.find((p) => p.owns === undefined || p.owns(id)) ?? sameKind[0];
+  if (found === undefined) throw new Error(`no ${provider} provider is configured`);
   return found;
 }

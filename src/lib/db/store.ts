@@ -920,7 +920,8 @@ export class LibraryStore {
   }
 
   async putSourceMark(mark: SourceMark): Promise<void> {
-    if (!mark.hidden && !mark.pinned) {
+    // A row is kept while any of the three marks is on; "all off" is the untouched state.
+    if (!mark.hidden && !mark.pinned && !mark.incognito) {
       await this.db.remove("sourceMarks", mark.id);
       return;
     }

@@ -23,7 +23,7 @@ import { grantConsent, isGranted, revokeConsent, type ConsentGrant } from "../li
 /** Where the cookie grants live in this device's preferences. */
 const CONSENT_PREF = "settings.consentGrants";
 import { openHostRegistry } from "../lib/extensions/host-registry";
-import { komgaEnabled, komgaSettings } from "../lib/komga";
+import { activeKomgaServers } from "../lib/komga";
 import { createKomgaProvider } from "./komga";
 import { createWebdavProvider } from "./webdav";
 import { webdavEnabled, webdavSettings } from "../lib/webdav";
@@ -222,21 +222,29 @@ export async function openLibraryProfile(options: OpenProfileOptions = {}): Prom
       return null;
     },
     async refreshKomga(): Promise<string | null> {
-      const at = providers.findIndex((provider) => provider.kind === "komga");
-      if (at >= 0) providers.splice(at, 1);
-      const saved = komgaSettings();
-      if (saved === null || !komgaEnabled()) return null;
-      const provider = createKomgaProvider({
-        ...saved,
-        ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
-      });
-      try {
-        const sources = await provider.sources();
-        providers.push(provider);
-        return sources.length === 0 ? `Komga ${saved.baseUrl}: signed in, but no libraries are visible to that user` : null;
-      } catch (error) {
-        return `Komga ${saved.baseUrl}: ${error instanceof Error ? error.message : String(error)}`;
+      // One provider per enabled server: removing only the first would leave a stale second behind
+      // when a card saves, so every Komga provider goes and the list is rebuilt from storage.
+      for (let at = providers.length - 1; at >= 0; at--) {
+        if (providers[at].kind === "komga") providers.splice(at, 1);
       }
+      const warnings: string[] = [];
+      for (const server of activeKomgaServers()) {
+        const provider = createKomgaProvider({
+          baseUrl: server.baseUrl,
+          username: server.username,
+          password: server.password,
+          serverId: server.id,
+          ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
+        });
+        try {
+          const sources = await provider.sources();
+          providers.push(provider);
+          if (sources.length === 0) warnings.push(`Komga ${server.label}: signed in, but no libraries are visible to that user`);
+        } catch (error) {
+          warnings.push(`Komga ${server.label} (${server.baseUrl}): ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
+      return warnings.length === 0 ? null : warnings.join("\n");
     },
     async refreshWebdav(): Promise<string | null> {
       const at = providers.findIndex((provider) => provider.kind === "webdav");

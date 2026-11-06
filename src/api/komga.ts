@@ -106,6 +106,14 @@ export interface KomgaOptions {
   baseUrl: string;
   username: string;
   password: string;
+  /**
+   * Which configured server this provider speaks for.
+   *
+   * Several Komga entries may share a `baseUrl` (two logins on one box, each seeing different
+   * libraries), so the address cannot identify a provider or its ids. This id does: every source,
+   * series and chapter id carries it, and `owns()` refuses an id that belongs to another server.
+   */
+  serverId?: string;
   fetchImpl?: typeof fetch;
   /** How many rows a browse page asks for. Komga caps it server-side; 40 is a grid on a phone. */
   pageSize?: number;
@@ -136,20 +144,48 @@ export function trimBase(baseUrl: string): string {
   return baseUrl.replace(/\/+$/, "");
 }
 
-/** `mihon:`-style namespacing, so a Komga id can never be handed to another provider. */
-export function komgaSeriesId(id: string): string {
-  return joinId("komga", id);
+/**
+ * Namespacing, one segment deeper than a single server needed.
+ *
+ * `komga:<serverId>:<libraryId>` for a source, `komga:<serverId>:<seriesId>` for a series and
+ * `komga:<serverId>:ch:<bookId>` for a chapter. The server segment is not decoration: two entries
+ * can point at the same address with different logins, and their libraries must stay distinct or a
+ * mark hidden on one login would hide the same-named library on the other.
+ */
+export function komgaSourceId(serverId: string, libraryId: string): string {
+  return joinId("komga", `${serverId}:${libraryId}`);
 }
-export function komgaChapterId(id: string): string {
-  return joinId("komga", `ch:${id}`);
+export function komgaSeriesId(serverId: string, id: string): string {
+  return joinId("komga", `${serverId}:${id}`);
 }
-export function komgaLibraryId(id: string): string {
-  return joinId("komga", `lib:${id}`);
+export function komgaChapterId(serverId: string, id: string): string {
+  return joinId("komga", `${serverId}:ch:${id}`);
 }
 
-export function mapKomgaLibrary(raw: KomgaRawLibrary): Source {
+/** The id a provider answers to when several Komga servers are configured. */
+export function komgaOwnsId(serverId: string, id: string): boolean {
+  try {
+    const native = nativeId(id, "komga");
+    if (isLegacyKomgaNative(native)) return serverId === "default";
+    return native.startsWith(`${serverId}:`);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * An id from before the list existed: `komga:<seriesId>`, `komga:lib:<id>`, `komga:ch:<id>`.
+ *
+ * Those rows are still in the owner's library, so the migrated entry (`default`) keeps answering
+ * them instead of making a title that was readable yesterday fail today.
+ */
+export function isLegacyKomgaNative(native: string): boolean {
+  return native.indexOf(":") < 1 || native.startsWith("ch:") || native.startsWith("lib:");
+}
+
+export function mapKomgaLibrary(raw: KomgaRawLibrary, serverId: string): Source {
   return {
-    id: komgaLibraryId(raw.id),
+    id: komgaSourceId(serverId, raw.id),
     provider: "komga",
     name: raw.name,
     supportsLatest: true,
@@ -160,6 +196,7 @@ export function mapKomgaSeries(
   raw: KomgaRawSeries,
   baseUrl: string,
   headers: Record<string, string>,
+  serverId: string,
   proxied: boolean = hasLocalServer(),
 ): Series {
   const authors = (raw.booksMetadata?.authors ?? [])
@@ -168,8 +205,11 @@ export function mapKomgaSeries(
   const unique = [...new Set(authors)];
   const title = raw.metadata?.title ?? raw.name;
   return {
-    id: komgaSeriesId(raw.id),
+    id: komgaSeriesId(serverId, raw.id),
     provider: "komga",
+    // The library is a source and a mark target; the series id cannot spell it, so it travels here
+    // and onto the mapping row. Without it a title from a hidden library would still be listed.
+    ...(raw.libraryId === undefined || raw.libraryId === "" ? {} : { sourceId: komgaSourceId(serverId, raw.libraryId) }),
     title,
     // The URL *and* the header it needs: an `<img>` cannot send the login, so the app fetches this
     // itself and hands the UI a blob. See the header comment.
@@ -187,12 +227,12 @@ export function mapKomgaSeries(
 }
 
 /** A book is a chapter. Komga's `numberSort` is the sort key, and `number` the printed one. */
-export function mapKomgaBook(raw: KomgaRawBook, seriesId: string): Chapter {
+export function mapKomgaBook(raw: KomgaRawBook, seriesId: string, serverId: string): Chapter {
   const number = raw.metadata?.numberSort ?? raw.number ?? -1;
   const release = raw.metadata?.releaseDate;
   const uploaded = release === undefined ? undefined : Date.parse(`${release}T00:00:00Z`);
   return {
-    id: komgaChapterId(raw.id),
+    id: komgaChapterId(serverId, raw.id),
     seriesId,
     name: raw.metadata?.title ?? raw.name,
     number: typeof number === "number" ? number : -1,
@@ -203,13 +243,13 @@ export function mapKomgaBook(raw: KomgaRawBook, seriesId: string): Chapter {
 }
 
 /** What Komga says is read, for the reconcile in `src/lib/read-state.ts`. */
-export function mapKomgaReadState(books: readonly KomgaRawBook[]): RemoteRead[] {
+export function mapKomgaReadState(books: readonly KomgaRawBook[], serverId: string): RemoteRead[] {
   return books.map((book) => {
     const read = book.readProgress?.completed === true;
     const page = book.readProgress?.page;
     const at = book.readProgress?.readDate === undefined ? undefined : Date.parse(book.readProgress.readDate);
     return {
-      chapterId: komgaChapterId(book.id),
+      chapterId: komgaChapterId(serverId, book.id),
       read,
       // Komga's `page` is a 0-based index, which is what our own progress stores — no +1 here.
       ...(typeof page === "number" && page > 0 ? { page } : {}),
@@ -220,11 +260,34 @@ export function mapKomgaReadState(books: readonly KomgaRawBook[]): RemoteRead[] 
 
 export function createKomgaProvider(options: KomgaOptions): SourceProvider {
   const baseUrl = trimBase(options.baseUrl);
+  const serverId = options.serverId ?? "default";
   const headers = komgaAuthHeaders(options.username, options.password);
   // A Komga box that is asleep accepts the socket and then says nothing. The deadline names it in
   // the error instead of leaving the grid on "loading" until the platform gives up.
   const doFetch = options.fetchImpl ?? deadlined(fetch, RUNTIME_DEADLINE_MS, "your Komga server");
   const pageSize = options.pageSize ?? 40;
+
+  /**
+   * The Komga id inside one of ours, after checking it belongs to *this* server.
+   *
+   * Two servers can share an address, so an id that merely names a Komga is not enough: handing
+   * server A's library id to server B would list the wrong libraries (or the same ones twice).
+   */
+  function nativeFor(id: string): string {
+    const native = nativeId(id, "komga");
+    if (isLegacyKomgaNative(native)) {
+      if (serverId !== "default") {
+        throw new KomgaError(`${id} predates the server list and belongs to the migrated Komga server`, 0);
+      }
+      return native.replace(/^lib:/, "");
+    }
+    const at = native.indexOf(":");
+    const owner = native.slice(0, at);
+    if (owner !== serverId) {
+      throw new KomgaError(`${id} belongs to Komga server "${owner}", not "${serverId}"`, 0);
+    }
+    return native.slice(at + 1);
+  }
 
   /** The last books list per series, so `chapters()` then `readState()` is one request. */
   const lastBooks = new Map<string, KomgaRawBook[]>();
@@ -253,7 +316,7 @@ export function createKomgaProvider(options: KomgaOptions): SourceProvider {
 
   /** One page of series, for a library or a search. `popular` and `latest` differ only in the sort. */
   async function seriesPage(libraryId: string, page: number, sort: string, query?: string): Promise<Paged<Series>> {
-    const native = nativeId(libraryId, "komga").replace(/^lib:/, "");
+    const native = nativeFor(libraryId);
     const params = new URLSearchParams({
       library_id: native,
       page: String(Math.max(0, page - 1)),
@@ -264,7 +327,7 @@ export function createKomgaProvider(options: KomgaOptions): SourceProvider {
     const data = await json<KomgaPaged<KomgaRawSeries>>(`/api/v1/series?${params.toString()}`);
     const rows = data.content ?? [];
     return paged(
-      rows.map((row) => mapKomgaSeries(row, baseUrl, headers)),
+      rows.map((row) => mapKomgaSeries(row, baseUrl, headers, serverId)),
       data.last === false || (typeof data.totalPages === "number" && typeof data.number === "number" && data.number + 1 < data.totalPages),
     );
   }
@@ -272,7 +335,7 @@ export function createKomgaProvider(options: KomgaOptions): SourceProvider {
   async function books(seriesId: string): Promise<KomgaRawBook[]> {
     const stashed = lastBooks.get(seriesId);
     if (stashed !== undefined) return stashed;
-    const native = nativeId(seriesId, "komga");
+    const native = nativeFor(seriesId);
     const params = new URLSearchParams({
       series_id: native,
       size: "500",
@@ -296,9 +359,12 @@ export function createKomgaProvider(options: KomgaOptions): SourceProvider {
     // Komga keeps the read state; ours mirrors it and is reconciled from the server.
     ownsProgress: false,
 
+    // With several servers of the same kind, `providerFor` asks this before handing over an id.
+    owns: (id) => komgaOwnsId(serverId, id),
+
     async sources() {
       const libraries = await json<KomgaRawLibrary[]>("/api/v1/libraries");
-      return libraries.map(mapKomgaLibrary);
+      return libraries.map((row) => mapKomgaLibrary(row, serverId));
     },
 
     // Komga has no popularity: newest *added* is the honest stand-in, and it is stable, unlike a
@@ -308,19 +374,19 @@ export function createKomgaProvider(options: KomgaOptions): SourceProvider {
     search: (sourceId, query, page) => seriesPage(sourceId, page, "metadata.titleSort,asc", query),
 
     async details(seriesId) {
-      const native = nativeId(seriesId, "komga");
+      const native = nativeFor(seriesId);
       const raw = await json<KomgaRawSeries>(`/api/v1/series/${encodeURIComponent(native)}`);
-      return mapKomgaSeries(raw, baseUrl, headers);
+      return mapKomgaSeries(raw, baseUrl, headers, serverId);
     },
 
     async chapters(seriesId) {
       lastBooks.delete(seriesId);
       const rows = await books(seriesId);
-      return rows.map((row) => mapKomgaBook(row, seriesId));
+      return rows.map((row) => mapKomgaBook(row, seriesId, serverId));
     },
 
     async pages(chapterId) {
-      const native = nativeId(chapterId, "komga").replace(/^ch:/, "");
+      const native = nativeFor(chapterId).replace(/^ch:/, "");
       const list = await json<KomgaPageDto[]>(`/api/v1/books/${encodeURIComponent(native)}/pages`);
       return list.map(
         (row, index): Page => ({
@@ -334,7 +400,7 @@ export function createKomgaProvider(options: KomgaOptions): SourceProvider {
     },
 
     async readState(seriesId) {
-      return mapKomgaReadState(await books(seriesId));
+      return mapKomgaReadState(await books(seriesId), serverId);
     },
 
     /**
@@ -344,7 +410,7 @@ export function createKomgaProvider(options: KomgaOptions): SourceProvider {
      * PATCHing `page: 0` would claim the reader is at the top of a book they finished.
      */
     async setRead(chapterId, read, page) {
-      const native = nativeId(chapterId, "komga").replace(/^ch:/, "");
+      const native = nativeFor(chapterId).replace(/^ch:/, "");
       const path = `/api/v1/books/${encodeURIComponent(native)}/read-progress`;
       if (!read) {
         await json<void>(path, { method: "DELETE" });

@@ -75,15 +75,15 @@ test("a trailing slash on the address is trimmed, not doubled into every path", 
 });
 
 test("a library becomes a namespaced source", () => {
-  const source = mapKomgaLibrary(LIBRARIES[0]);
-  assert.equal(source.id, "komga:lib:lib-1");
+  const source = mapKomgaLibrary(LIBRARIES[0], "default");
+  assert.equal(source.id, "komga:default:lib-1");
   assert.equal(source.provider, "komga");
   assert.equal(source.name, "Comics");
 });
 
 test("a series carries its cover url and the header that cover needs", () => {
-  const series = mapKomgaSeries(SERIES[0], BASE, AUTH);
-  assert.equal(series.id, "komga:s-1");
+  const series = mapKomgaSeries(SERIES[0], BASE, AUTH, "default");
+  assert.equal(series.id, "komga:default:s-1");
   assert.equal(series.title, "Saga");
   assert.equal(series.cover, `${BASE}/api/v1/series/s-1/thumbnail`);
   assert.deepEqual(series.coverHeaders, AUTH, "an <img> cannot send the login, so the app must");
@@ -94,22 +94,22 @@ test("a series carries its cover url and the header that cover needs", () => {
 });
 
 test("a book is a chapter, read from readProgress.completed", () => {
-  const chapter = mapKomgaBook(BOOKS[0], "komga:s-1");
-  assert.equal(chapter.id, "komga:ch:b-1");
-  assert.equal(chapter.seriesId, "komga:s-1");
+  const chapter = mapKomgaBook(BOOKS[0], "komga:default:s-1", "default");
+  assert.equal(chapter.id, "komga:default:ch:b-1");
+  assert.equal(chapter.seriesId, "komga:default:s-1");
   assert.equal(chapter.name, "Chapter One");
   assert.equal(chapter.number, 1);
   assert.equal(chapter.pageCount, 24);
   assert.equal(chapter.read, true);
   assert.equal(chapter.uploadedAt, Date.parse("2020-03-01T00:00:00Z"));
 
-  assert.equal(mapKomgaBook(BOOKS[1], "komga:s-1").read, false);
+  assert.equal(mapKomgaBook(BOOKS[1], "komga:default:s-1", "default").read, false);
 });
 
 test("read state carries the page and the server's own timestamp", () => {
-  const remote = mapKomgaReadState(BOOKS);
+  const remote = mapKomgaReadState(BOOKS, "default");
   assert.deepEqual(remote[0], {
-    chapterId: "komga:ch:b-1",
+    chapterId: "komga:default:ch:b-1",
     read: true,
     page: 12,
     at: Date.parse("2026-10-29T10:00:00Z"),
@@ -122,7 +122,7 @@ test("the provider asks for libraries with the login", async () => {
   const komga = fakeKomga({ "/api/v1/libraries": LIBRARIES });
   const provider = createKomgaProvider({ baseUrl: BASE, username: "reader", password: "hunter2", fetchImpl: komga.impl });
   const sources = await provider.sources();
-  assert.equal(sources[0].id, "komga:lib:lib-1");
+  assert.equal(sources[0].id, "komga:default:lib-1");
   assert.equal(komga.calls[0].init.headers.authorization, AUTH.authorization);
 });
 
@@ -130,18 +130,18 @@ test("browse asks for a page Komga understands, with the right sort per tab", as
   const komga = fakeKomga({ "/api/v1/series": { content: SERIES, last: false } });
   const provider = createKomgaProvider({ baseUrl: BASE, username: "r", password: "p", fetchImpl: komga.impl, pageSize: 40 });
 
-  await provider.latest("komga:lib:lib-1", 1);
+  await provider.latest("komga:default:lib-1", 1);
   assert.match(komga.calls[0].path, /library_id=lib-1/);
   assert.match(komga.calls[0].path, /page=0/, "Komga pages are 0-based; ours are 1-based");
   assert.match(komga.calls[0].path, /sort=lastModified/);
 
-  await provider.popular("komga:lib:lib-1", 2);
+  await provider.popular("komga:default:lib-1", 2);
   assert.match(komga.calls[1].path, /page=1/);
   assert.match(komga.calls[1].path, /sort=created/);
 
-  const page = await provider.search("komga:lib:lib-1", "saga", 1);
+  const page = await provider.search("komga:default:lib-1", "saga", 1);
   assert.match(komga.calls[2].path, /search=saga/);
-  assert.equal(page.items[0].id, "komga:s-1");
+  assert.equal(page.items[0].id, "komga:default:s-1");
   assert.equal(page.hasNext, true);
 });
 
@@ -152,13 +152,13 @@ test("chapters and then read state is one request, and pages carry the login", a
   });
   const provider = createKomgaProvider({ baseUrl: BASE, username: "r", password: "p", fetchImpl: komga.impl });
 
-  const chapters = await provider.chapters("komga:s-1");
-  const remote = await provider.readState("komga:s-1");
+  const chapters = await provider.chapters("komga:default:s-1");
+  const remote = await provider.readState("komga:default:s-1");
   assert.equal(komga.calls.length, 1, "the read state came from the list chapters() already had");
   assert.equal(chapters.length, 2);
   assert.equal(remote[0].read, true);
 
-  const pages = await provider.pages("komga:ch:b-1");
+  const pages = await provider.pages("komga:default:ch:b-1");
   assert.equal(pages.length, 2);
   assert.equal(pages[1].url, `${BASE}/api/v1/books/b-1/pages/1`);
   assert.equal(pages[0].headers.authorization, komgaAuthHeaders("r", "p").authorization);
@@ -168,14 +168,14 @@ test("marking read writes completed, a page writes the page, unread deletes", as
   const komga = fakeKomga({ "/api/v1/books/b-1/read-progress": { status: 204 } }, { status: 204 });
   const provider = createKomgaProvider({ baseUrl: BASE, username: "r", password: "p", fetchImpl: komga.impl });
 
-  await provider.setRead("komga:ch:b-1", true);
+  await provider.setRead("komga:default:ch:b-1", true);
   assert.equal(komga.calls[0].init.method, "PATCH");
   assert.deepEqual(JSON.parse(komga.calls[0].init.body), { completed: true });
 
-  await provider.setRead("komga:ch:b-1", true, 7);
+  await provider.setRead("komga:default:ch:b-1", true, 7);
   assert.deepEqual(JSON.parse(komga.calls[1].init.body), { page: 7 });
 
-  await provider.setRead("komga:ch:b-1", false);
+  await provider.setRead("komga:default:ch:b-1", false);
   assert.equal(komga.calls[2].init.method, "DELETE");
 });
 

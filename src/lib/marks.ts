@@ -24,8 +24,18 @@ import type { Category, HiddenView, PinView } from "./categories";
 /** A mark on one source. The id is the app's own source id: `dalvik:src:<n>`, `local:src:library`. */
 export interface SourceMark {
   id: string;
+  /** The eye: this source's titles leave the library and history. */
   hidden: boolean;
   pinned: boolean;
+  /**
+   * Incognito: reading from this source is not logged.
+   *
+   * A third, independent mark. It is *not* the eye and must never hide anything — the source list,
+   * the library grid and History keep drawing its titles. It only suppresses the writes a reading
+   * session would otherwise make (history rows, sessions), exactly as `settings.historyPaused` and
+   * the temporary global incognito do. Progress, read marks and downloads still save.
+   */
+  incognito: boolean;
 }
 
 /** A stored value may be older, partial or hand-edited; keep only what is sound. */
@@ -39,7 +49,8 @@ export function normaliseSourceMarks(raw: unknown): SourceMark[] {
     const id = typeof row.id === "string" ? row.id.trim() : "";
     if (id === "" || seen.has(id)) continue;
     seen.add(id);
-    out.push({ id, hidden: row.hidden === true, pinned: row.pinned === true });
+    // Rows written before incognito existed have no field; they must read as "not incognito".
+    out.push({ id, hidden: row.hidden === true, pinned: row.pinned === true, incognito: row.incognito === true });
   }
   return out;
 }
@@ -56,6 +67,18 @@ export function sourceKeyOfMapping(provider: string, sourceId: string): string {
   // This device's own source is `local:src:library` — its mapping already spells the `src:` half, so
   // the key is the provider plus that, not a second prefix.
   if (provider === "local") return sourceId === "" ? "local:src:library" : `local:${sourceId}`;
+  /**
+   * Komga is one source per *library*, so the key is the whole source id.
+   *
+   * A row recorded since the server list holds `komga:<server>:<library>`, which is already the key.
+   * An older row holds only the series' native id or the bare server, neither of which names a
+   * library — those answer the legacy `komga` key the old single-server mark was stored under, so an
+   * existing mark keeps working instead of silently losing its comics.
+   */
+  if (provider === "komga") {
+    if (sourceId.startsWith("komga:")) return sourceId;
+    return "komga";
+  }
   return provider;
 }
 
@@ -94,7 +117,17 @@ export function sourceKeyOf(seriesId: string, mapped?: string | MappedSource): s
   }
   if (provider === "local") return "local:src:library";
   if (provider === undefined || provider === "") return undefined;
-  // A provider with a single source (Komga, Archive) is its own source.
+  /**
+   * A Komga id without a mapping names the server and the series, never the library — and the library
+   * is what the marks are on. Answering the server would hide every library of it, which is the one
+   * thing this must not do, so an unattributed Komga title is left alone. The legacy single-server
+   * shape (`komga:<seriesId>`) is still the one old mark's key.
+   */
+  if (provider === "komga") {
+    const native = seriesId.slice(provider.length + 1);
+    return native.includes(":") ? undefined : "komga";
+  }
+  // A provider with a single source (Archive) is its own source.
   return provider;
 }
 
@@ -151,6 +184,47 @@ export function isPinned(row: Marked, context: MarkContext): boolean {
   if (source === undefined) return false;
   return context.bySource.get(source)?.pinned === true;
 }
+
+/**
+ * Is this title's source in incognito?
+ *
+ * The third mark is deliberately absent from `isHidden`: a source in incognito is still shown
+ * everywhere. This predicate is for the write paths only, so a title that is incognito is read
+ * normally and simply leaves no trace in history or the reading log.
+ */
+export function isIncognito(row: Marked, context: MarkContext): boolean {
+  const source = context.sourceOf(row.id);
+  if (source === undefined) return false;
+  return context.bySource.get(source)?.incognito === true;
+}
+
+/**
+ * Is the source of `seriesId` in incognito, resolved the same way the views resolve it?
+ *
+ * The library's write path has the stored mapping row in hand and cannot build a whole
+ * `MarkContext` per page turn, so this is the small form: mapping first, id second, through
+ * `sourceKeyOf`. No key means "not attributable", which is never incognito.
+ */
+export function isIncognitoSource(
+  seriesId: string,
+  mapped: string | MappedSource | undefined,
+  marks: readonly SourceMark[],
+): boolean {
+  const key = sourceKeyOf(seriesId, mapped);
+  if (key === undefined) return false;
+  return marks.some((mark) => mark.id === key && mark.incognito === true);
+}
+
+/**
+ * A ghost, for the incognito mark.
+ *
+ * Not an eye: the eye already means "leave the library and history", and a second eye on the same
+ * row would read as the same control. Drawn in a 24×24 box, stroke-only like `EYE_PATHS`.
+ */
+export const INCOGNITO_PATH =
+  "M12 3a7 7 0 0 0-7 7v9.5l2.5-2 2.5 2 2-2 2 2 2.5-2 2.5 2V10a7 7 0 0 0-7-7Z" +
+  "M9.2 10.2h.01M14.8 10.2h.01";
+
 
 /**
  * The rows of a rail or a list whose title is not hidden.

@@ -48,7 +48,7 @@ class SourceMarksState {
   }
 
   markOf(sourceId: string): SourceMark {
-    return this.marks.find((mark) => mark.id === sourceId) ?? { id: sourceId, hidden: false, pinned: false };
+    return this.marks.find((mark) => mark.id === sourceId) ?? { id: sourceId, hidden: false, pinned: false, incognito: false };
   }
 
   get hiddenCount(): number {
@@ -59,12 +59,23 @@ class SourceMarksState {
     return this.marks.filter((mark) => mark.pinned).length;
   }
 
+  get incognitoCount(): number {
+    return this.marks.filter((mark) => mark.incognito).length;
+  }
+
   get hiddenLabel(): string {
     return HIDDEN_VIEW_LABELS[this.hiddenView];
   }
 
   get pinLabel(): string {
     return PIN_VIEW_LABELS[this.pinView];
+  }
+
+  /** The incognito tally, in the reader's words, for the Browse band and its accessibility text. */
+  get incognitoLabel(): string {
+    const count = this.incognitoCount;
+    if (count === 0) return "No sources incognito";
+    return count === 1 ? "1 source incognito" : `${count} sources incognito`;
   }
 
   async setHidden(sourceId: string, hidden: boolean): Promise<void> {
@@ -78,6 +89,20 @@ class SourceMarksState {
 
   async toggleHidden(sourceId: string): Promise<void> {
     await this.#write(sourceId, { hidden: !this.markOf(sourceId).hidden });
+  }
+
+  /**
+   * Incognito is its own mark too, independent of both others.
+   *
+   * A source can be hidden, incognito, both or neither. Incognito never removes a title from the
+   * library or History — it only stops the reading log from recording it.
+   */
+  async setIncognito(sourceId: string, incognito: boolean): Promise<void> {
+    await this.#write(sourceId, { incognito });
+  }
+
+  async toggleIncognito(sourceId: string): Promise<void> {
+    await this.#write(sourceId, { incognito: !this.markOf(sourceId).incognito });
   }
 
   async cycleHiddenView(): Promise<void> {
@@ -103,12 +128,12 @@ class SourceMarksState {
     for (const id of pinnedIds) {
       const existing = out.findIndex((mark) => mark.id === id);
       if (existing >= 0) out[existing] = { ...out[existing], pinned: true };
-      else out.push({ id, hidden: false, pinned: true });
+      else out.push({ id, hidden: false, pinned: true, incognito: false });
     }
     return out;
   }
 
-  async #write(sourceId: string, change: Partial<Pick<SourceMark, "hidden" | "pinned">>): Promise<void> {
+  async #write(sourceId: string, change: Partial<Pick<SourceMark, "hidden" | "pinned" | "incognito">>): Promise<void> {
     if (this.#store === null || privacy.locked) return;
     const current = this.markOf(sourceId);
     await this.#store.putSourceMark({ ...current, ...change });

@@ -113,6 +113,19 @@ reading-time statistics. Everything else keeps working exactly as before: `progr
 still save, read/unread still updates, Continue Reading still resumes, downloads and the library are
 untouched. Existing history is left alone, not hidden.
 
+**Incognito per source** — the Browse source row carries three independent marks: the eye (hide),
+the pin, and a ghost (incognito). A source in incognito keeps every title in the library, Browse and
+History, but reading from it writes no `history` row and opens no `sessions` row — the same
+suppression as Pause and the temporary global Incognito, with the same survivors: `progress`,
+`position`, read marks and downloads. The marks are stored per source id in the `sourceMarks` store;
+a row written before incognito existed reads as "not incognito". Hidden and incognito can both be
+on, and neither implies the other.
+
+**Pinned history** — a history row can be pinned from its swipe reveal / actions menu. Pins are
+series ids in the `settings.historyPins` preference, so they travel with an export and survive
+removing a chapter's log; the History list draws a `Pinned` group above Today, and a pin whose rows
+are gone simply draws no group.
+
 **Keep reading history** — `Forever` (default), 30 days, 90 days, 6 months, 1 year, or a custom
 number of days. Retention applies **only to closed `reading_sessions`**. It never touches
 `progress`, read marks, library membership, categories, bookmarks, downloads or Continue Reading. An

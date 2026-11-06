@@ -105,6 +105,14 @@ export interface Prefs {
   historyPaused: boolean;
   /** Days a session is kept; 0 is forever. Applies to sessions only, never to progress. */
   historyRetentionDays: number;
+  /**
+   * Series ids pinned at the top of History.
+   *
+   * Ids, not rows: history rows are rebuilt from the log, and a pin is the reader's mark on a
+   * title, so it lives in prefs where an export and a relaunch carry it. An id whose rows were
+   * removed simply draws no Pinned group, and comes back if the title is read again.
+   */
+  historyPins: string[];
   /** Source ids the user pinned, for "search pinned sources only" (Komikku's behaviour). */
   pinnedSources: string[];
   /**
@@ -191,6 +199,7 @@ class Settings {
   tapZones = $state(true);
   historyPaused = $state(false);
   historyRetentionDays = $state(0);
+  historyPins = $state<string[]>([]);
   pinnedSources = $state<string[]>([]);
   sourceFilters = $state<Record<string, SourceFilterSelection>>({});
   searchPinnedOnly = $state(true);
@@ -260,6 +269,7 @@ class Settings {
     this.tapZones = await read("tapZones", this.tapZones);
     this.historyPaused = await read("historyPaused", this.historyPaused);
     this.historyRetentionDays = await read("historyRetentionDays", this.historyRetentionDays);
+    this.historyPins = await read("historyPins", this.historyPins);
     this.pinnedSources = await read("pinnedSources", this.pinnedSources);
     this.sourceFilters = await read("sourceFilters", this.sourceFilters);
     this.searchPinnedOnly = await read("searchPinnedOnly", this.searchPinnedOnly);

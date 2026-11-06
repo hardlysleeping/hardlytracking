@@ -60,6 +60,15 @@ export interface Series {
   /** Ids of the local categories this row is filed under. Empty/absent = uncategorised. */
   categoryIds?: string[];
   /**
+   * The *source row* this title came from, when the id cannot spell it.
+   *
+   * Most providers are a single source, so `provider` plus the id is enough. Komga with several
+   * servers (and several libraries each) is not: `komga:<server>:<series>` names a series but not the
+   * library it lives in, and the library is what the eye, the ghost and the pin are marked on. Set by
+   * the provider that knows, and recorded on the mapping row so every later read resolves the same.
+   */
+  sourceId?: string;
+  /**
    * The source's own page for this title, when it has a web page at all.
    *
    * Absent for the sources that are only an API or a folder: a Mihon extension answers with an id and
@@ -218,6 +227,15 @@ export interface SourceProvider {
    * extension): there is nothing to reconcile, and a caller must not invent one.
    */
   readState?(seriesId: string): Promise<RemoteRead[]>;
+
+  /**
+   * Does this provider own this id?
+   *
+   * Needed only when two providers share a kind — several Komga servers, which may even share an
+   * address. `providerFor` asks it so an id namespaced to one server is never answered by another.
+   * Absent means "the kind is enough", which is true for every single-instance provider.
+   */
+  owns?(id: string): boolean;
 }
 
 const KINDS: ProviderKind[] = ["mihon", "dalvik", "htserver", "komga", "local", "archive", "webdav"];

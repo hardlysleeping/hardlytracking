@@ -7,7 +7,7 @@
    */
   import Sheet from "../components/Sheet.svelte";
   import { incognito } from "../state/incognito.svelte";
-  import { historySwipe, selectedHistoryIds } from "../lib/history-controls";
+  import { historyGroups, historySwipe, selectedHistoryIds, toggleHistoryPin } from "../lib/history-controls";
   import { privacy } from "../state/privacy.svelte";
   import { library } from "../state/library.svelte";
   import Cover from "../components/Cover.svelte";
@@ -19,6 +19,7 @@
   import { categories } from "../state/categories.svelte";
   import { sourceMarks } from "../state/source-marks.svelte";
   import { contextOf, isHidden, sourceKeyOf } from "../lib/marks";
+  import { MARKER_PATH } from "../lib/categories";
 
   interface Row {
     seriesId: string;
@@ -212,24 +213,16 @@
   // A previously picked private row must not survive in the split detail pane.
   const pickedRow = $derived(shown.find((row) => row.chapterId === picked) ?? shown[0] ?? null);
 
-  const groups = $derived.by(() => {
-    const startOfToday = new Date();
-    startOfToday.setHours(0, 0, 0, 0);
-    const today = startOfToday.getTime();
-    const buckets: Array<{ label: string; rows: Row[] }> = [
-      { label: "Today", rows: [] },
-      { label: "Yesterday", rows: [] },
-      { label: "Earlier this week", rows: [] },
-      { label: "Older", rows: [] },
-    ];
-    for (const row of shown) {
-      if (row.at >= today) buckets[0].rows.push(row);
-      else if (row.at >= today - 86_400_000) buckets[1].rows.push(row);
-      else if (row.at >= today - 7 * 86_400_000) buckets[2].rows.push(row);
-      else buckets[3].rows.push(row);
-    }
-    return buckets.filter((bucket) => bucket.rows.length > 0);
-  });
+  const groups = $derived.by(() => historyGroups(shown, settings.historyPins));
+
+  /** Is this title pinned? Pin state is per series, so every row of it says the same. */
+  function isPinned(seriesId: string): boolean {
+    return settings.historyPins.includes(seriesId);
+  }
+
+  function togglePin(seriesId: string): void {
+    settings.set("historyPins", toggleHistoryPin(settings.historyPins, seriesId));
+  }
 
   function ago(at: number): string {
     const minutes = Math.floor((Date.now() - at) / 60_000);
@@ -280,7 +273,12 @@
           {#each group.rows as row (row.chapterId)}
             <li class="entry" class:revealed={revealed === row.chapterId}>
               {#if revealed === row.chapterId}
-                <button class="btn remove" onclick={() => pending = [row.chapterId]}>Remove</button>
+                <div class="reveal-actions">
+                  <button class="btn pin-action" aria-pressed={isPinned(row.seriesId)}
+                    aria-label={`${isPinned(row.seriesId) ? "Unpin" : "Pin"} ${row.title} in History`}
+                    onclick={() => togglePin(row.seriesId)}>{isPinned(row.seriesId) ? "Unpin" : "Pin"}</button>
+                  <button class="btn remove" onclick={() => pending = [row.chapterId]}>Remove</button>
+                </div>
               {/if}
               <div class="row" class:on={selecting ? selected.has(row.chapterId) : mode === "split" && pickedRow?.chapterId === row.chapterId}>
                 <button class="hit" aria-label={`${selecting ? "Select " : ""}${row.title} — ${row.chapterName}`} aria-pressed={selecting ? selected.has(row.chapterId) : undefined}
@@ -289,7 +287,10 @@
                 {#if selecting}<span class="check" aria-hidden="true">{selected.has(row.chapterId) ? "☑" : "☐"}</span>{/if}
                 <Cover series={{ title: row.title, cover: row.cover }} size="row" />
                 <div class="info">
-                  <span class="t">{row.title}</span>
+                  <span class="t">
+                    {#if isPinned(row.seriesId)}<svg class="pinned-glyph" viewBox="0 0 24 24" aria-hidden="true"><path d={MARKER_PATH} /></svg>{/if}
+                    {row.title}
+                  </span>
                   <span class="s">{row.chapterName} · page {row.page + 1} · {ago(row.at)}</span>
                 </div>
                 {#if !selecting}
@@ -337,8 +338,10 @@
 <style>
   .entry { position: relative; overflow: hidden; border-radius: var(--r2); }
   .entry .row { background: var(--surface); transition: transform 160ms ease; }
-  .entry.revealed .row { transform: translateX(-100px); }
-  .remove { position: absolute; right: 0; top: 0; bottom: 0; width: 96px; }
+  .entry.revealed .row { transform: translateX(-196px); }
+  .reveal-actions { position: absolute; top: 0; right: 0; bottom: 0; display: flex; width: 196px; }
+  .reveal-actions .btn { flex: 1 1 0; min-width: 0; height: 100%; border-radius: 0; }
+  .pinned-glyph { width: 12px; height: 12px; margin-right: 4px; vertical-align: -1px; fill: none; stroke: var(--accent); stroke-width: 2; stroke-linejoin: round; }
   .hit { touch-action: pan-y; }
   .action { position: relative; z-index: 1; }
   .privacy-note { font-size: var(--t-sm); color: var(--text-2); margin-bottom: var(--s3); }

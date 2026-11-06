@@ -11,18 +11,19 @@ import { installOnHtServer, setHtServerExtensionEnabled, uninstallOnHtServer } f
 import { downloadApk, loadRepository, type Repository } from "../lib/extensions/repository";
 import { apiUrl, remoteHost } from "../lib/host";
 import type { ExtensionEntry } from "../lib/extensions/index";
-import type { RepoRow, ViewStateRow } from "../lib/db/store";
+import type { RepoRow, SourceMappingRow, ViewStateRow } from "../lib/db/store";
 import { BACKGROUND_GRACE_MS, viewStateKey } from "../lib/history";
 import { nextUnread, seriesOfPosition } from "../lib/library/continue";
 import { settings } from "./settings.svelte";
 import { incognito } from "./incognito.svelte";
+import { sourceMarks } from "./source-marks.svelte";
 import { shouldKeepTitle } from "../lib/offline/policy";
 import { requestKeep } from "../lib/offline/sink";
 import { installTrackerSync } from "../lib/trackers/sync";
 import { planReadState, remoteReadCount } from "../lib/read-state";
 import { providerLabel } from "../api/source";
 import type { RemoteRead, SourceProvider } from "../api/source";
-import { sourceKeyOfMapping } from "../lib/marks";
+import { isIncognitoSource, sourceKeyOfMapping } from "../lib/marks";
 import { applyMigration, type AppliedMigration } from "../lib/migrate-apply";
 import {
   describeMigration,
@@ -620,7 +621,7 @@ class LibraryState {
     await this.profile.store.addSeries(series);
     // Mirror what we already fetched, so the series page opens instantly next time.
     if (chapters.length > 0) await this.profile.store.putChapters(series.id, chapters);
-    await this.recordMapping(series.id);
+    await this.recordMapping(series.id, undefined, series.sourceId);
     await this.refreshLibrary();
     // An opt-in offline policy is the *only* thing that downloads without being asked, and adding a
     // title is where it has something to do. Fire-and-forget: a keep that fails must not fail the add.
@@ -642,7 +643,27 @@ class LibraryState {
     const series = await target.provider.details(target.seriesId);
     // A migrated title answers with the target's metadata under *our* id: the entry keeps its
     // identity, so a link, a category or a position that names this series still names it.
-    return target.seriesId === seriesId ? series : { ...series, id: seriesId };
+    const row = target.seriesId === seriesId ? series : { ...series, id: seriesId };
+    await this.#repairSource(seriesId, row);
+    return row;
+  }
+
+  /**
+   * Fill in the source row a mapping could not spell at the time it was written.
+   *
+   * Komga titles added before the server list existed recorded a mapping with no library, so their
+   * marks would never resolve. The provider just told us which library this series lives in, so the
+   * row is corrected here — once, on a read the page was making anyway, and only when the mapping is
+   * the title's own (a migrated mapping names another source and is left alone).
+   */
+  async #repairSource(seriesId: string, series: Series): Promise<void> {
+    const store = this.profile?.store;
+    const sourceId = series.sourceId;
+    if (store === undefined || sourceId === undefined || sourceId === "") return;
+    const mapping = await store.getMapping(seriesId);
+    if (mapping === undefined || mapping.sourceId === sourceId) return;
+    if (mapping.remoteSeriesId !== seriesId) return;
+    await store.putMapping({ ...mapping, sourceId, at: Date.now() });
   }
 
   /**
@@ -722,11 +743,14 @@ class LibraryState {
     }
 
     const plan = planReadState(remote, { read: localRead, page: localPage }, known);
+    // One answer for the whole pull: the server's timestamps still mark chapters read, but a
+    // source in incognito leaves no history row behind.
+    const loggingSuppressed = await this.#loggingSuppressed(seriesId);
 
     for (const row of plan.markRead) {
       await store.setRead(row.chapterId, true, { push: false });
       // The server's own timestamp, so History says when it was read rather than when we noticed.
-      if (row.at !== undefined && !(settings.historyPaused || incognito.active)) {
+      if (row.at !== undefined && !loggingSuppressed) {
         await store.recordHistory(seriesId, row.chapterId, row.at);
       }
     }
@@ -751,6 +775,24 @@ class LibraryState {
   }
 
   /**
+   * Should this title's reading be kept out of history and the session log?
+   *
+   * One question with three causes that mean the same to the store: the durable pause, the
+   * temporary global incognito, or this title's own source being marked incognito. The source is
+   * resolved exactly as the views resolve it — the stored mapping first, the id second — so a
+   * migrated title is governed by the source it reads from now, never by a guessed id fragment.
+   */
+  async #loggingSuppressed(seriesId: string, mapping?: SourceMappingRow): Promise<boolean> {
+    if (settings.historyPaused || incognito.active) return true;
+    const row = mapping ?? (await this.profile?.store.getMapping(seriesId));
+    return isIncognitoSource(
+      seriesId,
+      row === undefined ? undefined : { provider: row.provider, sourceId: row.sourceId },
+      sourceMarks.marks,
+    );
+  }
+
+  /**
    * One call for "I am here".
    *
    * Position, history and progress are three questions about the same moment, so they are
@@ -764,7 +806,7 @@ class LibraryState {
     // turned history off, because Continue Reading is not surveillance.
     await store.setProgress(chapterId, page, total);
     await store.setPosition(seriesId, chapterId, page);
-    if (settings.historyPaused || incognito.active) return;
+    if (await this.#loggingSuppressed(seriesId)) return;
     await store.recordHistory(seriesId, chapterId);
   }
 
@@ -787,11 +829,13 @@ class LibraryState {
     try {
       const last = await store.lastSessionFor(chapterId);
       if (settings.historyPaused || incognito.active) return null;
+      const mapping = await store.getMapping(seriesId);
+      // A source in incognito opens no session, but the chapter still opens: the reader gets its
+      // null and reads on, while progress and position are written by `remember`.
+      if (await this.#loggingSuppressed(seriesId, mapping)) return null;
       if (last !== undefined && last.endedAt === undefined && Date.now() - last.startedAt < BACKGROUND_GRACE_MS) {
         return last.id;
       }
-      const mapping = await store.getMapping(seriesId);
-      if (settings.historyPaused || incognito.active) return null;
       return await store.beginSession({ seriesId, sourceId: mapping?.sourceId, chapterId, startPage: page });
     } catch {
       return null; // a session is a nicety; never let it break opening a chapter
@@ -928,12 +972,15 @@ class LibraryState {
    * it reads from now, which is not what its id spells; re-deriving it on the next save would undo
    * the migration quietly.
    */
-  async recordMapping(seriesId: string, packageId?: string): Promise<void> {
+  async recordMapping(seriesId: string, packageId?: string, sourceId?: string): Promise<void> {
     if (this.profile === null) return;
     const derived = mappingFromId(seriesId, packageId);
     if (derived === null) return;
+    // A source row the id cannot spell (a Komga library) is recorded in full, as the source key the
+    // marks are stored under, so a hidden or incognito library resolves on every later read.
+    const named = sourceId === undefined || sourceId === "" ? derived : { ...derived, sourceId };
     if ((await this.profile.store.getMapping(seriesId)) !== undefined) return;
-    await this.profile.store.putMapping({ seriesId, ...derived, at: Date.now() });
+    await this.profile.store.putMapping({ seriesId, ...named, at: Date.now() });
   }
 
   // ---- migrating a title to another source ---------------------------------

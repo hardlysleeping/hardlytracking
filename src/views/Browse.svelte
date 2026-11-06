@@ -13,7 +13,7 @@
   import { togglePin } from "../lib/pinned";
   import { sourceMarks } from "../state/source-marks.svelte";
   import { EYE_PATHS, MARKER_PATH, PIN_WORDS } from "../lib/categories";
-  import { visibleSources } from "../lib/marks";
+  import { INCOGNITO_PATH, visibleSources } from "../lib/marks";
   import { providerLabel } from "../api/source";
   import { filterByLevel, hiddenNotice, levelOfSource } from "../lib/content/levels";
   import { languageLabel } from "../lib/language";
@@ -109,6 +109,13 @@
 
     <input class="field search" type="search" placeholder="Find a source" bind:value={query} aria-label="Find a source" />
 
+    {#if sourceMarks.incognitoCount > 0}
+      <p class="incognito-note" role="status">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d={INCOGNITO_PATH} /></svg>
+        {sourceMarks.incognitoLabel} — their reading leaves no history or session, but stays in the library
+      </p>
+    {/if}
+
     {#each byProvider as group (group.provider)}
       <section class="group">
         <h2>{group.label}<span>{group.rows.length}</span></h2>
@@ -132,6 +139,19 @@
                 <svg viewBox="0 0 24 24" aria-hidden="true">
                   <path d={sourceMarks.markOf(source.id).hidden ? EYE_PATHS.only : EYE_PATHS.hidden} />
                 </svg>
+              </button>
+              <button
+                disabled={privacy.locked}
+                class="incbtn"
+                class:incognito={sourceMarks.markOf(source.id).incognito}
+                aria-label={`${sourceMarks.markOf(source.id).incognito ? "Turn off incognito for" : "Make incognito"} ${source.name}`}
+                aria-pressed={sourceMarks.markOf(source.id).incognito}
+                title={sourceMarks.markOf(source.id).incognito
+                  ? `${source.name} is incognito — reading leaves no history or session. Its comics stay in the library`
+                  : `Make ${source.name} incognito — reading leaves no history or session, but its comics stay in the library`}
+                onclick={() => void sourceMarks.toggleIncognito(source.id)}
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d={INCOGNITO_PATH} /></svg>
               </button>
               <button
                 class="pinbtn"
@@ -310,6 +330,59 @@
     border-radius: 999px;
     color: var(--text-3);
     flex: none;
+  }
+
+  /* Incognito: a ghost, not a second eye — a different mark with a different consequence. */
+  .incbtn {
+    all: unset;
+    cursor: pointer;
+    display: grid;
+    place-items: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 999px;
+    color: var(--text-3);
+    flex: none;
+  }
+
+  .incbtn svg {
+    width: 15px;
+    height: 15px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.6;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .incbtn.incognito {
+    color: var(--accent);
+  }
+
+  .incbtn:disabled,
+  .eyebtn:disabled {
+    opacity: 0.4;
+    cursor: default;
+  }
+
+  .incognito-note {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0 0 var(--s3);
+    font-size: var(--t-xs);
+    color: var(--text-3);
+  }
+
+  .incognito-note svg {
+    width: 14px;
+    height: 14px;
+    flex: 0 0 auto;
+    fill: none;
+    stroke: var(--accent);
+    stroke-width: 1.6;
+    stroke-linecap: round;
+    stroke-linejoin: round;
   }
 
   .pinbtn svg {
