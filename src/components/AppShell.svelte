@@ -92,11 +92,12 @@
   const device = $derived(deviceClass(viewport.width, viewport.height));
 
   /**
-   * The phone bar, in the reader's order.
+   * The navigation, in the reader's order — the bar, the rail and the sidebar all draw this.
    *
-   * The rail and the sidebar keep every destination: they are the wide layouts, where there is room
-   * for all of them and no thumb to customise for. The phone bar is the one the Settings editor
-   * changes, and it is drawn from the pref rather than from `DESTINATIONS`.
+   * One order for every layout was the point of the preference: a page hidden on the phone was still
+   * on the tablet rail and the desktop sidebar, so the same account looked like two different apps
+   * with two different sets of pages. Three layouts, one list. A page taken off it is still reachable
+   * from the page-title menu, which lists every destination and is deliberately not editable.
    *
    * A pref that names nothing drawable still draws the five shipped destinations. The loader and
    * `settings.set` already coerce that away; this is the last line, because an empty bar is a phone
@@ -118,7 +119,7 @@
     <aside class="sidebar">
       <div class="brand">HardlyTracking</div>
       <nav aria-label="Main">
-        {#each DESTINATIONS as destination (destination.id)}
+        {#each bar as destination (destination.id)}
           <button
             class="item"
             class:on={active === destination.id}
@@ -133,7 +134,7 @@
     </aside>
   {:else if device === "tablet"}
     <nav class="rail" aria-label="Main">
-      {#each DESTINATIONS as destination (destination.id)}
+      {#each bar as destination (destination.id)}
         <button
           class="item"
           class:on={active === destination.id}

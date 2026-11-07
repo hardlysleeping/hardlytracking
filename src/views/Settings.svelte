@@ -417,8 +417,8 @@ import PrivacyPanel from "../components/PrivacyPanel.svelte";
     -->
     <div class="navedit">
       <p class="navhead">
-        Bottom bar
-        <em class="sub">The pages along a phone's bar, in order. A tablet or desktop keeps all five.</em>
+        Navigation
+        <em class="sub">The pages in the bar, the rail and the sidebar — one order for every layout.</em>
       </p>
       {#each navRows as id (id)}
         {@const onBar = settings.bottomNav.includes(id)}
@@ -441,7 +441,7 @@ import PrivacyPanel from "../components/PrivacyPanel.svelte";
             <button
               class="chip navtoggle"
               aria-pressed={onBar}
-              aria-label={`${onBar ? "Hide" : "Show"} ${labelOf(id)} in the bottom bar`}
+              aria-label={`${onBar ? "Hide" : "Show"} ${labelOf(id)} in the navigation`}
               onclick={() => toggleNav(id)}
             >{onBar ? "On bar" : "Off bar"}</button>
           </div>
@@ -451,7 +451,7 @@ import PrivacyPanel from "../components/PrivacyPanel.svelte";
         <p class="navnote" role="status">{navNote}</p>
       {/if}
       <!-- One line, in place of a whole paragraph about reachability. -->
-      <p class="hint">The page-title menu always lists every page, so a page taken off the bar is still one tap away.</p>
+      <p class="hint">The page-title menu always lists every page, so a page taken off the bar is still one tap away on any device.</p>
     </div>
 
     <div class="navedit">

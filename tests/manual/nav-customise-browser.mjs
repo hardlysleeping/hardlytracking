@@ -122,7 +122,7 @@ try {
   await route('#/settings');
   const barEditor=page.locator('.navedit').first();
   assert.deepEqual(await barEditor.locator('.navlabel').evaluateAll(ns=>ns.map(n=>n.textContent.trim())),['More','History','Search','Browse','Library'],'every destination is listed, bar order first');
-  await page.getByRole('button',{name:'Hide Browse in the bottom bar',exact:true}).click();
+  await page.getByRole('button',{name:'Hide Browse in the navigation',exact:true}).click();
   await page.waitForTimeout(200);
   assert.deepEqual((await prefs()).bottomNav,['more','history','search','library']);
   await route('#/library');
@@ -154,16 +154,16 @@ try {
   // ---- (c) the last visible destination cannot be hidden -------------------------------------
   await route('#/settings');
   for(const name of ['More','History','Search']){
-    await page.getByRole('button',{name:`Hide ${name} in the bottom bar`,exact:true}).click();
+    await page.getByRole('button',{name:`Hide ${name} in the navigation`,exact:true}).click();
     await page.waitForTimeout(120);
   }
   assert.deepEqual((await prefs()).bottomNav,['library'],'one destination remains');
-  await page.getByRole('button',{name:'Hide Library in the bottom bar',exact:true}).click();
+  await page.getByRole('button',{name:'Hide Library in the navigation',exact:true}).click();
   await page.waitForTimeout(200);
   assert.deepEqual((await prefs()).bottomNav,['library'],'the last one is refused, not written');
   const note=page.getByRole('status').filter({hasText:'Keep at least one page in the bar.'});
   assert.equal(await note.count(),1,'the refusal says why');
-  assert.equal(await page.getByRole('button',{name:'Hide Library in the bottom bar',exact:true}).getAttribute('aria-pressed'),'true');
+  assert.equal(await page.getByRole('button',{name:'Hide Library in the navigation',exact:true}).getAttribute('aria-pressed'),'true');
   await shot('c-refusal-note');
   await noOverflow();
   await route('#/library');

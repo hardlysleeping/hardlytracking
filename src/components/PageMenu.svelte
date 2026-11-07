@@ -54,7 +54,34 @@
       if (event.key === "Escape") {
         event.preventDefault();
         close(true);
+        return;
       }
+      // Arrow keys walk the list: a menu reached by the keyboard should not require Tab between
+      // rows any more than a bar of buttons does. Home/End go to the ends. Only while the focus is
+      // actually inside the menu, so an arrow pressed on the page still scrolls the page.
+      const rows = menu === null ? [] : Array.from(menu.querySelectorAll<HTMLElement>('[role="menuitem"]'));
+      if (rows.length === 0) return;
+      const at = rows.indexOf(document.activeElement as HTMLElement);
+      if (at < 0 && event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+      let next: number;
+      switch (event.key) {
+        case "ArrowDown":
+          next = at < 0 ? 0 : (at + 1) % rows.length;
+          break;
+        case "ArrowUp":
+          next = at < 0 ? rows.length - 1 : (at - 1 + rows.length) % rows.length;
+          break;
+        case "Home":
+          next = 0;
+          break;
+        case "End":
+          next = rows.length - 1;
+          break;
+        default:
+          return;
+      }
+      event.preventDefault();
+      rows[next]?.focus();
     };
     const onDown = (event: PointerEvent): void => {
       if (root !== null && !root.contains(event.target as Node)) close();
