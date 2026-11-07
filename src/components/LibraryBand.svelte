@@ -123,22 +123,26 @@
   @media (prefers-reduced-motion: reduce) { .caret { transition: none; } }
 
   /* Eye, lock, pin: the lock keeps the middle so the two labelled seats give up their ends evenly.
-     Each seat is its own pill with the border of its own tone — one panel border around three
-     differently coloured controls was claiming a colour the seats disagreed about. */
+     One frame around all three, in the accent — the seats colour their glyphs, the band colours the
+     box they live in, so the row reads as a control group rather than three loose buttons. */
   .row {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
-    gap: var(--s1);
-    padding: 0;
-    border: 0;
-    background: transparent;
+    gap: 2px;
+    padding: 2px;
+    border: 1px solid color-mix(in srgb, var(--accent) 55%, transparent);
+    border-radius: var(--r2);
+    background: color-mix(in srgb, var(--surface) 60%, transparent);
+    -webkit-backdrop-filter: blur(12px) saturate(1.2);
+    backdrop-filter: blur(12px) saturate(1.2);
   }
+  .row.compact { border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
   /* With the curtain down there is one seat, and a one-seat grid puts it in the left column. Centre
      it in the width of the band instead, so Unlock sits under the caret rather than off to one side. */
   .row.compact.pinless { grid-template-columns: minmax(0, 1fr); justify-items: center; }
 
-  /* Each seat is its own pill in its own tone: border, wash and glyph share one colour, so a red eye
-     is not sitting inside a purple frame. */
+  /* The seat itself is bare: the frame above is the band's, and a tinted box inside a tinted box
+     made three buttons fight the group they belong to. The tone lives in the glyph and the label. */
   .seat {
     --tone: var(--text-2);
     display: flex;
@@ -148,15 +152,13 @@
     gap: 1px;
     min-width: 0;
     min-height: 40px;
-    padding: 4px 6px;
-    border: 1px solid color-mix(in srgb, var(--tone) 40%, transparent);
-    border-radius: var(--r2);
-    background: color-mix(in srgb, var(--tone) 8%, transparent);
+    padding: 3px 6px;
+    border: 0;
+    border-radius: calc(var(--r2) - 2px);
+    background: transparent;
     color: var(--tone);
     font: inherit;
     cursor: pointer;
-    -webkit-backdrop-filter: blur(12px) saturate(1.2);
-    backdrop-filter: blur(12px) saturate(1.2);
   }
   .seat.eye { --tone: var(--tone-hidden); }
   .seat.lock { --tone: var(--tone-lock-open); min-width: 64px; }
@@ -166,9 +168,9 @@
   .seat.off { --tone: var(--text-3); }
   /* Narrowed to this one thing: the icon keeps its tone, the word under it goes plain white. */
   .seat.loud .lbl { color: var(--text-1); font-weight: 600; opacity: 1; }
-  .seat:hover { background: color-mix(in srgb, var(--tone) 18%, transparent); }
+  .seat:hover { background: color-mix(in srgb, var(--tone) 16%, transparent); }
   .seat:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-  .seat:active { background: color-mix(in srgb, var(--tone) 28%, transparent); }
+  .seat:active { background: color-mix(in srgb, var(--tone) 26%, transparent); }
 
   /* Tiny caps words: enough to name the seat, never enough to outshout the list. */
   .lbl {

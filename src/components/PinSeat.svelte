@@ -37,10 +37,10 @@
     gap: var(--s2);
     min-height: 40px;
     padding: 3px 10px;
-    /* The frame is the glyph's colour, so the pill reads as the pin rather than as chrome. */
-    border: 1px solid color-mix(in srgb, currentColor 40%, transparent);
+    /* Same accent frame as the band the pin normally lives in — one control, one frame colour. */
+    border: 1px solid color-mix(in srgb, var(--accent) 55%, transparent);
     border-radius: var(--r2);
-    background: color-mix(in srgb, currentColor 8%, transparent);
+    background: color-mix(in srgb, var(--surface) 60%, transparent);
     color: var(--tone-pinned);
     font-size: var(--t-xs);
     cursor: pointer;
@@ -63,7 +63,7 @@
   /* Put away: crossed out and grey. Narrowed to one shelf: the same blue, and the word goes white. */
   .pinseat.off { color: var(--text-3); }
   .pinseat.loud .lbl { color: var(--text-1); font-weight: 600; }
-  .pinseat:hover { background: color-mix(in srgb, currentColor 18%, transparent); }
+  .pinseat:hover { background: color-mix(in srgb, currentColor 16%, transparent); }
   .pinseat:focus-visible {
     color: inherit;
   }
