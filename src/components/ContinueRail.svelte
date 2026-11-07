@@ -81,11 +81,23 @@
   }
 </script>
 
-<section class="continue" aria-label="Continue reading">
+<section class="continue" class:collapsed={settings.continueCollapsed} aria-label="Continue reading">
   <header class="head">
-    <h2>Continue reading</h2>
+    <h2 class="t">
+      <button
+        class="fold"
+        aria-expanded={!settings.continueCollapsed}
+        aria-label={`${settings.continueCollapsed ? "Expand" : "Collapse"} Continue reading, ${rows.length} series`}
+        onclick={() => settings.set("continueCollapsed", !settings.continueCollapsed)}
+      >
+        <span class="caret" aria-hidden="true">›</span>
+        <span class="title">Continue reading</span>
+        <span class="n">{rows.length}</span>
+      </button>
+    </h2>
     <button class="btn ghost" onclick={() => go("/history")}>See All</button>
   </header>
+  {#if !settings.continueCollapsed}
   <div class="strip" class:medium={size === "medium"}>
     {#each rows as row (row.seriesId)}
       <button
@@ -110,6 +122,7 @@
       </button>
     {/each}
   </div>
+  {/if}
 </section>
 
 <Sheet open={menuRow !== null} title={menuRow === null ? "Continue reading" : seriesLabel(menuRow.title)} onclose={() => (menuRow = null)}>
@@ -143,6 +156,11 @@
     margin-bottom: var(--s5);
   }
 
+  /* Folded, the strip's own block is gone: the header keeps its line, the covers take none. */
+  .continue.collapsed {
+    margin-bottom: var(--s2);
+  }
+
   .head {
     display: flex;
     align-items: center;
@@ -151,11 +169,58 @@
     margin-bottom: var(--s2);
   }
 
+  .continue.collapsed .head {
+    margin-bottom: 0;
+  }
+
   h2 {
+    margin: 0;
     font-size: var(--t-xs);
     text-transform: uppercase;
     letter-spacing: 0.08em;
     color: var(--text-3);
+  }
+
+  .t {
+    min-width: 0;
+  }
+
+  .fold {
+    all: unset;
+    box-sizing: border-box;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: var(--s2);
+    min-height: 44px;
+    border-radius: var(--r2);
+  }
+
+  .fold:hover {
+    color: var(--text-1);
+  }
+
+  .fold:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  .caret {
+    display: inline-block;
+    font-size: var(--t-md);
+    line-height: 1;
+    color: var(--text-3);
+    transition: transform 120ms ease;
+  }
+
+  .fold[aria-expanded="true"] .caret {
+    transform: rotate(90deg);
+  }
+
+  .n {
+    font-size: var(--t-xs);
+    color: var(--text-3);
+    font-variant-numeric: tabular-nums;
   }
 
   .head .btn {

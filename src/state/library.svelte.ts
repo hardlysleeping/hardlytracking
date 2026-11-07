@@ -40,10 +40,14 @@ import { detectPlatform } from "../lib/webview/index";
 import { plugins } from "./plugins.svelte";
 import { watchOpenedFiles } from "../lib/files/opened";
 import { imageCache } from "../lib/cache/images";
+import { makePinRecord, pinValid, verifyPin } from "../lib/pin";
+import { confirmDeviceOwner } from "../lib/device-auth";
 import type { Chapter, Page, Series, Source } from "../api/source";
 
-/**
- * What a migration would do, or why it will not.
+/** What a PIN change did. A refusal is the same shape as a failure: nothing was written. */
+export type PinChange = { ok: true } | { ok: false; reason: "invalid" | "exists" | "missing" | "wrong" };
+
+/** What a migration would do, or why it will not.
  *
  * `rows` is the confirm panel, built from the same plan the write uses — the panel cannot promise a
  * number the migration does not deliver.
@@ -1116,6 +1120,55 @@ class LibraryState {
   ownsProgress(chapterId: string): boolean {
     if (this.profile === null) return false;
     return progressWriter(providerFor(this.profile.providers, chapterId)) === "device";
+  }
+
+  /**
+   * The screen-curtain PIN.
+   *
+   * These are the only writers of `settings.privacyPin`, and they write the salted hash that
+   * `lib/pin` produces — never the PIN. A change or a removal proves ownership first: the device
+   * owner check when a native shell can make it, otherwise the current PIN. Storing it as a
+   * preference is what makes one PIN work on every device signed into HardlySync, which the owner
+   * asked for; it is local screen privacy, not encryption.
+   */
+  async setPin(pin: string): Promise<PinChange> {
+    if (!pinValid(pin)) return { ok: false, reason: "invalid" };
+    if (settings.privacyPin !== "") return { ok: false, reason: "exists" };
+    settings.set("privacyPin", await makePinRecord(pin));
+    return { ok: true };
+  }
+
+  async changePin(current: string, next: string): Promise<PinChange> {
+    if (!pinValid(next)) return { ok: false, reason: "invalid" };
+    if (settings.privacyPin === "") return { ok: false, reason: "missing" };
+    if (!(await this.#ownsPin(current))) return { ok: false, reason: "wrong" };
+    settings.set("privacyPin", await makePinRecord(next));
+    return { ok: true };
+  }
+
+  async clearPin(current: string): Promise<PinChange> {
+    if (settings.privacyPin === "") return { ok: false, reason: "missing" };
+    if (!(await this.#ownsPin(current))) return { ok: false, reason: "wrong" };
+    settings.set("privacyPin", "");
+    return { ok: true };
+  }
+
+  /** Device owner first (a future native shell), then the PIN that is actually stored. */
+  async #ownsPin(current: string): Promise<boolean> {
+    if (await confirmDeviceOwner()) return true;
+    return verifyPin(settings.privacyPin, current);
+  }
+
+  /**
+   * Check the current PIN without writing anything.
+   *
+   * The change sheet asks this before it offers a new code, so a wrong current PIN is refused at
+   * the step the reader typed it on. `changePin` and `clearPin` still verify again when they write:
+   * a check the UI skipped must not become a check that never happened.
+   */
+  async confirmPin(current: string): Promise<boolean> {
+    if (settings.privacyPin === "") return false;
+    return this.#ownsPin(current);
   }
 }
 

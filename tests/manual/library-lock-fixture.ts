@@ -12,6 +12,7 @@ import { categories } from '../../src/state/categories.svelte';
 import { sourceMarks } from '../../src/state/source-marks.svelte';
 import { privacy } from '../../src/state/privacy.svelte';
 import { settings } from '../../src/state/settings.svelte';
+import { makePinRecord } from '../../src/lib/pin';
 import type { Series, Chapter, Source } from '../../src/api/source';
 const store = new LibraryStore(memoryDatabase());
 const rows: Series[] = [
@@ -58,10 +59,14 @@ library.continueReading = async()=>rows.map(row=>({seriesId:row.id,chapterId:`${
 library.viewState = async()=>undefined;
 library.saveViewState = async()=>{};
 settings.set = ((key:string,value:unknown)=>{(settings as any)[key]=value;}) as any;
+// The curtain now refuses to lock without a PIN, so this fixture starts with one (synthetic code,
+// hash only). Unlocking goes through the same verification the keypad uses.
+const PIN = '2468';
+settings.privacyPin = await makePinRecord(PIN);
 settings.contentLevel = 'all' as any;
 settings.adultDeclared = true;
 settings.showContinue = true;
 settings.pinnedSources = sources.map(s=>s.id);
 await categories.load(store); await sourceMarks.load(store);
-(window as any).lockFixture = {privacy,categories,sourceMarks,store,rows,delay:()=>{delayed=true;},release:()=>{for (const done of releases) done(); releases=[]; delayed=false;}};
+(window as any).lockFixture = {privacy,categories,sourceMarks,store,rows,pin:PIN,unlock:async()=>privacy.attemptUnlock(PIN),delay:()=>{delayed=true;},release:()=>{for (const done of releases) done(); releases=[]; delayed=false;}};
 mount(Fixture,{target:document.body});

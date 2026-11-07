@@ -2,6 +2,20 @@
   import { categories } from "../state/categories.svelte";
   import { privacy } from "../state/privacy.svelte";
   import { EYE_PATHS, MARKER_PATH } from "../lib/categories";
+  import PinSheet from "./PinSheet.svelte";
+
+  /**
+   * The Lock seat asks for a PIN, always.
+   *
+   * With no PIN stored the seat opens the Set a PIN sheet instead of lowering a curtain nobody
+   * could raise; once a PIN exists the same seat locks immediately and the Unlock seat opens the
+   * keypad. Wrong digits keep the curtain up — the sheet is a verification, not a formality.
+   */
+  let sheet = $state<"set" | "unlock" | null>(null);
+
+  function lock(): void {
+    if (privacy.lock() === "needs-pin") sheet = "set";
+  }
 </script>
 
 <!--
@@ -31,7 +45,7 @@
   {#if !privacy.bandCollapsed}
     {#if privacy.locked}
       <div class="row compact">
-        <button class="seat lock on" aria-pressed="true" aria-label="Unlock local privacy screen" title="Local screen privacy only — no passcode, authentication or encryption" onclick={() => privacy.unlock()}>
+        <button class="seat lock on" aria-pressed="true" aria-label="Unlock local privacy screen" title="Local screen privacy only — enter your PIN" onclick={() => (sheet = "unlock")}>
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10V7a5 5 0 0 1 10 0v3M5 10h14v11H5z" /></svg>
           <span class="lbl">Unlock</span>
         </button>
@@ -40,14 +54,14 @@
           <span class="lbl">{categories.pinLabel}</span>
         </button>
       </div>
-      <p class="hint" role="status">Hidden shelves tucked away. Local screen privacy only; anyone can unlock. No authentication or encryption.</p>
+      <p class="hint" role="status">Hidden shelves tucked away. Enter your PIN to bring them back — local screen privacy, not encryption.</p>
     {:else}
       <div class="row">
         <button class="seat eye" aria-label={`Hidden categories: ${categories.hiddenLabel}`} title="Which shelves are hidden" onclick={() => void categories.cycleHiddenView()}>
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d={EYE_PATHS[categories.hiddenView]} /></svg>
           <span class="lbl">{categories.hiddenLabel}</span>
         </button>
-        <button class="seat lock" aria-pressed="false" aria-label="Lock local privacy screen" title="Local screen privacy only — no passcode, authentication or encryption" onclick={() => privacy.lock()}>
+        <button class="seat lock" aria-pressed="false" aria-label="Lock local privacy screen" title={privacy.pinSet ? "Lock the screen — asks for your PIN to come back" : "Set a PIN first — a lock with no PIN cannot be opened"} onclick={lock}>
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10V7a5 5 0 0 1 10 0M5 10h14v11H5z" /></svg>
           <span class="lbl">Lock</span>
         </button>
@@ -59,6 +73,17 @@
     {/if}
   {/if}
 </div>
+
+{#if sheet !== null}
+  <PinSheet
+    open={sheet !== null}
+    mode={sheet}
+    onclose={() => (sheet = null)}
+    ondone={() => {
+      if (sheet === "set") privacy.lock();
+    }}
+  />
+{/if}
 
 <style>
   .bandbox { display: grid; gap: 2px; margin-bottom: var(--s3); }

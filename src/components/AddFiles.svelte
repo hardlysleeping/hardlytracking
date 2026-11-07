@@ -23,8 +23,17 @@
     /** `primary` where it is the only thing to do (an empty library), `ghost` in a toolbar. */
     look?: "primary" | "ghost";
     label?: string;
+    /**
+     * Whether this draws its own two buttons.
+     *
+     * Library mounts it with the buttons off and calls `pickFiles`/`pickFolder` from the `⋯` sheet:
+     * the picker must open after the sheet closes, and an input inside a closed sheet is unmounted
+     * mid-gesture. Welcome and the empty library still draw the buttons, because there the action
+     * *is* the screen.
+     */
+    showButtons?: boolean;
   }
-  let { look = "ghost", label = "Add files" }: Props = $props();
+  let { look = "ghost", label = "Add files", showButtons = true }: Props = $props();
 
   let busy = $state(false);
   let note = $state<string | null>(null);
@@ -36,6 +45,18 @@
   const busyLabel = $derived(
     progress !== null && progress.total > 1 ? `Adding ${progress.index} of ${progress.total}…` : "Adding…",
   );
+
+  /** Open the file picker from a control that lives outside this component (the `⋯` sheet). */
+  export function pickFiles(): void {
+    if (busy) return;
+    input?.click();
+  }
+
+  /** Open the folder picker the same way. */
+  export function pickFolder(): void {
+    if (busy) return;
+    folderInput?.click();
+  }
 
   /**
    * Everything under a picked folder that this app can read.
@@ -94,6 +115,7 @@
 </script>
 
 <div class="add">
+  {#if showButtons}
   <button class="btn {look}" disabled={busy} onclick={() => input?.click()}>
     {busy ? busyLabel : label}
   </button>
@@ -105,7 +127,9 @@
   >
     Add folder
   </button>
+  {/if}
 </div>
+
 <input
   bind:this={input}
   class="hidden-input"

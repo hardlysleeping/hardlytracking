@@ -10,7 +10,7 @@ import type { LibraryStore } from "../lib/db/store";
 import { EMPTY_FILTER, type LibraryFilter } from "../lib/library/filter";
 import { sortSpecOfLegacy, type SortSpec } from "../lib/library/sort";
 import { DEFAULT_BADGES } from "../lib/library/badges";
-import type { Margins, PanePreference } from "../lib/view-options";
+import { isNavCorner, type Margins, type NavCorner, type PanePreference } from "../lib/view-options";
 import type { SourceFilterSelection } from "../api/source";
 import { DEFAULT_CPU_LEVEL, type CpuLevel } from "../lib/performance";
 import {
@@ -22,7 +22,14 @@ import {
   type AutoscrollSpeed,
 } from "../lib/autoscroll";
 import { keepCategoriesOf } from "../lib/offline/policy";
+import { DEFAULT_CONTINUE_COLLAPSED, continueCollapsedOf } from "../lib/library/continue";
 import { levelOr, type ContentLevel } from "../lib/content/levels";
+import { pinRecordOf } from "../lib/pin";
+
+/** A stored corner is one of four words; anything else is the default, not a broken layout. */
+function cornerOr(value: unknown): NavCorner {
+  return isNavCorner(value) ? value : "bottom-right";
+}
 
 import { DEFAULT_READ_AHEAD, readAheadOf, type ReadAhead } from "../lib/reader-ahead";
 import { browseMode, columnsFor } from "../lib/browse-display";
@@ -87,6 +94,8 @@ export interface Prefs {
   /** How many cards the strip draws, 1–20. */
   continueMax: number;
   continueSize: "small" | "medium";
+  /** The reader folded the strip away. The fold survives a relaunch, like any other choice. */
+  continueCollapsed: boolean;
   /** After finishing a chapter: point at the next unread one, or stay put. */
   continueAfterFinish: "next-unread" | "hold";
   /** Series taken off the strip. Their position, library and history rows are untouched. */
@@ -151,10 +160,21 @@ export interface Prefs {
   libraryPane: PanePreference;
   /** One pane or two, for history. */
   historyPane: PanePreference;
+  /** Which corner the phone's floating Back/Forward buttons sit in. */
+  historyNavCorner: NavCorner;
   /** Cover/page image cache ceiling, MB. */
   imageCacheLimitMb: number;
   /** Cache images at all. */
   cacheImages: boolean;
+  /**
+   * The screen-curtain PIN, as a salted hash record (`lib/pin`), or `""` for no PIN.
+   *
+   * A preference like any other, not a device secret: the owner asked for one PIN across devices,
+   * so it travels in an export and in the HardlySync document's preferences. It is written only by
+   * `library.setPin/changePin/clearPin`, and `set` drops any value that is not a record this build
+   * recognises — a corrupt row means "no PIN", never a lock nobody can open.
+   */
+  privacyPin: string;
   /** The first-run screen has been seen; it never shows again. */
   welcomed: boolean;
 }
@@ -181,6 +201,7 @@ class Settings {
   continuePosition = $state<"above" | "below">("above");
   continueMax = $state(10);
   continueSize = $state<"small" | "medium">("small");
+  continueCollapsed = $state(DEFAULT_CONTINUE_COLLAPSED);
   continueAfterFinish = $state<"next-unread" | "hold">("next-unread");
   continueDismissed = $state<string[]>([]);
 
@@ -211,8 +232,12 @@ class Settings {
   maximizeSpace = $state(false);
   libraryPane = $state<PanePreference>("auto");
   historyPane = $state<PanePreference>("auto");
+  /** Bottom right: where the thumb already is on a phone held in one hand. */
+  historyNavCorner = $state<NavCorner>("bottom-right");
   imageCacheLimitMb = $state(256);
   cacheImages = $state(true);
+  /** Salted hash only — see `lib/pin`. Empty means the curtain has no PIN and refuses to lock. */
+  privacyPin = $state("");
   /**
    * The first-run screen has been shown and dismissed.
    *
@@ -255,6 +280,7 @@ class Settings {
     this.continuePosition = await read("continuePosition", this.continuePosition);
     this.continueMax = await read("continueMax", this.continueMax);
     this.continueSize = await read("continueSize", this.continueSize);
+    this.continueCollapsed = continueCollapsedOf(await read<unknown>("continueCollapsed", DEFAULT_CONTINUE_COLLAPSED));
     this.continueAfterFinish = await read("continueAfterFinish", this.continueAfterFinish);
     this.continueDismissed = await read("continueDismissed", this.continueDismissed);
     this.readerMode = await read("readerMode", this.readerMode);
@@ -281,8 +307,11 @@ class Settings {
     this.maximizeSpace = await read("maximizeSpace", this.maximizeSpace);
     this.libraryPane = await read("libraryPane", this.libraryPane);
     this.historyPane = await read("historyPane", this.historyPane);
+    this.historyNavCorner = cornerOr(await read<unknown>("historyNavCorner", this.historyNavCorner));
     this.imageCacheLimitMb = await read("imageCacheLimitMb", this.imageCacheLimitMb);
     this.cacheImages = await read("cacheImages", this.cacheImages);
+    // Defensive read: a corrupt or foreign record is "no PIN", not a lock that refuses every entry.
+    this.privacyPin = pinRecordOf(await read<unknown>("privacyPin", ""));
     this.welcomed = await read("welcomed", this.welcomed);
     this.ready = true;
   }
@@ -306,7 +335,11 @@ class Settings {
             ? autoscrollCurveOf(value)
             : key === "keepCategories"
               ? keepCategoriesOf(value)
-              : value;
+              : key === "privacyPin"
+                ? pinRecordOf(value)
+                : key === "historyNavCorner"
+                  ? cornerOr(value)
+                  : value;
     const plain = $state.snapshot(normalised) as Prefs[K];
     (this as unknown as Record<string, unknown>)[key] = plain;
     void this.store?.setPref(KEY + key, plain).catch(() => {});

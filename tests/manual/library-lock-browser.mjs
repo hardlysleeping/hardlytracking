@@ -16,7 +16,7 @@ await page.waitForFunction(()=>window.lockFixture);
 const views=page.getByRole('navigation',{name:'Fixture views'});
 const view=async name=>{await views.getByRole('button',{name,exact:true}).click();await page.waitForTimeout(200);};
 const lock=()=>page.getByRole('button',{name:'Lock local privacy screen',exact:true}).click();
-const unlock=()=>page.getByRole('button',{name:'Unlock local privacy screen',exact:true}).click();
+const unlock=async()=>{await page.evaluate(()=>window.lockFixture.unlock());await page.waitForTimeout(150);};
 const absent=async()=>{
  const text=await page.locator('body').evaluate(el=>el.textContent + [...el.querySelectorAll('[aria-label],[title],img')].map(node=>[node.getAttribute('aria-label'),node.getAttribute('title'),node.getAttribute('alt')].join(' ')).join(' '));
  for(const privateText of ['Fixture Private Shelf','Fixture Private Source','Private collection label','Fixture Hidden Source']) assert.ok(!text.includes(privateText),`leaked ${privateText}`);
@@ -27,7 +27,7 @@ async function geometry(name,w,h,insets){
  await cdp.send('Emulation.setSafeAreaInsetsOverride',{insets});
  await page.evaluate(()=>window.dispatchEvent(new Event('resize')));
  await page.waitForTimeout(450);
- const result=await page.evaluate(()=>({url:location.href,width:innerWidth,height:innerHeight,coarse:matchMedia('(pointer: coarse)').matches,dpr:devicePixelRatio,safe:Object.fromEntries(['t','r','b','l'].map(k=>[k,getComputedStyle(document.documentElement).getPropertyValue('--safe-'+k).trim()])),bodyPadding:{top:getComputedStyle(document.body).paddingTop,right:getComputedStyle(document.body).paddingRight,bottom:getComputedStyle(document.body).paddingBottom,left:getComputedStyle(document.body).paddingLeft},bodyTop:document.body.getBoundingClientRect().top,navTop:document.querySelector('nav').getBoundingClientRect().top,scroll:document.documentElement.scrollWidth,controls:[...document.querySelector('[aria-label="Library visibility"]').querySelectorAll('button')].map(el=>({label:el.getAttribute('aria-label'),height:el.getBoundingClientRect().height,left:el.getBoundingClientRect().left,right:el.getBoundingClientRect().right,color:getComputedStyle(el).color}))}));
+ const result=await page.evaluate(()=>({url:location.href,width:innerWidth,height:innerHeight,coarse:matchMedia('(pointer: coarse)').matches,dpr:devicePixelRatio,safe:Object.fromEntries(['t','r','b','l'].map(k=>[k,getComputedStyle(document.documentElement).getPropertyValue('--safe-'+k).trim()])),bodyPadding:{top:getComputedStyle(document.body).paddingTop,right:getComputedStyle(document.body).paddingRight,bottom:getComputedStyle(document.body).paddingBottom,left:getComputedStyle(document.body).paddingLeft},bodyTop:document.body.getBoundingClientRect().top,navTop:document.querySelector('nav').getBoundingClientRect().top,scroll:document.documentElement.scrollWidth,controls:[...document.querySelector('.bandbox .row').querySelectorAll('button')].map(el=>({label:el.getAttribute('aria-label'),height:el.getBoundingClientRect().height,left:el.getBoundingClientRect().left,right:el.getBoundingClientRect().right,color:getComputedStyle(el).color}))}));
  assert.equal(result.width,w);assert.equal(result.height,h);assert.equal(result.coarse,true);assert.equal(result.dpr,3);
  assert.equal(result.scroll,w);assert.equal(result.navTop,insets.top);
  for(const [key,value] of Object.entries({t:insets.top,r:insets.right,b:insets.bottom,l:insets.left})) assert.equal(result.safe[key],`${value}px`);
@@ -55,9 +55,14 @@ try {
  await page.evaluate(async()=>{const f=window.lockFixture;await f.categories.cycleHiddenView();await f.categories.setHidden('private',false);await f.sourceMarks.setHidden('mihon:src:99',false);f.categories.hiddenView='revealed';f.sourceMarks.hiddenView='revealed';});
  await absent();
  await unlock();assert.equal(await eye().getAttribute('aria-label'),'Hidden categories: Revealed');
- await page.getByRole('button',{name:'Fold visibility controls',exact:true}).click();await lock();await unlock();
- assert.equal(await eye().count(),0);await page.getByRole('button',{name:'Expand visibility controls',exact:true}).click();
+ await page.getByRole('button',{name:'Hide visibility controls',exact:true}).click();
+ await page.evaluate(()=>window.lockFixture.privacy.lock());await page.waitForTimeout(100);
+ await unlock();
+ assert.equal(await eye().count(),0,'unlocking gives back the fold the reader chose');
+ await page.getByRole('button',{name:'Show visibility controls',exact:true}).click();
  await lock();
+ // Locking folds the band; the tab is the way back to the Unlock seat, so open it to measure.
+ await page.getByRole('button',{name:'Show visibility controls',exact:true}).click();await page.waitForTimeout(100);
  await geometry('iphone17-pro-max-portrait-locked',440,956,{top:62,bottom:34,left:0,right:0});
  for(const name of ['Library','History','Stats','Downloads','Browse','Source','Series']){
    await view(name);
@@ -88,7 +93,7 @@ try {
  await page.getByText('This title is hidden while the privacy lock is on.',{exact:true}).waitFor();
  assert.equal(await page.locator('.reader').count(),0);
  await absent();
- await page.evaluate(()=>window.lockFixture.privacy.unlock());
+ await page.evaluate(()=>window.lockFixture.unlock());
  await page.locator('.reader img[src]').first().waitFor();
  await page.evaluate(()=>window.lockFixture.privacy.lock());
  await page.getByText('This title is hidden while the privacy lock is on.',{exact:true}).waitFor();
@@ -100,6 +105,7 @@ try {
  evidence.push({check:'Direct private reader refused; unlocking mounts; locking unmounts images/controls; public reader retained while locked',pass:true});
  // Leave immersive Reader through the same route-state change the real App router makes.
  await page.evaluate(()=>{document.querySelector('nav[aria-label="Fixture views"] button').click();});
+ await page.getByRole('button',{name:'Show visibility controls',exact:true}).click();await page.waitForTimeout(100);
  await geometry('iphone17-pro-max-landscape' ,956,440,{top:0,bottom:21,left:62,right:62});
  await unlock();await geometry('iphone17-pro-max-landscape-open',956,440,{top:0,bottom:21,left:62,right:62});
  await geometry('compat-390',390,844,{top:47,bottom:34,left:0,right:0});

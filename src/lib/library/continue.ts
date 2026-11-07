@@ -62,6 +62,19 @@ export function seriesOfPosition(stored: string, chapter: { seriesId?: string } 
   return typeof owner === "string" && owner !== "" ? owner : stored;
 }
 
+/** A new reader sees the strip open; only an explicit `true` folds it. */
+export const DEFAULT_CONTINUE_COLLAPSED = false;
+
+/**
+ * The fold from storage.
+ *
+ * A pref written by an older build, a hand-edited value or a restored JSON that forgot the field
+ * must not fold the strip: only the literal `true` does, so the default is safe on every path.
+ */
+export function continueCollapsedOf(value: unknown): boolean {
+  return value === true;
+}
+
 /** The rows the strip draws: dismissed series dropped, order kept, then truncated. */
 export function eligible(rows: ContinueRow[], dismissed: Set<string>, max: number = DEFAULT_CONTINUE_RULES.max): ContinueRow[] {
   const kept = rows.filter((row) => !dismissed.has(row.seriesId));

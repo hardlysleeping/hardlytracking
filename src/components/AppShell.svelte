@@ -12,6 +12,7 @@
   import { deviceClass } from "../lib/layout-modes";
   import { go } from "../lib/nav";
   import { navHistory } from "../lib/nav-history.svelte";
+  import { settings } from "../state/settings.svelte";
 
   let { active, routeKey = "", children }: { active: string; routeKey?: string; children: Snippet } = $props();
 
@@ -134,7 +135,7 @@
   </main>
 
   {#if device === "phone" && (navHistory.depth > 0 || navHistory.canForward)}
-    <div class="history-nav">
+    <div class="history-nav" class:br={settings.historyNavCorner === "bottom-right"} class:bl={settings.historyNavCorner === "bottom-left"} class:tl={settings.historyNavCorner === "top-left"} class:tr={settings.historyNavCorner === "top-right"}>
       {#if navHistory.depth > 0}
         <button class="hbtn" aria-label="Back" title="Back" onclick={() => history.back()}>
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7" /></svg>
@@ -219,15 +220,31 @@
     display: flex;
   }
 
-  /* Floating back/forward, tucked above the phone bar's left corner. Sits over
-   * the content rather than in the scroll flow, so a long page keeps its room. */
+  /* Floating back/forward, tucked above the phone bar so it never fights it. Sits over the content
+     rather than in the scroll flow, so a long page keeps its room. Bottom right by default (the
+     thumb's corner in one hand); the other three are a setting, and each keeps clear of the safe
+     areas and of the bar itself. */
   .history-nav {
     position: fixed;
-    left: calc(var(--s3) + var(--safe-l));
-    bottom: calc(var(--nav-h) + var(--safe-b) + var(--s2));
     display: flex;
     gap: var(--s2);
     z-index: 40;
+  }
+  .history-nav.br {
+    right: calc(var(--s3) + var(--safe-r));
+    bottom: calc(var(--nav-h) + var(--safe-b) + var(--s2));
+  }
+  .history-nav.bl {
+    left: calc(var(--s3) + var(--safe-l));
+    bottom: calc(var(--nav-h) + var(--safe-b) + var(--s2));
+  }
+  .history-nav.tl {
+    left: calc(var(--s3) + var(--safe-l));
+    top: calc(var(--safe-t) + var(--s3));
+  }
+  .history-nav.tr {
+    right: calc(var(--s3) + var(--safe-r));
+    top: calc(var(--safe-t) + var(--s3));
   }
 
   .hbtn {

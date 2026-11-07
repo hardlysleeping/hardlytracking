@@ -20,10 +20,11 @@
   import { hostInfo, hostToken, htServerEnabled, pairingLink, remoteHost, type HostInfo } from "../lib/host";
   import { imageCache } from "../lib/cache/images";
   import { CACHE_LIMIT_CHOICES, describeCache, formatBytes, type CacheEntry } from "../lib/cache/policy";
-  import { MARGIN_CHOICES, PANE_CHOICES } from "../lib/view-options";
+  import { MARGIN_CHOICES, NAV_CORNER_CHOICES, PANE_CHOICES } from "../lib/view-options";
   import { CPU_LEVELS, describeLevel } from "../lib/performance";
 import { CONTENT_LEVELS, type ContentLevel } from "../lib/content/levels";
 import KeepOfflinePanel from "../components/KeepOfflinePanel.svelte";
+import PrivacyPanel from "../components/PrivacyPanel.svelte";
 
   /** The slider shows the cover the library actually draws, not a value a preset overrides. */
   const cover = $derived(coverWidth(settings.libraryDensity, deviceClass(viewport.width, viewport.height), settings.coverSize));
@@ -287,6 +288,11 @@ import KeepOfflinePanel from "../components/KeepOfflinePanel.svelte";
   </details>
 
   <details class="group" open>
+    <summary><h2>Privacy</h2></summary>
+    <PrivacyPanel />
+  </details>
+
+  <details class="group" open>
     <summary><h2>Keep offline</h2></summary>
     <KeepOfflinePanel />
   </details>
@@ -334,6 +340,21 @@ import KeepOfflinePanel from "../components/KeepOfflinePanel.svelte";
         onchange={(event) => settings.set("maximizeSpace", event.currentTarget.checked)}
       />
     </label>
+    <div class="row">
+      <span>Back/forward corner<em class="sub">Where the floating back and forward buttons sit on a phone. They only appear when there is history to move through.</em></span>
+      <div class="chips">
+        {#each NAV_CORNER_CHOICES as choice (choice.id)}
+          <button
+            class="chip"
+            class:on={settings.historyNavCorner === choice.id}
+            aria-pressed={settings.historyNavCorner === choice.id}
+            onclick={() => settings.set("historyNavCorner", choice.id)}
+          >
+            {choice.label}
+          </button>
+        {/each}
+      </div>
+    </div>
     <label class="row">
       <span>History panes<em class="sub">Two panes: the timeline on the left, the entry you pick on the right.</em></span>
       <select

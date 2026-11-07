@@ -5,6 +5,9 @@
    * Refresh and Select are here *as well as* in the top bar — the parity contract says neither may
    * vanish until the owner says so — and Statistics is a second page of the same sheet rather than
    * a second overlay, so only one thing is ever open.
+   *
+   * The top group is the local files: they left the tools row because a phone saw five controls
+   * around one shelf, and they are one door each — no second copy lives in the tools row.
    */
   import Sheet from "./Sheet.svelte";
   import { plugins } from "../state/plugins.svelte";
@@ -23,9 +26,13 @@
     onselect: () => void;
     oncategories: () => void;
     onsettings: () => void;
+    /** Local files: the pickers live in Library, so they open *after* this sheet has closed. */
+    onaddfiles: () => void;
+    onaddfolder: () => void;
+    ondrive: () => void;
     stats: LibraryStats;
   }
-  let { open, onclose, onrefresh, onselect, oncategories, onsettings, stats }: Props = $props();
+  let { open, onclose, onrefresh, onselect, oncategories, onsettings, onaddfiles, onaddfolder, ondrive, stats }: Props = $props();
 
   let page = $state<"menu" | "stats">("menu");
 
@@ -45,6 +52,14 @@
 
 <Sheet open={open} title={page === "menu" ? "Library" : "Statistics"} onclose={onclose}>
   {#if page === "menu"}
+    <div class="group">
+      <h3 class="group-title">Your files</h3>
+      <div class="menu-list">
+        <button class="menu-item" onclick={() => run(onaddfiles)}><span>Add files…</span></button>
+        <button class="menu-item" onclick={() => run(onaddfolder)}><span>Add folder…</span></button>
+        <button class="menu-item" onclick={() => run(ondrive)}><span>From drive…</span></button>
+      </div>
+    </div>
     <div class="menu-list">
       <button class="menu-item" onclick={() => run(onrefresh)}><span>Refresh library</span></button>
       <button class="menu-item" onclick={() => run(onselect)}><span>Select manga</span></button>
@@ -86,6 +101,14 @@
   .menu-list {
     display: grid;
     gap: 2px;
+  }
+
+  /* A group of its own, not a fourth kind of row: the files the reader already owns. */
+  .group {
+    display: grid;
+    gap: var(--s2);
+    padding-bottom: var(--s3);
+    border-bottom: 1px solid var(--line);
   }
 
   .menu-item {

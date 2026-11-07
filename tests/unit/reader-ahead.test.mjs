@@ -52,6 +52,10 @@ function freshSettings(){
   // Settings also normalises the autoscroll choices; the real validators are cheap and pure.
   if(id.includes('lib/autoscroll'))return{autoscrollCurveOf:value=>value,autoscrollSpeedOf:value=>value,DEFAULT_AUTOSCROLL_CURVE:'linear',DEFAULT_AUTOSCROLL_SPEED:'steady'};
   if(id.includes('offline/policy'))return{keepCategoriesOf:value=>Array.isArray(value)?value.filter(v=>typeof v==='string'):[]};
+  // The screen-curtain PIN is read defensively; nothing is stored in this fixture.
+  if(id.includes('lib/pin'))return{pinRecordOf:value=>typeof value==='string'?value:''};
+  if(id.includes('view-options'))return{isNavCorner:value=>['bottom-right','bottom-left','top-left','top-right'].includes(value)};
+  if(id.includes('library/continue'))return{DEFAULT_CONTINUE_COLLAPSED:false,continueCollapsedOf:value=>value===true};
   throw new Error(`Unexpected dependency ${id}`);
  }};
  vm.runInNewContext(stripped,ctx);
@@ -67,4 +71,22 @@ test('Settings stores the selected budget and restores it through load, includin
  prefs.set('settings.readerAhead',10000);
  const malformed=freshSettings();await malformed.load(store);assert.equal(malformed.readerAhead,3);
  malformed.set('readerAhead','bad');assert.equal(malformed.readerAhead,3);assert.equal(prefs.get('settings.readerAhead'),3);
+});
+
+// The floating Back/Forward corner is a default plus a closed choice: bottom right unless the reader
+// picks another one, and a stored value nothing recognises is the default rather than no position.
+test('the back/forward corner defaults to bottom right and refuses an unknown value',async()=>{
+ const prefs=new Map(),store={getPref:async k=>prefs.get(k),setPref:async(k,v)=>prefs.set(k,v)};
+ const first=freshSettings();await first.load(store);
+ assert.equal(first.historyNavCorner,'bottom-right');
+ first.set('historyNavCorner','top-left');
+ assert.equal(first.historyNavCorner,'top-left');
+ assert.equal(prefs.get('settings.historyNavCorner'),'top-left');
+ const restored=freshSettings();await restored.load(store);
+ assert.equal(restored.historyNavCorner,'top-left');
+ prefs.set('settings.historyNavCorner','diagonal');
+ const malformed=freshSettings();await malformed.load(store);
+ assert.equal(malformed.historyNavCorner,'bottom-right');
+ malformed.set('historyNavCorner','sideways');
+ assert.equal(malformed.historyNavCorner,'bottom-right');
 });

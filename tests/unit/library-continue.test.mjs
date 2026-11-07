@@ -1,13 +1,17 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  DEFAULT_CONTINUE_COLLAPSED,
   DEFAULT_CONTINUE_RULES,
   clampMax,
+  continueCollapsedOf,
   eligible,
   nextUnread,
   seriesOfPosition,
   showsContinue,
 } from "../../src/lib/library/continue.ts";
+import { memoryDatabase } from "../../src/lib/db/open.ts";
+import { LibraryStore } from "../../src/lib/db/store.ts";
 
 function chapter(id, read = false, number = 1) {
   return { id, seriesId: "s", name: `Chapter ${number}`, number, pageCount: 20, read };
@@ -80,4 +84,25 @@ test("without a chapter row the stored series id stands", () => {
   assert.equal(seriesOfPosition("mihon:12", undefined), "mihon:12");
   assert.equal(seriesOfPosition("mihon:12", { seriesId: "" }), "mihon:12");
   assert.equal(seriesOfPosition("mihon:12", {}), "mihon:12");
+});
+
+test("the strip starts open, and only the literal true folds it", () => {
+  // The pref is new: an older export has no row, and a restored or hand-edited value must not
+  // hide the reader's Continue strip on launch.
+  assert.equal(DEFAULT_CONTINUE_COLLAPSED, false);
+  assert.equal(continueCollapsedOf(undefined), false);
+  assert.equal(continueCollapsedOf(null), false);
+  assert.equal(continueCollapsedOf("true"), false);
+  assert.equal(continueCollapsedOf(1), false);
+  assert.equal(continueCollapsedOf(true), true);
+});
+
+test("continueCollapsed round-trips through the prefs store under settings.continueCollapsed", async () => {
+  const store = new LibraryStore(memoryDatabase());
+  // The default is a missing row, not a written false — the same fallback `Settings.load` uses.
+  assert.equal(continueCollapsedOf(await store.getPref("settings.continueCollapsed")), DEFAULT_CONTINUE_COLLAPSED);
+  await store.setPref("settings.continueCollapsed", true);
+  assert.equal(continueCollapsedOf(await store.getPref("settings.continueCollapsed")), true);
+  await store.setPref("settings.continueCollapsed", false);
+  assert.equal(continueCollapsedOf(await store.getPref("settings.continueCollapsed")), false);
 });

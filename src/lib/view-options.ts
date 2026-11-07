@@ -13,6 +13,26 @@ export type Margins = "comfortable" | "compact" | "none";
 export type PanePreference = "auto" | "single" | "split";
 export type Density = "auto" | "manual" | "compact" | "comfortable" | "large";
 
+/**
+ * Where the floating Back/Forward pair sits on a phone.
+ *
+ * Bottom right by default: that is the thumb's corner on a phone held in one hand, and the buttons
+ * appear only when there is history to move through. The other three corners are there because which
+ * corner is comfortable depends on the hand, and the choice is a preference like any other.
+ */
+export type NavCorner = "bottom-right" | "bottom-left" | "top-left" | "top-right";
+
+export const NAV_CORNER_CHOICES: Array<{ id: NavCorner; label: string }> = [
+  { id: "bottom-right", label: "Bottom right" },
+  { id: "bottom-left", label: "Bottom left" },
+  { id: "top-left", label: "Top left" },
+  { id: "top-right", label: "Top right" },
+];
+
+export function isNavCorner(value: unknown): value is NavCorner {
+  return value === "bottom-right" || value === "bottom-left" || value === "top-left" || value === "top-right";
+}
+
 export const MARGIN_CHOICES: Array<{ id: Margins; label: string; hint: string }> = [
   { id: "comfortable", label: "Comfortable", hint: "Room around the content" },
   { id: "compact", label: "Compact", hint: "Tighter edges, same layout" },

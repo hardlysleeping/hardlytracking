@@ -73,6 +73,14 @@
   /** Display knobs (cover size, continue strip) — the settings that are not a filter. */
   let displayOpen = $state(false);
   let driveOpen = $state(false);
+  /**
+   * The local-file component, mounted without its buttons.
+   *
+   * Its two pickers are opened from the `⋯` sheet. The sheet closes first (its `run` helper), and
+   * the input must still be in the document at that moment, so the component lives here rather
+   * than inside the sheet's `{#if open}` block.
+   */
+  let adders = $state<{ pickFiles: () => void; pickFolder: () => void } | null>(null);
 
   /** The applied filter is a setting, not component state: a reload must keep it. */
   const filter = $derived(settings.libraryFilter);
@@ -819,9 +827,6 @@
           </button>
           <button class="btn ghost" onclick={() => (sortOpen = true)}>Sort · {sortLabel}</button>
           <button class="btn ghost" onclick={() => (displayOpen = true)}>Display</button>
-          <!-- The comics they already own: no server, no extension, no network. -->
-          <AddFiles />
-          <button class="btn ghost" onclick={() => (driveOpen = true)}>From Drive</button>
         </div>
 
         <ChipRow chips={filterChips} onremove={removeChip} />
@@ -830,6 +835,13 @@
           <ContinueRail rows={continueRows} size={settings.continueSize} />
         {/if}
         {/if}
+
+        <!--
+          The local files live in the `⋯` sheet now. The inputs stay mounted here (buttons off) so
+          the picker opens on the same gesture that closed the sheet — including on an empty
+          library, where the sheet's "Add files…" must work exactly like the blank screen's button.
+        -->
+        <AddFiles bind:this={adders} showButtons={false} />
 
         <BrowseDisplay />
         {#if !library.ready}
@@ -995,6 +1007,9 @@
   onselect={() => (selection = new Set())}
   oncategories={() => (categoriesOpen = true)}
   onsettings={() => go("/settings")}
+  onaddfiles={() => adders?.pickFiles()}
+  onaddfolder={() => adders?.pickFolder()}
+  ondrive={() => (driveOpen = true)}
   {stats}
 />
 

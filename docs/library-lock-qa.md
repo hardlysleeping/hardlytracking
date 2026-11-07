@@ -4,9 +4,38 @@ The Library has direct Hidden → Revealed → Only and Active → Only → Hidd
 The eye and pin use existing `--tone-hidden` / `--tone-pinned` variables (defaults
 `#e5484d` / `#0078e0`). Fold is a session preference. Lock holds that fold aside,
 tucks both controls away, forces the effective category/source eye to Hidden, and
-Unlock restores the prior fold and intended eye filters. This is explicitly **local
-screen privacy, not authentication, a passcode system, or encryption**. Anyone can
-unlock; reload starts a new session.
+Unlock restores the prior fold and intended eye filters. This is **local screen
+privacy, not encryption**: no library byte is encrypted, and nothing here authenticates
+to a server.
+
+## The PIN
+
+The curtain is PIN-gated, because the owner asked for exactly that:
+
+- `lib/pin.ts` is the whole scheme. A PIN is 4–8 digits, stored as
+  `sha256:<saltHex>:<hashHex>` — 16 salt bytes from `crypto.getRandomValues`, 32 hash
+  bytes from `crypto.subtle.digest`. Parsing is defensive: a corrupt or foreign value
+  reads as "no PIN", never as a lock nobody can open. `verifyPin` compares every byte
+  without an early return.
+- The record is the closed preference `settings.privacyPin` (`state/settings.svelte.ts`),
+  written only by `library.setPin/changePin/clearPin`, which ask for the current PIN (or
+  `confirmDeviceOwner()` when a native shell can make that check) and write through
+  `settings.set`. Because it is a preference like any other, it travels in an export and
+  in the HardlySync document's `preferences`, which is how one PIN opens the app on every
+  signed-in device. No plaintext PIN is ever stored, logged or put in a URL.
+- `PrivacyState.lock()` refuses with `"needs-pin"` when no PIN is stored, so the Library
+  band opens the Set a PIN sheet instead of lowering a curtain nobody could raise.
+  `attemptUnlock(pin)` verifies; wrong entries count down from five (`"That PIN is not
+  right — N tries left."`) and five wrong tries pause the keypad for a minute. Only a
+  correct PIN raises the curtain. The count is per session: a reload is a fresh screen.
+- UI: `PinSheet.svelte` is the one sheet (set / unlock / change / remove) opened by both
+  the band's Lock/Unlock seats and `PrivacyPanel.svelte`, the Privacy section in Settings.
+  Changing or removing the PIN verifies the current one at the step it is typed, and the
+  write verifies again.
+- Limitation to state plainly: there is no native device-owner check yet.
+  `lib/device-auth.ts`'s `confirmDeviceOwner()` resolves `false` in every shell, so the
+  change/remove/reset path always falls back to asking for the current PIN. Real Face ID
+  or device passcode is a separate native slice; nothing here fakes it.
 
 `state/privacy.svelte.ts` owns the curtain. `state/visibility.svelte.ts` reuses
 `contextOf` / `isHidden`, including saved category membership and source mappings,
@@ -29,7 +58,9 @@ The memory-only fixture exercises this same component for locked direct-entry, u
 npm run dev -- --host 127.0.0.1 --port 5217 --strictPort
 # In another terminal:
 node --experimental-strip-types --import ./tests/unit/register-ts.mjs --test tests/unit/library-lock.test.mjs
+node --experimental-strip-types --import ./tests/unit/register-ts.mjs --test tests/unit/pin.test.mjs
 node tests/manual/library-lock-browser.mjs
+node tests/manual/pin-browser.mjs
 npm test
 npx tsc --noEmit
 npx svelte-check --threshold error
@@ -38,8 +69,11 @@ npm run build
 
 The browser runner imports `playwright` by default; set `PLAYWRIGHT_MODULE` to an external installation's `index.mjs` if browser tooling is kept outside the project. Fixture entry is
 `tests/manual/library-lock-fixture.html`; setup is `library-lock-fixture.ts` and
-`LibraryLockFixture.svelte` beside it. No `library.open()`, real profile, passcode,
-real library, source network mutation, or persistent fixture database is used.
+`LibraryLockFixture.svelte` beside it. The PIN fixture is `tests/manual/pin-fixture.html`
+(`pin-fixture.ts`, `PinFixture.svelte`, runner `pin-browser.mjs`); it mounts the band's
+seats and the same Privacy panel Settings renders, and uses a synthetic code (`2468` in
+the lock fixture, typed fresh in the PIN fixture). No `library.open()`, real profile,
+real library, real source network mutation, or persistent fixture database is used.
 Non-local browser HTTP requests are blocked. Fixture navigation is not App routing.
 
 Evidence is generated under ignored `data/library-lock-qa/`: `evidence.json`,
