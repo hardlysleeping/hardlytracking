@@ -1,0 +1,85 @@
+workflows:
+  ios-unsigned:
+    name: HardlyTracking iOS unsigned IPA
+    instance_type: mac_mini_m2
+    max_build_duration: 120
+    environment:
+      node: 22
+      java: 21
+      xcode: latest
+      vars:
+        CARGO_TERM_COLOR: always
+    cache:
+      cache_paths:
+        - ~/.cargo
+        - $HOME/.rustup
+        - $HOME/Library/Caches/tauri
+        - $CM_BUILD_DIR/src-tauri/target
+    scripts:
+      - name: Rust toolchain
+        script: |
+          set -euo pipefail
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
+          source "$HOME/.cargo/env"
+          rustup target add aarch64-apple-ios
+          rustc -V
+          cargo -V
+          xcodebuild -version
+      - name: Install dependencies and build web app
+        script: |
+          set -euo pipefail
+          npm ci
+          npm run build
+          npx cap sync ios
+      - name: Verify native plugin registration and install pods
+        script: |
+          set -euo pipefail
+          node -e "const c=require('./ios/App/App/capacitor.config.json'); if (!(c.packageClassList||[]).includes('MihonRuntimePlugin')) { console.error('MihonRuntimePlugin missing from packageClassList'); process.exit(1); } console.log('MihonRuntimePlugin registered');"
+          cd ios/App
+          pod install --repo-update
+      - name: Verify Xcode and iOS SDK
+        script: |
+          set -euo pipefail
+          xcodebuild -version
+          SDK=$(xcodebuild -showsdks | sed -n 's/.*-sdk iphoneos\([0-9.]*\).*/\1/p' | sort -V | tail -1)
+          echo "iphoneos SDK: ${SDK:-none}"
+          [ -n "$SDK" ] || { echo 'No iPhoneOS SDK found'; exit 1; }
+          [ "$(printf '%s\n%s\n' 18.0 "$SDK" | sort -V | head -1)" = 18.0 ] || { echo "SDK $SDK is below 18.0"; exit 1; }
+      - name: Archive unsigned iOS app
+        script: |
+          set -euo pipefail
+          VERSION=$(node -p "require('./package.json').version")
+          BUILD=${BUILD_NUMBER:-1}
+          xcodebuild \
+            -workspace ios/App/App.xcworkspace \
+            -scheme App \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$CM_BUILD_DIR/App.xcarchive" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY='' \
+            CODE_SIGN_ENTITLEMENTS='' \
+            MARKETING_VERSION="$VERSION" \
+            CURRENT_PROJECT_VERSION="$BUILD" \
+            archive
+          APP="$CM_BUILD_DIR/App.xcarchive/Products/Applications/App.app"
+          test -d "$APP"
+          GOT=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Info.plist")
+          echo "Built bundle version $GOT (expected $VERSION), build $BUILD"
+          test "$GOT" = "$VERSION"
+          test -f "$APP/Frameworks/OpenJDKRuntime.framework/OpenJDKRuntime"
+          test -f "$APP/Frameworks/OpenJDKRuntime.framework/lib/lib/modules"
+          JAR=$(find "$APP" -name 'MExtensionServer.jar' -print -quit)
+          test -n "$JAR"
+          test -f "$(dirname "$JAR")/java-logging-shim.jar"
+          MIN=$(/usr/libexec/PlistBuddy -c 'Print :MinimumOSVersion' "$APP/Info.plist")
+          test "$MIN" = 15.0
+          mkdir -p "$CM_BUILD_DIR/ipa/Payload"
+          cp -R "$APP" "$CM_BUILD_DIR/ipa/Payload/"
+          cd "$CM_BUILD_DIR/ipa"
+          zip -qry "$CM_BUILD_DIR/HardlyTracking-unsigned.ipa" Payload
+          ls -lh "$CM_BUILD_DIR/HardlyTracking-unsigned.ipa"
+    artifacts:
+      - HardlyTracking-unsigned.ipa
