@@ -65,4 +65,5 @@ echo "Installed:"
 echo "  app      ${bin}"
 echo "  menu     ${desktop_dir}/hardlytracking.desktop"
 echo "  command  hardlytracking"
-"${bin}" --version 2>/dev/null || true
+# No `--version` probe: this is a Tauri GUI, so it has no such flag — the call starts the app and
+# blocks the script on a window nobody asked for. Prove the install by launching it deliberately.
