@@ -52,6 +52,14 @@ export interface KomgaServer extends KomgaSettings {
   id: string;
   label: string;
   enabled: boolean;
+  /**
+   * Which library the server-level aggregate source shows: absent or empty means every library.
+   *
+   * This is the Komikku-shaped choice the owner asked for — one "Komga — <label>" source that lists
+   * the whole server by default, narrowed to one library in its own settings. The per-library
+   * sources are untouched by it: they always read their own library.
+   */
+  libraryId?: string;
 }
 
 export interface KomgaServerResult {
@@ -121,6 +129,10 @@ function normalise(raw: unknown): KomgaServer | null {
     password: typeof row.password === "string" ? row.password : "",
     // Default on, like the single-server switch was: entering a login *is* the opt-in.
     enabled: row.enabled !== false,
+    // Absent and empty both mean "all libraries", so a pre-picker row needs no migration.
+    ...(typeof row.libraryId === "string" && row.libraryId.trim() !== ""
+      ? { libraryId: row.libraryId.trim() }
+      : {}),
   };
 }
 
@@ -344,6 +356,9 @@ export function addKomgaServer(input: Partial<KomgaServer> = {}): KomgaServerRes
     username,
     password,
     enabled: input.enabled !== false,
+    ...(typeof input.libraryId === "string" && input.libraryId.trim() !== ""
+      ? { libraryId: input.libraryId.trim() }
+      : {}),
   };
   persist([...servers, server]);
   return { ok: true, server };
@@ -364,6 +379,9 @@ export function updateKomgaServer(id: string, patch: Partial<Omit<KomgaServer, "
     ...(patch.enabled === undefined ? {} : { enabled: patch.enabled }),
   };
   if (next.baseUrl === "") return { ok: false, error: "A Komga server needs an address." };
+  // An empty string clears the picker (All); a missing field leaves the saved choice alone.
+  if (patch.libraryId === "") delete next.libraryId;
+  else if (typeof patch.libraryId === "string") next.libraryId = patch.libraryId.trim();
   servers[at] = next;
   persist(servers);
   return { ok: true, server: next };
@@ -371,6 +389,17 @@ export function updateKomgaServer(id: string, patch: Partial<Omit<KomgaServer, "
 
 export function setKomgaServerEnabled(id: string, enabled: boolean): void {
   updateKomgaServer(id, { enabled });
+}
+
+/**
+ * Choose which library the server-level aggregate source reads.
+ *
+ * `undefined` (or an empty string) is All — the default the owner asked to keep. One entry's choice
+ * never touches another entry's: two logins on one box can show comics on one and magazines on the
+ * other, which is the whole reason the list holds several entries.
+ */
+export function setKomgaServerLibrary(id: string, libraryId?: string): void {
+  updateKomgaServer(id, { libraryId: (libraryId ?? "").trim() });
 }
 
 /** Remove one entry. The others, their ids and their marks are untouched. */
@@ -423,6 +452,54 @@ export async function probeKomga(
   } catch (error) {
     // WebKit and native networking can use the same generic failure text for DNS, TLS,
     // ATS and routing failures. It is not evidence of CORS or a rejected login.
+    const message = error instanceof Error ? error.message : String(error);
+    return { ok: false, error: `Komga is not answering at ${base}: ${message}` };
+  }
+}
+
+/** One library the picker can name — the id is what Komga filters by, not the display name. */
+export interface KomgaLibrary {
+  id: string;
+  name: string;
+}
+
+export interface KomgaLibrariesResult {
+  ok: boolean;
+  libraries?: KomgaLibrary[];
+  error?: string;
+}
+
+/**
+ * The libraries one saved server reports, for the aggregate source's picker.
+ *
+ * `probeKomga` answers names for the Test button; this answers ids, because the choice has to be
+ * saved as the id Komga filters on. It is read when the card needs it (not at boot), and every
+ * failure is a sentence the card can show rather than an empty list that looks like "no libraries".
+ */
+export async function fetchKomgaLibraries(
+  settings: KomgaSettings,
+  fetchImpl: typeof fetch = deadlined(fetch, RUNTIME_DEADLINE_MS, "your Komga server"),
+): Promise<KomgaLibrariesResult> {
+  const base = settings.baseUrl.replace(/\/+$/, "");
+  const bytes = new TextEncoder().encode(`${settings.username}:${settings.password}`);
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  const headers = { authorization: `Basic ${btoa(binary)}`, accept: "application/json" };
+  try {
+    const response = await fetchImpl(komgaUrl(base, "/api/v1/libraries"), { headers });
+    if (response.status === 401 || response.status === 403) {
+      return { ok: false, error: `Komga refused that login (${response.status})` };
+    }
+    if (!response.ok) return { ok: false, error: `Komga answered ${response.status}` };
+    const rows = (await response.json()) as Array<{ id?: unknown; name?: unknown }>;
+    if (!Array.isArray(rows)) return { ok: false, error: "Komga answered with something other than a library list" };
+    return {
+      ok: true,
+      libraries: rows
+        .filter((row) => typeof row.id === "string" && row.id !== "")
+        .map((row) => ({ id: row.id as string, name: typeof row.name === "string" && row.name !== "" ? row.name : "Untitled library" })),
+    };
+  } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     return { ok: false, error: `Komga is not answering at ${base}: ${message}` };
   }

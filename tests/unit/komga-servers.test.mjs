@@ -12,10 +12,11 @@ import {
   removeKomgaServer,
   setKomgaEnabled,
   setKomgaServerEnabled,
+  setKomgaServerLibrary,
   setKomgaSettings,
   updateKomgaServer,
 } from "../../src/lib/komga.ts";
-import { createKomgaProvider } from "../../src/api/komga.ts";
+import { createKomgaProvider, komgaAggregateSourceId } from "../../src/api/komga.ts";
 import { providerFor } from "../../src/api/registry.ts";
 import { createProviders } from "../../src/api/registry.ts";
 import { memoryDatabase } from "../../src/lib/db/open.ts";
@@ -190,8 +191,8 @@ test("two servers with an identical baseUrl produce different source, series and
   const a = createKomgaProvider({ baseUrl: BASE, username: "a", password: "1", serverId: "a", fetchImpl: komga.impl });
   const b = createKomgaProvider({ baseUrl: BASE, username: "b", password: "2", serverId: "b", fetchImpl: komga.impl });
 
-  const sourceA = (await a.sources())[0];
-  const sourceB = (await b.sources())[0];
+  const sourceA = (await a.sources()).find((source) => source.id === "komga:a:lib-1");
+  const sourceB = (await b.sources()).find((source) => source.id === "komga:b:lib-1");
   assert.equal(sourceA.id, "komga:a:lib-1");
   assert.equal(sourceB.id, "komga:b:lib-1");
   assert.notEqual(sourceA.id, sourceB.id);
@@ -246,6 +247,101 @@ test("the registry builds one provider per enabled server, and providerFor picks
   const forA = providerFor(providers, "komga:a:lib-1");
   const forB = providerFor(providers, "komga:b:lib-1");
   assert.notEqual(forA, forB, "the same kind twice must not resolve to the first match");
-  assert.equal((await forA.sources())[0].name, "a library");
-  assert.equal((await forB.sources())[0].name, "b library");
+  assert.equal((await forA.sources()).find((source) => source.id === "komga:a:lib-1").name, "a library");
+  assert.equal((await forB.sources()).find((source) => source.id === "komga:b:lib-1").name, "b library");
+});
+
+test("a server's aggregate source lists all libraries by default and sits beside the library cards", async () => {
+  const komga = fakeKomga();
+  const provider = createKomgaProvider({
+    baseUrl: BASE,
+    username: "a",
+    password: "1",
+    serverId: "a",
+    label: "Comics server",
+    fetchImpl: komga.impl,
+  });
+  const sources = await provider.sources();
+  assert.deepEqual(sources.map((source) => source.id), ["komga:a:all", "komga:a:lib-1"]);
+  assert.equal(sources[0].name, "Komga — Comics server");
+  assert.equal(sources[0].provider, "komga");
+  assert.equal(sources[1].name, "a library");
+});
+
+test("All sends no library_id, a chosen library sends it, and a library card ignores the picker", async () => {
+  const allCalls = fakeKomga();
+  const allProvider = createKomgaProvider({
+    baseUrl: BASE,
+    username: "a",
+    password: "1",
+    serverId: "a",
+    fetchImpl: allCalls.impl,
+  });
+  await allProvider.popular("komga:a:all", 1);
+  assert.doesNotMatch(allCalls.calls.at(-1).path, /library_id/, "All is the absence of the parameter, not an empty one");
+  assert.equal(allProvider.owns(komgaAggregateSourceId("a")), true);
+
+  const pickedCalls = fakeKomga();
+  const picked = createKomgaProvider({
+    baseUrl: BASE,
+    username: "a",
+    password: "1",
+    serverId: "a",
+    libraryId: "lib-2",
+    fetchImpl: pickedCalls.impl,
+  });
+  await picked.latest("komga:a:all", 1);
+  assert.match(pickedCalls.calls.at(-1).path, /library_id=lib-2/);
+
+  // The library card keeps asking for its own library, picker or no picker.
+  await picked.search("komga:a:lib-1", "saga", 1);
+  const libraryCall = pickedCalls.calls.at(-1).path;
+  assert.match(libraryCall, /library_id=lib-1/);
+  assert.doesNotMatch(libraryCall, /library_id=lib-2/);
+  assert.match(libraryCall, /search=saga/);
+});
+
+test("the aggregate id belongs to its server and is refused by another one", async () => {
+  const komga = fakeKomga();
+  const a = createKomgaProvider({ baseUrl: BASE, username: "a", password: "1", serverId: "a", fetchImpl: komga.impl });
+  const b = createKomgaProvider({ baseUrl: BASE, username: "b", password: "2", serverId: "b", fetchImpl: komga.impl });
+
+  assert.equal(a.owns("komga:a:all"), true);
+  assert.equal(b.owns("komga:a:all"), false);
+  await assert.rejects(() => b.popular("komga:a:all", 1), /belongs to Komga server "a", not "b"/);
+});
+
+test("the library picker saves and clears per server, and an absent value reads as All", async () => {
+  addKomgaServer({ label: "Comics", baseUrl: BASE, username: "a", password: "1" });
+  addKomgaServer({ label: "Magazines", baseUrl: BASE, username: "b", password: "2" });
+  const [comics, magazines] = komgaServers();
+  assert.equal(comics.libraryId, undefined, "a pre-picker entry defaults to All");
+
+  setKomgaServerLibrary(comics.id, "lib-2");
+  assert.equal(komgaServers().find((row) => row.id === comics.id).libraryId, "lib-2");
+  assert.equal(komgaServers().find((row) => row.id === magazines.id).libraryId, undefined, "one entry's picker never moves another");
+
+  setKomgaServerLibrary(comics.id, undefined);
+  const cleared = komgaServers().find((row) => row.id === comics.id);
+  assert.equal(cleared.libraryId, undefined);
+  assert.equal(Object.hasOwn(cleared, "libraryId"), false, "All is stored as absence, not an empty id");
+
+  // The registry hands the saved choice to the provider, so the aggregate obeys it without a relaunch.
+  setKomgaServerLibrary(magazines.id, "lib-mags");
+  const komga = fakeKomga();
+  const providers = (
+    await createProviders({
+      store: new LibraryStore(memoryDatabase()),
+      localFirst: true,
+      mihonBase: null,
+      dalvikBase: null,
+      komgaServers: komgaServers(),
+      fetchImpl: komga.impl,
+    })
+  ).providers;
+  const magazinesProvider = providers.find(
+    (provider) => provider.kind === "komga" && provider.owns(komgaAggregateSourceId(magazines.id)),
+  );
+  await magazinesProvider.popular(komgaAggregateSourceId(magazines.id), 1);
+  assert.match(komga.calls.at(-1).path, /library_id=lib-mags/);
 });

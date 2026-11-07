@@ -24,7 +24,7 @@ import { grantConsent, isGranted, revokeConsent, type ConsentGrant } from "../li
 const CONSENT_PREF = "settings.consentGrants";
 import { openHostRegistry } from "../lib/extensions/host-registry";
 import { activeKomgaServers } from "../lib/komga";
-import { createKomgaProvider } from "./komga";
+import { createKomgaProvider, isKomgaAggregateSource } from "./komga";
 import { createWebdavProvider } from "./webdav";
 import { webdavEnabled, webdavSettings } from "../lib/webdav";
 
@@ -234,12 +234,15 @@ export async function openLibraryProfile(options: OpenProfileOptions = {}): Prom
           username: server.username,
           password: server.password,
           serverId: server.id,
+          label: server.label,
+          ...(server.libraryId === undefined ? {} : { libraryId: server.libraryId }),
           ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
         });
         try {
           const sources = await provider.sources();
           providers.push(provider);
-          if (sources.length === 0) warnings.push(`Komga ${server.label}: signed in, but no libraries are visible to that user`);
+          const libraries = sources.filter((source) => !isKomgaAggregateSource(server.id, source.id));
+          if (libraries.length === 0) warnings.push(`Komga ${server.label}: signed in, but no libraries are visible to that user`);
         } catch (error) {
           warnings.push(`Komga ${server.label} (${server.baseUrl}): ${error instanceof Error ? error.message : String(error)}`);
         }

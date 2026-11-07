@@ -10,7 +10,7 @@ import {
   mapKomgaSeries,
   trimBase,
 } from "../../src/api/komga.ts";
-import { probeKomga } from "../../src/lib/komga.ts";
+import { fetchKomgaLibraries, probeKomga } from "../../src/lib/komga.ts";
 
 const BASE = "http://komga.test:25600";
 const AUTH = komgaAuthHeaders("reader", "hunter2");
@@ -122,7 +122,9 @@ test("the provider asks for libraries with the login", async () => {
   const komga = fakeKomga({ "/api/v1/libraries": LIBRARIES });
   const provider = createKomgaProvider({ baseUrl: BASE, username: "reader", password: "hunter2", fetchImpl: komga.impl });
   const sources = await provider.sources();
-  assert.equal(sources[0].id, "komga:default:lib-1");
+  assert.deepEqual(sources.map((source) => source.id), ["komga:default:all", "komga:default:lib-1"]);
+  assert.equal(sources[0].name, "Komga — Komga");
+  assert.equal(sources[1].name, "Comics");
   assert.equal(komga.calls[0].init.headers.authorization, AUTH.authorization);
 });
 
@@ -218,4 +220,32 @@ test("the card's test says which libraries the login can see", async () => {
   const bad = await probeKomga({ baseUrl: BASE, username: "reader", password: "nope" }, refused.impl);
   assert.equal(bad.ok, false);
   assert.match(bad.error, /refused that login \(401\)/);
+});
+
+test("the picker's library list carries ids, and an unreachable server is a sentence", async () => {
+  const komga = fakeKomga({ "/api/v1/libraries": [{ id: "lib-comics", name: "Comics" }, { id: "lib-mags", name: "Magazines" }] });
+  const ok = await fetchKomgaLibraries({ baseUrl: BASE, username: "reader", password: "hunter2" }, komga.impl);
+  assert.deepEqual(ok, {
+    ok: true,
+    libraries: [
+      { id: "lib-comics", name: "Comics" },
+      { id: "lib-mags", name: "Magazines" },
+    ],
+  });
+  assert.equal(komga.calls[0].init.headers.authorization, AUTH.authorization);
+
+  const refused = await fetchKomgaLibraries(
+    { baseUrl: BASE, username: "reader", password: "wrong" },
+    fakeKomga({ "/api/v1/libraries": { status: 401 } }, { status: 401 }).impl,
+  );
+  assert.deepEqual(refused, { ok: false, error: "Komga refused that login (401)" });
+
+  const down = await fetchKomgaLibraries(
+    { baseUrl: BASE, username: "reader", password: "hunter2" },
+    async () => {
+      throw new TypeError("Failed to fetch");
+    },
+  );
+  assert.equal(down.ok, false);
+  assert.match(down.error, /Komga is not answering at http:\/\/komga\.test:25600: Failed to fetch/);
 });

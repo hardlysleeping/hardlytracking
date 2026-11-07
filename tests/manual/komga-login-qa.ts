@@ -1,18 +1,22 @@
 /** Open /tests/manual/komga-login.html on an isolated dev origin. No real server or credentials. */
 import { mount, tick, unmount } from 'svelte';
 import KomgaLogin from '../../src/components/KomgaLogin.svelte';
-import { clearKomga, komgaConfigured, komgaServers, komgaSettings } from '../../src/lib/komga';
+import { addKomgaServer, clearKomga, komgaConfigured, komgaServers, komgaSettings } from '../../src/lib/komga';
 import '../../src/app.css';
 
 const target = document.querySelector('#fixture')!;
 const checks: string[] = [];
 let refreshes = 0;
-let mode: 'ok' | 'refused' | 'pending' = 'ok';
+let mode: 'ok' | 'refused' | 'pending' | 'libraries-down' = 'ok';
 let release: (() => void) | undefined;
 const originalFetch = globalThis.fetch;
 const testSecret = crypto.randomUUID(); // Synthetic, never a real login.
 const user = 'fixture-reader';
 const base = 'http://fixture.tailnet.ts.net:25600';
+const pickerLibraries = [
+  { id: 'lib-comics', name: 'Comics' },
+  { id: 'lib-mags', name: 'Magazines' },
+];
 const settle = async () => { await new Promise(resolve => setTimeout(resolve, 30)); await tick(); };
 function check(condition: unknown, name: string): void {
   if (!condition) throw new Error(name);
@@ -34,11 +38,15 @@ async function fill(values: [string, string, string, string] = ['Fixture', base,
 }
 function submit(): void { target.querySelector('form')!.requestSubmit(); }
 
-globalThis.fetch = async () => {
+globalThis.fetch = async (input) => {
   if (mode === 'pending') await new Promise<void>(resolve => { release = resolve; });
-  return mode === 'refused'
-    ? new Response('{}', { status: 401 })
-    : new Response('[]', { headers: { 'content-type': 'application/json' } });
+  if (mode === 'refused') return new Response('{}', { status: 401 });
+  const url = String(input);
+  if (mode === 'libraries-down' && url.includes('/api/v1/libraries')) throw new TypeError('Failed to fetch');
+  if (url.includes('/api/v1/libraries')) {
+    return new Response(JSON.stringify(pickerLibraries), { headers: { 'content-type': 'application/json' } });
+  }
+  return new Response('[]', { headers: { 'content-type': 'application/json' } });
 };
 let component: ReturnType<typeof mount>;
 async function run(): Promise<void> {
@@ -72,8 +80,29 @@ async function run(): Promise<void> {
   check(button('Test') !== null && button('Edit') !== null && button('Remove') !== null, 'each server offers Test, Edit and Remove');
   check(refreshes >= 1, 'saving refreshes the sources');
 
+  // The aggregate source's picker: All plus the libraries that server reports.
+  const picker = target.querySelector('select')!;
+  check(picker !== null, 'a saved server draws a Library picker');
+  check(
+    [...picker.options].map(option => option.textContent?.trim()).join('|') === 'All libraries|Comics|Magazines',
+    'the picker offers All and every library the server reports',
+  );
+  check(picker.value === '', 'a server without a saved choice sits on All');
+  picker.value = 'lib-comics';
+  picker.dispatchEvent(new Event('change', { bubbles: true })); await settle();
+  check(komgaServers()[0]?.libraryId === 'lib-comics', 'choosing a library saves it on that server');
+  check(target.querySelector<HTMLSelectElement>('select')?.value === 'lib-comics', 'the saved choice is reflected without a relaunch');
+  check(refreshes >= 2, 'choosing a library refreshes the sources');
+
+  const cleared = target.querySelector('select')!;
+  cleared.value = '';
+  cleared.dispatchEvent(new Event('change', { bubbles: true })); await settle();
+  check(komgaServers()[0]?.libraryId === undefined, 'choosing All clears the saved library');
+
   button('Test').click(); await settle();
-  check(!!target.textContent?.includes('no libraries are visible'), 'Test reports what that login can see');
+  const testResult = target.querySelector('.result')?.textContent ?? '';
+  check(testResult.includes('Signed in'), 'Test reports what that login can see');
+  check(testResult.includes('Comics'), 'Test names the libraries the picker offers');
   check(!!target.textContent?.includes('Fixture'), 'the server label is shown on its row');
 
   button('Edit').click(); await settle();
@@ -116,8 +145,24 @@ async function run(): Promise<void> {
   check(!target.querySelector('dialog')!.open, 'a fourth server does not open the prompt');
   check(!!target.querySelector('[role="alert"]')?.textContent?.includes('supports 3 Komga servers'), 'a fourth server is refused in words');
 
+  // A server that cannot be reached must say so where its picker is, not draw an empty list.
+  await unmount(component);
+  clearKomga();
+  addKomgaServer({ label: 'Offline', baseUrl: base, username: user, password: testSecret });
+  mode = 'libraries-down';
+  component = mount(KomgaLogin, { target, props: { onchange: async () => { refreshes++; } } });
+  await settle();
+  const offline = target.querySelector<HTMLSelectElement>('select')!;
+  check(offline !== null, 'an unreachable server still draws its Library picker');
+  check([...offline.options].map(option => option.textContent?.trim()).join('|') === 'All libraries', 'an unreachable server cannot invent library choices');
+  check(!!target.textContent?.includes('Komga is not answering'), 'an unreachable server names the failure beside the picker');
+
   // Leave one empty prompt ready for narrow/landscape visual inspection.
-  button('Remove').click(); await settle();
+  await unmount(component);
+  clearKomga();
+  mode = 'ok';
+  component = mount(KomgaLogin, { target, props: { onchange: async () => { refreshes++; } } });
+  await tick();
   button('Add server').click(); await settle();
   (window as any).__komgaQA = { ok: true, checks };
   document.querySelector('#result')!.textContent = `${checks.length} checks passed`;

@@ -30,7 +30,7 @@ import {
   type InstalledExtension,
 } from "./dalvik";
 import { listHtServerExtensions } from "./htserver";
-import { createKomgaProvider } from "./komga";
+import { createKomgaProvider, isKomgaAggregateSource } from "./komga";
 import { createWebdavProvider } from "./webdav";
 import { webdavEnabled, webdavSettings } from "../lib/webdav";
 import { splitId, type SourceProvider } from "./source";
@@ -271,6 +271,8 @@ export async function createProviders(config: RegistryConfig): Promise<ProviderS
         username: server.username,
         password: server.password,
         serverId: server.id,
+        label: server.label,
+        ...(server.libraryId === undefined ? {} : { libraryId: server.libraryId }),
         ...(config.fetchImpl === undefined ? {} : { fetchImpl: config.fetchImpl }),
       });
       if (config.localFirst) {
@@ -281,7 +283,10 @@ export async function createProviders(config: RegistryConfig): Promise<ProviderS
         // Explicit connection checks remain available outside local-first startup.
         const sources = await provider.sources();
         providers.push(provider);
-        if (sources.length === 0) warnings.push(`Komga ${server.label}: signed in, but no libraries are visible to that user`);
+        // `sources()` always answers the aggregate card, so "no libraries" is its absence, not an
+        // empty array. A signed-in login that sees no libraries must still say so.
+        const libraries = sources.filter((source) => !isKomgaAggregateSource(server.id, source.id));
+        if (libraries.length === 0) warnings.push(`Komga ${server.label}: signed in, but no libraries are visible to that user`);
       } catch (error) {
         warnings.push(`Komga ${server.label} (${server.baseUrl}): ${error instanceof Error ? error.message : String(error)}`);
       }

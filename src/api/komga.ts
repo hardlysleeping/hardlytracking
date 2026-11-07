@@ -114,6 +114,20 @@ export interface KomgaOptions {
    * series and chapter id carries it, and `owns()` refuses an id that belongs to another server.
    */
   serverId?: string;
+  /**
+   * The server's own label, so its aggregate source can be named for it.
+   *
+   * One source per server lists every library; its name has to say *which* server, because two
+   * entries may point at one box with different logins.
+   */
+  label?: string;
+  /**
+   * Which library the aggregate source shows: absent/empty is All.
+   *
+   * Only the aggregate source reads this. A per-library source always asks for its own library,
+   * whatever this says — otherwise narrowing one source would silently narrow every other one.
+   */
+  libraryId?: string;
   fetchImpl?: typeof fetch;
   /** How many rows a browse page asks for. Komga caps it server-side; 40 is a grid on a phone. */
   pageSize?: number;
@@ -155,6 +169,23 @@ export function trimBase(baseUrl: string): string {
 export function komgaSourceId(serverId: string, libraryId: string): string {
   return joinId("komga", `${serverId}:${libraryId}`);
 }
+/**
+ * The native library segment of the one server-level source, as distinct from a library id.
+ *
+ * Komga's library ids are UUIDs, so `all` is not a value one of them can take in practice. It is
+ * spelled once here, because both the aggregate id and `nativeFor`'s branch must agree.
+ */
+export const KOMGA_AGGREGATE_LIBRARY = "all";
+
+/** `komga:<serverId>:all` — one source that lists every library of that server. */
+export function komgaAggregateSourceId(serverId: string): string {
+  return komgaSourceId(serverId, KOMGA_AGGREGATE_LIBRARY);
+}
+
+/** Is this source id the aggregate one for `serverId` (and not a per-library source)? */
+export function isKomgaAggregateSource(serverId: string, id: string): boolean {
+  return id === komgaAggregateSourceId(serverId);
+}
 export function komgaSeriesId(serverId: string, id: string): string {
   return joinId("komga", `${serverId}:${id}`);
 }
@@ -188,6 +219,23 @@ export function mapKomgaLibrary(raw: KomgaRawLibrary, serverId: string): Source 
     id: komgaSourceId(serverId, raw.id),
     provider: "komga",
     name: raw.name,
+    supportsLatest: true,
+  };
+}
+
+/**
+ * One server as one source: every library until the picker names one.
+ *
+ * This is the Komikku-shaped choice — the source's own settings decide what it displays, instead of
+ * reading two source cards to see a whole server. The per-library sources stay, so a hidden mark on
+ * one library and a pinned mark on another keep working exactly as they did.
+ */
+export function mapKomgaAggregateSource(serverId: string, label: string): Source {
+  const named = label.trim() === "" ? "Komga" : label.trim();
+  return {
+    id: komgaAggregateSourceId(serverId),
+    provider: "komga",
+    name: `Komga — ${named}`,
     supportsLatest: true,
   };
 }
@@ -314,15 +362,31 @@ export function createKomgaProvider(options: KomgaOptions): SourceProvider {
     return (text === "" ? undefined : JSON.parse(text)) as T;
   }
 
+  /**
+   * The `library_id` one browse call should send, or `null` for "every library".
+   *
+   * The aggregate source answers `all` from `nativeFor`; it is a picker, not a library, so the saved
+   * choice is used instead. A per-library source ignores the picker entirely and always sends its
+   * own id — that is the promise the two kinds of card make to each other.
+   */
+  function libraryParam(sourceId: string): string | null {
+    const native = nativeFor(sourceId);
+    if (native !== KOMGA_AGGREGATE_LIBRARY) return native;
+    const picked = (options.libraryId ?? "").trim();
+    return picked === "" ? null : picked;
+  }
+
   /** One page of series, for a library or a search. `popular` and `latest` differ only in the sort. */
-  async function seriesPage(libraryId: string, page: number, sort: string, query?: string): Promise<Paged<Series>> {
-    const native = nativeFor(libraryId);
+  async function seriesPage(sourceId: string, page: number, sort: string, query?: string): Promise<Paged<Series>> {
+    const library = libraryParam(sourceId);
     const params = new URLSearchParams({
-      library_id: native,
       page: String(Math.max(0, page - 1)),
       size: String(pageSize),
       sort,
     });
+    // Absent, not empty: `library_id=` would filter on a library id that cannot exist. Komga treats
+    // a missing parameter as "all libraries", which is exactly the All choice.
+    if (library !== null) params.set("library_id", library);
     if (query !== undefined && query !== "") params.set("search", query);
     const data = await json<KomgaPaged<KomgaRawSeries>>(`/api/v1/series?${params.toString()}`);
     const rows = data.content ?? [];
@@ -364,7 +428,12 @@ export function createKomgaProvider(options: KomgaOptions): SourceProvider {
 
     async sources() {
       const libraries = await json<KomgaRawLibrary[]>("/api/v1/libraries");
-      return libraries.map((row) => mapKomgaLibrary(row, serverId));
+      // The aggregate first: it is the card that reads the whole server by default. The per-library
+      // ones follow unchanged, so their ids, marks and filters keep resolving.
+      return [
+        mapKomgaAggregateSource(serverId, options.label ?? "Komga"),
+        ...libraries.map((row) => mapKomgaLibrary(row, serverId)),
+      ];
     },
 
     // Komga has no popularity: newest *added* is the honest stand-in, and it is stable, unlike a

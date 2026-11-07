@@ -3,11 +3,15 @@
   import {
     KOMGA_MAX_SERVERS,
     addKomgaServer,
+    fetchKomgaLibraries,
+    komgaServerConfigured,
     komgaServers,
     probeKomga,
     removeKomgaServer,
     setKomgaServerEnabled,
+    setKomgaServerLibrary,
     updateKomgaServer,
+    type KomgaLibrary,
     type KomgaServer,
   } from "../lib/komga";
 
@@ -20,6 +24,13 @@
   let testing = $state<string | null>(null);
   /** What each server's last test said, keyed by server id. */
   let results = $state<Record<string, string>>({});
+  /**
+   * The libraries each server reports, for its aggregate source's picker.
+   *
+   * Read when the card draws the row, not at app boot: a settings card is the only thing that needs
+   * the list, and a server that is off should not hold up a library load.
+   */
+  let libraries = $state<Record<string, { status: "loading" | "ok" | "error"; items: KomgaLibrary[]; error?: string }>>({});
 
   let dialogOpen = $state(false);
   /** The entry being edited, or `null` for a new one. */
@@ -36,8 +47,36 @@
 
   const headingId = "komga-servers-heading";
 
+  /** The library list for one row, read once and kept until the row changes or is removed. */
+  function loadLibraries(server: KomgaServer): void {
+    const known = libraries[server.id];
+    // A failed read retries on the next reload (an edit or a toggle); a good one is kept.
+    if (known?.status === "loading" || known?.status === "ok") return;
+    if (!komgaServerConfigured(server)) {
+      libraries = {
+        ...libraries,
+        [server.id]: { status: "error", items: [], error: "Add a login to choose a library." },
+      };
+      return;
+    }
+    libraries = { ...libraries, [server.id]: { status: "loading", items: [] } };
+    void fetchKomgaLibraries(server).then((result) => {
+      // The row can be removed while the request is in flight; a late answer must not resurrect it.
+      if (!servers.some((row) => row.id === server.id)) return;
+      libraries = {
+        ...libraries,
+        [server.id]: result.ok
+          ? { status: "ok", items: result.libraries ?? [] }
+          : { status: "error", items: [], error: result.error ?? "Komga did not answer." },
+      };
+    });
+  }
+
   function reload(): void {
     servers = komgaServers();
+    const ids = new Set(servers.map((server) => server.id));
+    libraries = Object.fromEntries(Object.entries(libraries).filter(([id]) => ids.has(id)));
+    for (const server of servers) loadLibraries(server);
   }
 
   onMount(reload);
@@ -161,6 +200,22 @@
     void refresh();
   }
 
+  /** The picker's rows: what the server reports, plus a saved id it no longer lists. */
+  function libraryOptions(server: KomgaServer): KomgaLibrary[] {
+    const items = libraries[server.id]?.items ?? [];
+    if (server.libraryId !== undefined && !items.some((library) => library.id === server.libraryId)) {
+      return [...items, { id: server.libraryId, name: "Saved library (not listed)" }];
+    }
+    return items;
+  }
+
+  /** All changes the aggregate source only; the per-library sources are untouched. */
+  function chooseLibrary(server: KomgaServer, libraryId: string): void {
+    setKomgaServerLibrary(server.id, libraryId === "" ? undefined : libraryId);
+    reload();
+    void refresh();
+  }
+
   function remove(server: KomgaServer): void {
     removeKomgaServer(server.id);
     const { [server.id]: _gone, ...kept } = results;
@@ -197,6 +252,27 @@
         </button>
         <button class="chip small" onclick={() => void openEdit(server)}>Edit</button>
         <button class="chip small" onclick={() => remove(server)}>Remove</button>
+      </div>
+      <div class="picker">
+        <label>
+          <span>Library</span>
+          <select
+            class="field"
+            value={server.libraryId ?? ""}
+            disabled={libraries[server.id]?.status === "loading"}
+            onchange={(event) => chooseLibrary(server, event.currentTarget.value)}
+          >
+            <option value="">All libraries</option>
+            {#each libraryOptions(server) as library (library.id)}
+              <option value={library.id}>{library.name}</option>
+            {/each}
+          </select>
+        </label>
+        {#if libraries[server.id]?.status === "loading"}
+          <p class="hint" role="status">Reading libraries…</p>
+        {:else if libraries[server.id]?.status === "error"}
+          <p class="failure" role="status">{libraries[server.id].error}</p>
+        {/if}
       </div>
       {#if results[server.id]}<p class="hint result" role="status">{results[server.id]}</p>{/if}
     </div>
@@ -250,6 +326,10 @@
   .name { font-size: var(--t-sm); }
   .addr { color: var(--muted); font-size: var(--t-sm); overflow-wrap: anywhere; }
   .controls { display: flex; align-items: center; gap: var(--s2); flex-wrap: wrap; }
+  .picker { display: grid; gap: var(--s1); min-width: 0; }
+  .picker label { display: grid; gap: var(--s1); min-width: 0; }
+  .picker label span { font-size: var(--t-sm); color: var(--muted); }
+  .picker select { width: 100%; min-height: 36px; }
   .switch { display: inline-flex; align-items: center; gap: var(--s1); font-size: var(--t-sm); color: var(--muted); }
   .hint, .failure { margin: 0; overflow-wrap: anywhere; font-size: var(--t-sm); }
   .result { color: var(--muted); }
