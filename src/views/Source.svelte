@@ -20,6 +20,7 @@
   import BrowseDisplay from "../components/BrowseDisplay.svelte";
   import SourceSettings from "../components/SourceSettings.svelte";
   import SourceFilterSheet from "../components/SourceFilterSheet.svelte";
+  import CollapseFloat from "../components/CollapseFloat.svelte";
   import { settings } from "../state/settings.svelte";
   import { activeCount, cleanSelection } from "../lib/source-filters";
   import { go, pathTo } from "../lib/nav";
@@ -29,6 +30,30 @@
     embedded?: boolean;
   }
   let { sourceId, embedded = false }: Props = $props();
+
+  /**
+   * A tap outside an opened item closes it.
+   *
+   * The panel is a second line of the row it belongs to, so tapping anywhere else on the page — another
+   * title, the search field, the empty space under the grid — means "I am done with this". The tile
+   * that owns the panel is exempt, because tapping it is the toggle; so is anything inside the panel,
+   * which is where the reader is actually reading.
+   */
+  $effect(() => {
+    if (expandedId === null) return;
+    const onTap = (event: PointerEvent): void => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      if (target.closest(".issue-panel") !== null) return;
+      // Any tile is left to the tile: tapping another title switches the panel to it, and tapping the
+      // open one closes it. Closing here on pointerdown would reflow the grid under the finger and the
+      // click that was meant to land on a title would never arrive.
+      if (target.closest("[data-series-id]") !== null) return;
+      expandedId = null;
+    };
+    document.addEventListener("pointerdown", onTap, true);
+    return () => document.removeEventListener("pointerdown", onTap, true);
+  });
 
   let mode = $state<"popular" | "latest" | "search">("popular");
   /** The title whose quick actions are open, or null. */
@@ -328,11 +353,18 @@
   {#snippet issuePanel()}
     {#if visibleExpanded !== null}
       <div class="issue-panel">
-        <button class="btn ghost" aria-label="Close item details" onclick={() => (expandedId = null)}>Close details</button>
         <SeriesDetail seriesId={visibleExpanded} embedded />
       </div>
     {/if}
   {/snippet}
+  <!--
+    Out of an opened item: the floating caret above the back pair, or a tap anywhere that is not the
+    item itself. Both leave the page where it is; neither is a button at the top of the panel that you
+    have to scroll back to.
+  -->
+  {#if visibleExpanded !== null}
+    <CollapseFloat oncollapse={() => (expandedId = null)} />
+  {/if}
   <SeriesActions series={actions && visibility.allows(actions) ? actions : null} onclose={() => (actions = null)} ondetails={(series) => go(pathTo("series", series.id))} />
 
   {#if hasNext}

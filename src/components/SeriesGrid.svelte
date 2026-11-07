@@ -253,6 +253,7 @@
       {#if expanded === null || expandAfter !== item.id}
       <button
         class="tile"
+        class:unread={mode === "row" && badgeFor(item.id) > 0}
         class:current={current === item.id}
         class:marked={selection?.has(item.id) === true}
         class:held={heldId === item.id}
@@ -299,7 +300,18 @@
           </div>
         <span class="meta">
           {#if !overlaid}<span class="title">{item.title}</span>{/if}
-          {#if mode === "row" || mode === "card"}
+          {#if mode === "row"}
+            <!--
+              A row says four things and no more: who made it, what it is, how much of it is here,
+              and a sentence of what it is about. The sentence goes above the numbers because it is
+              the one line that varies in length, and a column of rows reads as a column only when
+              the varying line is not the one at the bottom.
+            -->
+            {#if item.description}<span class="sub preview">{item.description}</span>{/if}
+            <span class="sub">
+              {[item.author, item.status, item.provider].filter(Boolean).join(" · ")}
+            </span>
+          {:else if mode === "card"}
             <span class="sub">
               {[item.author, item.provider, item.status].filter(Boolean).join(" · ")}
             </span>
@@ -363,10 +375,12 @@
     grid-template-columns: repeat(auto-fill, minmax(calc(var(--cover) * 0.72), 1fr));
     gap: var(--s2) var(--s1);
   }
+  /* Rows butt against each other and are separated by a hairline, the way a list is: a gap between
+     rounded rows turns a list of fifty into fifty cards. */
   .set.row {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 0;
   }
 
   /* The opened card spans the grid it opened in. In a list it is one more row, which is already
@@ -397,14 +411,61 @@
     contain-intrinsic-size: auto calc(var(--cover) * 1.5 + 64px);
   }
   .set.row .tile {
-    contain-intrinsic-size: auto calc(var(--cover) * 0.5 + 16px);
+    contain-intrinsic-size: auto 68px;
+    position: relative;
     display: flex;
     align-items: center;
     gap: var(--s3);
-    padding: var(--s2);
+    padding: 8px var(--s2);
+    border-radius: 0;
+  }
+  .set.row .tile + .tile {
+    border-top: 1px solid var(--line);
   }
   .set.row .tile:hover {
     background: var(--surface-2);
+  }
+  /* An unread title says so with a rim on the leading edge: the same accent that means "new" in the
+     Library, sized like a tab index rather than a badge. */
+  .set.row .tile.unread::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 22%;
+    bottom: 22%;
+    width: 3px;
+    border-radius: 0 2px 2px 0;
+    background: var(--accent);
+  }
+  .set.row .art {
+    width: clamp(34px, 10vw, 42px);
+    flex: none;
+  }
+  .set.row .title {
+    font-size: var(--t-sm);
+    font-weight: 600;
+    line-height: 1.25;
+  }
+  /* One line of what it is about, muted, so the three lines of a row have a clear hierarchy:
+     name, substance, numbers. Clamped to one line because a row is a list line: two lines of blurb
+     would triple the height of some rows and leave the column ragged. */
+  .set.row .preview,
+  .set.row .sub {
+    color: var(--text-2);
+    line-height: 1.25;
+    display: -webkit-box;
+    -webkit-line-clamp: 1;
+    line-clamp: 1;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    white-space: normal;
+  }
+  .set.row .sub {
+    color: var(--text-3);
+  }
+  .set.row .meta {
+    gap: 0;
+    flex: 1;
   }
 
   .art {
