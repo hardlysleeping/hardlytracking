@@ -6,14 +6,20 @@ import { browseMode, columnsFor, maxColumns, knownSize } from '../../src/lib/bro
 test('legacy display choices migrate to the same three modes', () => {
   for (const [input, result] of [['list','row'], ['row','row'], ['compact','grid'], ['grid','grid'], ['card','card'], [null,'grid'], ['garbage','grid']]) assert.equal(browseMode(input), result);
 });
-test('columns are integers: 2 minimum, 6 on phone/tablet, 8 desktop', () => {
+test('columns are integers: 2 minimum, 6 on phone/tablet, 12 desktop', () => {
   for (const width of [320,390,844,1024,1199,1200,1279,1280,1920]) {
     assert.equal(columnsFor(-1,width),2);
-    assert.equal(columnsFor(99,width),width < 1280 ? 6 : 8);
+    assert.equal(columnsFor(99,width),width < 1280 ? 6 : 12);
     assert.equal(columnsFor(4,width),4);
     assert.equal(columnsFor(3.7,width),4);
+    // A stored 8 from an older build is still legal on a desktop, and 12 is the new ceiling.
+    if (width >= 1280) {
+      assert.equal(columnsFor(8,width),8);
+      assert.equal(columnsFor(12,width),12);
+      assert.equal(columnsFor(13,width),12);
+    }
     for (const bad of [undefined, null, NaN, Infinity, '6']) assert.equal(columnsFor(bad,width),3);
-    assert.equal(maxColumns(width),width < 1280 ? 6 : 8);
+    assert.equal(maxColumns(width),width < 1280 ? 6 : 12);
   }
 });
 test('phone landscape never receives desktop column limits', () => {
