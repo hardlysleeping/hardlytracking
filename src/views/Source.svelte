@@ -55,6 +55,25 @@
     return () => document.removeEventListener("pointerdown", onTap, true);
   });
 
+  /**
+   * Swapping the layout closes whatever is open.
+   *
+   * An item opened as a row is a full-width second line under that row; carried into a grid it becomes
+   * a panel wedged between two columns, with the title it belongs to somewhere else. The layout is a
+   * different way of reading the same list, so it starts closed — and the opened item is remembered
+   * nowhere, because coming back to a layout and finding a stranger's details already open is worse
+   * than tapping the title again.
+   */
+  let watchedView = settings.libraryView;
+  $effect(() => {
+    const view = settings.libraryView;
+    if (view === watchedView) return;
+    watchedView = view;
+    untrack(() => {
+      if (expandedId !== null) expandedId = null;
+    });
+  });
+
   let mode = $state<"popular" | "latest" | "search">("popular");
   /** The title whose quick actions are open, or null. */
   let actions = $state<Series | null>(null);

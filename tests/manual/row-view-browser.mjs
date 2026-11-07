@@ -80,6 +80,22 @@ try {
   if (panels !== 1) throw new Error(`a second item should replace the first, not add a panel (${panels})`);
   evidence.push({ check: "tapping another item switches the open one", panels });
 
+  // 6. Swapping the layout closes the open item: a row's panel has no meaning in a grid.
+  await page.waitForSelector(".set .tile");
+  await page.locator(".set .tile").first().click();
+  await page.waitForSelector(".issue-panel");
+  await chip("Grid").click();
+  await page.waitForTimeout(250);
+  if ((await page.locator(".issue-panel").count()) !== 0) throw new Error("switching to the grid left the row's panel open");
+  if ((await caret().count()) !== 0) throw new Error("the collapse caret survived the layout swap");
+  evidence.push({ check: "swapping to another layout closes the open item" });
+
+  // And it stays closed coming back — the layout does not resurrect it.
+  await chip("Row").click();
+  await page.waitForTimeout(250);
+  if ((await page.locator(".issue-panel").count()) !== 0) throw new Error("returning to rows reopened an item by itself");
+  evidence.push({ check: "coming back to rows starts closed" });
+
   console.log(JSON.stringify({ pass: true, evidence, errors }, null, 2));
   if (errors.length > 0) process.exitCode = 1;
 } catch (error) {

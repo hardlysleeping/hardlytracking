@@ -411,6 +411,19 @@
   const sortedIssues = $derived(orderChapters(issues, "oldest"));
   const listIssues = $derived(allIssues ? sortedIssues : sortedIssues.slice(0, ISSUE_PREVIEW));
 
+  // A layout swap closes the opened result, for the same reason it does on a source page: the pane is
+  // the opened row's second line, not a column that can be carried into a grid.
+  let watchedView = settings.libraryView;
+  $effect(() => {
+    const view = settings.libraryView;
+    if (view === watchedView) return;
+    watchedView = view;
+    untrack(() => {
+      shown = null;
+      detailed = null;
+    });
+  });
+
   $effect(() => {
     const id = record?.id ?? null;
     void issueAttempt;
