@@ -1,7 +1,7 @@
 <script lang="ts">
   import { categories } from "../state/categories.svelte";
   import { privacy } from "../state/privacy.svelte";
-  import { EYE_PATHS, MARKER_PATH } from "../lib/categories";
+  import { EYE_PATHS, PIN_PATHS } from "../lib/categories";
   import PinSheet from "./PinSheet.svelte";
 
   /**
@@ -53,7 +53,14 @@
       <p class="hint" role="status">Hidden shelves tucked away. Enter your PIN to bring them back — local screen privacy, not encryption.</p>
     {:else}
       <div class="row">
-        <button class="seat eye" aria-label={`Hidden categories: ${categories.hiddenLabel}`} title="Which shelves are hidden" onclick={() => void categories.cycleHiddenView()}>
+        <button
+          class="seat eye"
+          class:off={categories.hiddenView === "hidden"}
+          class:loud={categories.hiddenView === "only"}
+          aria-label={`Hidden categories: ${categories.hiddenLabel}`}
+          title="Which shelves are hidden"
+          onclick={() => void categories.cycleHiddenView()}
+        >
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d={EYE_PATHS[categories.hiddenView]} /></svg>
           <span class="lbl">{categories.hiddenLabel}</span>
         </button>
@@ -63,12 +70,14 @@
         </button>
         <button
           class="seat pin"
+          class:off={categories.pinView === "without"}
+          class:loud={categories.pinView === "only"}
           aria-label={`Pinned: ${categories.pinLabel}`}
           aria-pressed={categories.pinView !== "all"}
           title={`Picked shelves, not their contents — ${categories.pinLabel}`}
           onclick={() => void categories.cyclePinView()}
         >
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d={MARKER_PATH} /></svg>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d={PIN_PATHS[categories.pinView]} /></svg>
           <span class="lbl">{categories.pinLabel}</span>
         </button>
       </div>
@@ -113,24 +122,25 @@
   .caret.up { transform: rotate(180deg); }
   @media (prefers-reduced-motion: reduce) { .caret { transition: none; } }
 
-  /* Eye, lock, pin: the lock keeps the middle so the two labelled seats give up their ends evenly. */
+  /* Eye, lock, pin: the lock keeps the middle so the two labelled seats give up their ends evenly.
+     Each seat is its own pill with the border of its own tone — one panel border around three
+     differently coloured controls was claiming a colour the seats disagreed about. */
   .row {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
-    gap: 2px;
-    padding: 2px;
-    border: 1px solid var(--line);
-    border-radius: var(--r2);
-    background: color-mix(in srgb, var(--surface) 60%, transparent);
-    -webkit-backdrop-filter: blur(12px) saturate(1.2);
-    backdrop-filter: blur(12px) saturate(1.2);
+    gap: var(--s1);
+    padding: 0;
+    border: 0;
+    background: transparent;
   }
-  .row.compact { border-color: color-mix(in srgb, var(--line) 60%, transparent); }
   /* With the curtain down there is one seat, and a one-seat grid puts it in the left column. Centre
      it in the width of the band instead, so Unlock sits under the caret rather than off to one side. */
   .row.compact.pinless { grid-template-columns: minmax(0, 1fr); justify-items: center; }
 
+  /* Each seat is its own pill in its own tone: border, wash and glyph share one colour, so a red eye
+     is not sitting inside a purple frame. */
   .seat {
+    --tone: var(--text-2);
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -138,21 +148,27 @@
     gap: 1px;
     min-width: 0;
     min-height: 40px;
-    padding: 3px 6px;
-    border: 0;
-    border-radius: calc(var(--r2) - 2px);
-    background: transparent;
-    color: var(--text-2);
+    padding: 4px 6px;
+    border: 1px solid color-mix(in srgb, var(--tone) 40%, transparent);
+    border-radius: var(--r2);
+    background: color-mix(in srgb, var(--tone) 8%, transparent);
+    color: var(--tone);
     font: inherit;
     cursor: pointer;
+    -webkit-backdrop-filter: blur(12px) saturate(1.2);
+    backdrop-filter: blur(12px) saturate(1.2);
   }
-  .seat.eye { color: var(--tone-hidden); }
-  .seat.lock { --tone: var(--tone-lock-open); color: var(--tone); min-width: 64px; }
-  .seat.pin { --tone: var(--tone-pinned); color: var(--tone); }
+  .seat.eye { --tone: var(--tone-hidden); }
+  .seat.lock { --tone: var(--tone-lock-open); min-width: 64px; }
+  .seat.pin { --tone: var(--tone-pinned); }
   .seat.lock.on { --tone: var(--tone-lock-closed); }
-  .seat:hover { background: color-mix(in srgb, currentColor 14%, transparent); }
+  /* Put away: the glyph is crossed out and the seat stops claiming a colour. */
+  .seat.off { --tone: var(--text-3); }
+  /* Narrowed to this one thing: the icon keeps its tone, the word under it goes plain white. */
+  .seat.loud .lbl { color: var(--text-1); font-weight: 600; opacity: 1; }
+  .seat:hover { background: color-mix(in srgb, var(--tone) 18%, transparent); }
   .seat:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-  .seat:active { background: color-mix(in srgb, currentColor 24%, transparent); }
+  .seat:active { background: color-mix(in srgb, var(--tone) 28%, transparent); }
 
   /* Tiny caps words: enough to name the seat, never enough to outshout the list. */
   .lbl {

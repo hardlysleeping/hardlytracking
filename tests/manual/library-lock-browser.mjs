@@ -21,20 +21,37 @@ const absent=async()=>{
  const text=await page.locator('body').evaluate(el=>el.textContent + [...el.querySelectorAll('[aria-label],[title],img')].map(node=>[node.getAttribute('aria-label'),node.getAttribute('title'),node.getAttribute('alt')].join(' ')).join(' '));
  for(const privateText of ['Fixture Private Shelf','Fixture Private Source','Private collection label','Fixture Hidden Source']) assert.ok(!text.includes(privateText),`leaked ${privateText}`);
 };
+const GREY='rgb(111, 111, 126)',RED='rgb(229, 72, 77)',BLUE='rgb(0, 120, 224)';
+/** A pill's border is `color-mix(... 40%, transparent)` of its tone: same channels, alpha carried. */
+const toneOf=(border,color)=>{
+ const nums=(border.match(/[\d.]+/g)??[]).slice(0,3).map(Number);
+ const want=(color.match(/\d+/g)??[]).map(Number);
+ return nums.length===3&&nums.every((v,i)=>Math.abs(v*255-want[i])<=2);
+};
 const cdp=await page.context().newCDPSession(page);
 async function geometry(name,w,h,insets){
  await page.setViewportSize({width:w,height:h});
  await cdp.send('Emulation.setSafeAreaInsetsOverride',{insets});
  await page.evaluate(()=>window.dispatchEvent(new Event('resize')));
  await page.waitForTimeout(450);
- const result=await page.evaluate(()=>({url:location.href,width:innerWidth,height:innerHeight,coarse:matchMedia('(pointer: coarse)').matches,dpr:devicePixelRatio,safe:Object.fromEntries(['t','r','b','l'].map(k=>[k,getComputedStyle(document.documentElement).getPropertyValue('--safe-'+k).trim()])),bodyPadding:{top:getComputedStyle(document.body).paddingTop,right:getComputedStyle(document.body).paddingRight,bottom:getComputedStyle(document.body).paddingBottom,left:getComputedStyle(document.body).paddingLeft},bodyTop:document.body.getBoundingClientRect().top,navTop:document.querySelector('nav').getBoundingClientRect().top,scroll:document.documentElement.scrollWidth,controls:[...document.querySelector('.bandbox .row').querySelectorAll('button')].map(el=>({label:el.getAttribute('aria-label'),height:el.getBoundingClientRect().height,left:el.getBoundingClientRect().left,right:el.getBoundingClientRect().right,color:getComputedStyle(el).color}))}));
+ const result=await page.evaluate(()=>({url:location.href,width:innerWidth,height:innerHeight,coarse:matchMedia('(pointer: coarse)').matches,dpr:devicePixelRatio,safe:Object.fromEntries(['t','r','b','l'].map(k=>[k,getComputedStyle(document.documentElement).getPropertyValue('--safe-'+k).trim()])),bodyPadding:{top:getComputedStyle(document.body).paddingTop,right:getComputedStyle(document.body).paddingRight,bottom:getComputedStyle(document.body).paddingBottom,left:getComputedStyle(document.body).paddingLeft},bodyTop:document.body.getBoundingClientRect().top,navTop:document.querySelector('nav').getBoundingClientRect().top,scroll:document.documentElement.scrollWidth,controls:[...document.querySelector('.bandbox .row').querySelectorAll('button')].map(el=>({label:el.getAttribute('aria-label'),height:el.getBoundingClientRect().height,left:el.getBoundingClientRect().left,right:el.getBoundingClientRect().right,color:getComputedStyle(el).color,border:getComputedStyle(el).borderTopColor,slash:(el.querySelector('path')?.getAttribute('d')??'').includes('M4 20 20 4'),lblColor:el.querySelector('.lbl')?getComputedStyle(el.querySelector('.lbl')).color:null}))}));
  assert.equal(result.width,w);assert.equal(result.height,h);assert.equal(result.coarse,true);assert.equal(result.dpr,3);
  assert.equal(result.scroll,w);assert.equal(result.navTop,insets.top);
  for(const [key,value] of Object.entries({t:insets.top,r:insets.right,b:insets.bottom,l:insets.left})) assert.equal(result.safe[key],`${value}px`);
  for(const [key,value] of Object.entries(insets)) assert.equal(result.bodyPadding[key],`${value}px`);
  for(const button of result.controls){
-   if(button.label.startsWith('Hidden categories:')) assert.equal(button.color,'rgb(229, 72, 77)');
-   if(button.label.startsWith('Pinned:')) assert.equal(button.color,'rgb(0, 120, 224)');
+   // The slash says the thing itself is put away, so it belongs to Hidden and to no other state.
+   if(button.label==='Hidden categories: Hidden'){assert.equal(button.color,GREY);assert.equal(button.slash,true);}
+   if(button.label.startsWith('Hidden categories: R')||button.label==='Hidden categories: Only') assert.equal(button.color,RED);
+   if(button.label==='Hidden categories: Revealed') assert.equal(button.slash,false);
+   // The pin keeps its blue unless it is crossed out; narrowing to Only is the same blue with a white word.
+   if(button.label==='Pinned: Active'||button.label==='Pinned: Only') assert.equal(button.color,BLUE);
+   if(button.label==='Pinned: Hidden'){assert.equal(button.color,GREY);assert.equal(button.slash,true);}
+   if(button.label==='Pinned: Active') assert.equal(button.slash,false);
+   // Only state: plain white label, on both seats.
+   if(button.label==='Pinned: Only'||button.label==='Hidden categories: Only') assert.equal(button.lblColor,'rgb(241, 241, 245)');
+   // Every pill's frame is its own tone, never the accent.
+   assert.ok(toneOf(button.border,button.color),`border ${button.border} should be the icon's tone ${button.color} (${button.label})`);
    assert.ok(button.height>=44);assert.ok(button.left>=insets.left && button.right<=w-insets.right);
  }
  evidence.push({name,...result});await page.screenshot({path:new URL(name+'.png',out).pathname,fullPage:false});

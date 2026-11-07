@@ -46,11 +46,24 @@ export const PIN_WORDS = { count: "Pinned", add: "Pin", remove: "Unpin" } as con
 /** The pin glyph: a stroke-only marker, so it takes the tone without a fill. */
 export const MARKER_PATH = "M9 3h6l-1 6 4 4H6l4-4-1-6zM12 13v8";
 
-/** The eye, three states in one glyph: open, open with a slash, closed. */
+/**
+ * The eye, three states in one glyph.
+ *
+ * The slash means *the thing itself is put away*: hidden is a grey eye crossed out, and revealed is
+ * a plain open eye. Drawing the slash on revealed reads as the opposite of what the state says.
+ * `only` keeps a half eye plus the slash — it is still a narrowing, just one that keeps its colour.
+ */
 export const EYE_PATHS: Record<HiddenView, string> = {
-  hidden: "M2 12s3.6-6 10-6 10 6 10 6-3.6 6-10 6-10-6-10-6z M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z",
-  revealed: "M2 12s3.6-6 10-6 10 6 10 6-3.6 6-10 6-10-6-10-6z M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z M4 20 20 4",
+  hidden: "M2 12s3.6-6 10-6 10 6 10 6-3.6 6-10 6-10-6-10-6z M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z M4 20 20 4",
+  revealed: "M2 12s3.6-6 10-6 10 6 10 6-3.6 6-10 6-10-6-10-6z M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z",
   only: "M2 12s3.6-6 10-6c2 0 3.7.6 5.1 1.4M22 12s-3.6 6-10 6c-2 0-3.7-.6-5.1-1.4 M4 20 20 4",
+};
+
+/** The pin wears the same three states: a marker, and a marker crossed out when pinned is excluded. */
+export const PIN_PATHS: Record<PinView, string> = {
+  all: MARKER_PATH,
+  only: MARKER_PATH,
+  without: `${MARKER_PATH} M4 20 20 4`,
 };
 
 export function nextHiddenView(view: HiddenView): HiddenView {
