@@ -11,6 +11,14 @@
   import { downloads } from "../state/downloads.svelte";
   import { go } from "../lib/nav";
   import { plugins } from "../state/plugins.svelte";
+  import { notices } from "../state/notices.svelte";
+  import { noticeTime } from "../lib/notice-log";
+
+  // The log is what the notices said on this device, newest first. Reading it here is the point of
+  // keeping it: the overlay is gone in seven seconds, and "what did that say?" lands on this page.
+  $effect(() => {
+    notices.load();
+  });
 
   const counts = $derived({
     library: library.library.length,
@@ -60,6 +68,27 @@
       <span class="chev" aria-hidden="true">›</span>
     </button>
   </nav>
+
+  <section class="notices" aria-label="Notices">
+    <header class="nhead">
+      <h2>Notices</h2>
+      {#if notices.log.length > 0}
+        <button class="clear" onclick={() => notices.clearLog()}>Clear</button>
+      {/if}
+    </header>
+    {#if notices.log.length === 0}
+      <p class="none">Nothing to report. Anything the app tells you at the top of the screen is kept here.</p>
+    {:else}
+      <ol class="log">
+        {#each notices.log as entry (entry.at + entry.text)}
+          <li>
+            <span class="when">{noticeTime(entry.at)}</span>
+            <span class="what">{entry.text}</span>
+          </li>
+        {/each}
+      </ol>
+    {/if}
+  </section>
 
   <p class="about">
     HardlyTracking · a Mihon/Komikku-compatible reader. Your library, history and downloads live on
@@ -119,6 +148,64 @@
   .chev {
     color: var(--text-3);
     font-size: var(--t-lg);
+  }
+
+  .notices {
+    margin-bottom: var(--s5);
+  }
+
+  .nhead {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--s3);
+    padding-bottom: var(--s2);
+    border-bottom: 1px solid var(--line);
+  }
+
+  h2 {
+    font-size: var(--t-md);
+    font-weight: 600;
+  }
+
+  .clear {
+    all: unset;
+    cursor: pointer;
+    min-height: 44px;
+    padding: 0 var(--s2);
+    font-size: var(--t-xs);
+    color: var(--text-3);
+  }
+
+  .none {
+    margin: var(--s3) 0 0;
+    font-size: var(--t-xs);
+    color: var(--text-3);
+    line-height: 1.6;
+  }
+
+  .log {
+    list-style: none;
+    margin: var(--s2) 0 0;
+    padding: 0;
+    display: grid;
+  }
+
+  .log li {
+    display: grid;
+    gap: 2px;
+    padding: var(--s2) 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .when {
+    font-size: var(--t-xs);
+    color: var(--text-3);
+  }
+
+  .what {
+    font-size: var(--t-sm);
+    overflow-wrap: anywhere;
   }
 
   .about {

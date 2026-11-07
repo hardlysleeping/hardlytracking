@@ -27,6 +27,7 @@
   import Backup from "./views/Backup.svelte";
   import Welcome from "./components/Welcome.svelte";
   import GlobalWarning from "./components/GlobalWarning.svelte";
+  import { notices } from "./state/notices.svelte";
   import SlowNotice from "./components/SlowNotice.svelte";
 
   import { bootReport, library } from "./state/library.svelte";
@@ -65,6 +66,32 @@ import { sourceMarks } from "./state/source-marks.svelte";
   });
   /** The warning strip is dismissed by text, so a *new* warning is shown again. */
   let dismissedWarning = $state<string | null>(null);
+
+  /**
+   * One notice at a time, raised from the library's own trouble.
+   *
+   * `raised` is what stops a re-run of this effect from re-announcing the same sentence (and
+   * retiming its seven seconds). Storage trouble is sticky: the log is for catching up, and a
+   * library running in memory is not something to read later — it is something to fix, so that
+   * notice has no timer and no X.
+   */
+  let raised: string | null = null;
+  $effect(() => {
+    notices.load();
+    const text = library.storageFallback
+      ? (library.error ?? "Device storage is unavailable — anything you do here is lost when the app closes.")
+      : library.error !== null && library.error !== dismissedWarning
+        ? library.error
+        : null;
+    if (text === null) {
+      if (notices.sticky) notices.resolve();
+      raised = null;
+      return;
+    }
+    if (text === raised) return;
+    raised = text;
+    notices.show(text, { sticky: library.storageFallback });
+  });
   const elapsed = $derived(
     bootReport.startedAt === 0 ? null : Math.max(0, Math.round((now - bootReport.startedAt) / 1000)),
   );
@@ -148,20 +175,17 @@ import { sourceMarks } from "./state/source-marks.svelte";
   <ReaderGate seriesId={route.id} chapterId={route.chapterId} />
 {:else}
   <AppShell {active} routeKey={`${route.name}:${route.id ?? ""}:${route.chapterId ?? ""}`}>
-    {#if library.storageFallback}
+    {#if notices.current !== null}
       <!--
-        Device-level, so it belongs above every destination: a library running in memory looks
-        completely normal until someone closes the app and finds nothing they did survived. One
-        sentence, dismissible by fixing the cause, not by tapping an X.
+        An overlay, not a bar in the layout: a notice used to push the header and the page down and
+        then stay there until tapped. It now floats over the top for seven seconds (see
+        `state/notices`) and everything it said is kept in the log on the More page.
       -->
-      <GlobalWarning message={library.error ?? "Device storage is unavailable."} />
-    {:else if library.error !== null && library.error !== dismissedWarning}
-      <!--
-        A host that did not start is not silence. It used to be written into `library.error` and drawn
-        nowhere, so the phone looked like it had simply lost the feature. One line, dismissible —
-        the same sentence on every launch until the host works is still worth a tap.
-      -->
-      <GlobalWarning message={library.error} ondismiss={() => (dismissedWarning = library.error)} />
+      <GlobalWarning
+        message={notices.current}
+        sticky={notices.sticky}
+        ondismiss={() => { dismissedWarning = notices.current; notices.dismiss(); }}
+      />
     {/if}
     {#if !library.ready && library.openError === null && active === "library"}
       <!--
