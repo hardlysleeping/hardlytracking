@@ -5,6 +5,7 @@ import vm from 'node:vm';
 import ts from 'typescript';
 import { DEFAULT_READ_AHEAD, READ_AHEAD_CHOICES, readAheadOf } from '../../src/lib/reader-ahead.ts';
 import { ReaderQueue, readerOrder } from '../../src/lib/reader.ts';
+import { DEFAULT_BOTTOM_NAV, DEFAULT_LIBRARY_TABS, DESTINATION_IDS, LIBRARY_SECTION_IDS, normaliseOrder } from '../../src/lib/nav-order.ts';
 
 test('ahead choices are finite, default three; malformed preferences cannot expand the queue',()=>{
  assert.deepEqual(READ_AHEAD_CHOICES,[0,2,3,5,10]);
@@ -56,6 +57,8 @@ function freshSettings(){
   if(id.includes('lib/pin'))return{pinRecordOf:value=>typeof value==='string'?value:''};
   if(id.includes('view-options'))return{isNavCorner:value=>['bottom-right','bottom-left','top-left','top-right'].includes(value)};
   if(id.includes('library/continue'))return{DEFAULT_CONTINUE_COLLAPSED:false,continueCollapsedOf:value=>value===true};
+  // The nav order validators are pure and dependency-free, so the real ones run here.
+  if(id.includes('lib/nav-order'))return{DEFAULT_BOTTOM_NAV,DEFAULT_LIBRARY_TABS,DESTINATION_IDS,LIBRARY_SECTION_IDS,normaliseOrder};
   throw new Error(`Unexpected dependency ${id}`);
  }};
  vm.runInNewContext(stripped,ctx);

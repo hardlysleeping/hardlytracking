@@ -7,7 +7,7 @@
    * changes when the window is resized — only how much room the chrome takes.
    */
   import type { Snippet } from "svelte";
-  import { DESTINATIONS } from "../lib/destinations";
+  import { DESTINATIONS, type Destination } from "../lib/destinations";
   import { viewport } from "../lib/layout.svelte";
   import { deviceClass } from "../lib/layout-modes";
   import { go } from "../lib/nav";
@@ -90,6 +90,24 @@
    * from — a rail the shell draws is a width the library may not use for a grid.
    */
   const device = $derived(deviceClass(viewport.width, viewport.height));
+
+  /**
+   * The phone bar, in the reader's order.
+   *
+   * The rail and the sidebar keep every destination: they are the wide layouts, where there is room
+   * for all of them and no thumb to customise for. The phone bar is the one the Settings editor
+   * changes, and it is drawn from the pref rather than from `DESTINATIONS`.
+   *
+   * A pref that names nothing drawable still draws the five shipped destinations. The loader and
+   * `settings.set` already coerce that away; this is the last line, because an empty bar is a phone
+   * with no way out of the page it is on.
+   */
+  const bar = $derived.by(() => {
+    const picked = settings.bottomNav
+      .map((id) => DESTINATIONS.find((destination) => destination.id === id))
+      .filter((destination): destination is Destination => destination !== undefined);
+    return picked.length > 0 ? picked : DESTINATIONS;
+  });
 </script>
 
 <div class="app" class:compact={device === "phone"} class:medium={device === "tablet"} class:large={device === "desktop"}>
@@ -151,7 +169,7 @@
 
   {#if device === "phone"}
     <nav class="bar" aria-label="Main">
-      {#each DESTINATIONS as destination (destination.id)}
+      {#each bar as destination (destination.id)}
         <button
           class="item"
           class:on={active === destination.id}

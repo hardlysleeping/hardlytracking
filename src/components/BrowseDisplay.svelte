@@ -19,6 +19,15 @@
         onclick={() => settings.set("libraryView", view as "row" | "grid" | "card")}>{view === "row" ? "Row" : view === "grid" ? "Grid" : "Card"}</button>
     {/each}
     {#if mode === "grid"}
+      <!--
+        Where the title goes is the one grid choice that changes how much book a phone shows: under
+        the cover is readable, on it is compact, and the reader picks per shelf rather than having
+        one opinion imposed on every screen.
+      -->
+      {#each [["below", "Title below"], ["overlay", "Title on cover"]] as pair}
+        <button class="chip" class:on={settings.browseTitle === pair[0]} aria-pressed={settings.browseTitle === pair[0]}
+          onclick={() => settings.set("browseTitle", pair[0] as "below" | "overlay")}>{pair[1]}</button>
+      {/each}
       {#each [["compact", "Compact"], ["larger", "Larger"]] as pair}
         <button class="chip" class:on={settings.browseDensity === pair[0]} aria-pressed={settings.browseDensity === pair[0]}
           onclick={() => settings.set("browseDensity", pair[0] as "compact" | "larger")}>{pair[1]}</button>

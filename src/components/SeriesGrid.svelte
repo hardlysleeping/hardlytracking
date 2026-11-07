@@ -77,6 +77,13 @@
     expandAfter?: string | null;
     /** What to draw in that row. Ignored unless `expandAfter` matches a tile in this grid. */
     expanded?: Snippet | null;
+    /**
+     * Where a grid tile's title goes: under the artwork, or laid over it.
+     *
+     * Only the grid reads this. A row or a card has room for its words and always shows them beside
+     * or below the cover — moving a title onto a 42 px list thumbnail would make it unreadable.
+     */
+    titlePlacement?: "below" | "overlay";
   }
   let {
     series,
@@ -101,6 +108,7 @@
     saved = null,
     expandAfter = null,
     expanded = null,
+    titlePlacement = "below",
   }: Props = $props();
 
   /**
@@ -133,6 +141,8 @@
   });
 
   const mode = $derived(browseMode(view));
+  /** A title laid over the cover: only in the grid, and only when the reader asked for it. */
+  const overlaid = $derived(titlePlacement === "overlay" && mode === "grid");
   const columnCount = $derived(columnsFor(columns, viewport.width, viewport.height));
 
   let pressTimer: ReturnType<typeof setTimeout> | null = null;
@@ -233,7 +243,7 @@
   <p class="empty">{empty}</p>
 {:else}
   <div class="browse-rail" class:horizontal tabindex={horizontal ? 0 : undefined} role="region" aria-label={horizontal ? "Horizontally browsable titles" : undefined}>
-  <div class="set {mode}" class:compact={density === "compact" || view === "compact"} class:explicit={columns !== undefined} style:--columns={columnCount} style:--cover="{cover}px">
+  <div class="set {mode}" class:overtitle={overlaid} class:compact={density === "compact" || view === "compact"} class:explicit={columns !== undefined} style:--columns={columnCount} style:--cover="{cover}px">
     {#each drawn as item (item.id)}
       {#if expanded !== null && expandAfter !== null && item.id === (expansionAnchor ?? expandAfter)}
         <div class="expand" data-expanded="true">
@@ -283,15 +293,21 @@
             {#if selection !== null}
               <span class="tick" aria-hidden="true">{selection.has(item.id) ? "✓" : ""}</span>
             {/if}
+            {#if overlaid}
+              <span class="over-title">{item.title}</span>
+            {/if}
           </div>
         <span class="meta">
-          <span class="title">{item.title}</span>
+          {#if !overlaid}<span class="title">{item.title}</span>{/if}
           {#if mode === "row" || mode === "card"}
             <span class="sub">
               {[item.author, item.provider, item.status].filter(Boolean).join(" · ")}
             </span>
             <span class="sub">{[totals.has(item.id) ? `${totals.get(item.id)} chapters` : "", unread.has(item.id) ? `${badgeFor(item.id)} unread` : "", knownSize(sizes.get(item.id)) !== null ? `${knownSize(sizes.get(item.id))} on device` : "Size unknown"].filter(Boolean).join(" · ")}</span>
             {#if mode === "card" && item.description}<span class="description">{item.description}</span>{/if}
+          {:else if overlaid}
+            <!-- The title is on the cover now, so this row exists only for an unread count. -->
+            {#if badgeFor(item.id) > 0}<span class="sub">{badgeFor(item.id)} unread</span>{/if}
           {:else if view === "compact"}
             <span class="sub">{badgeFor(item.id) > 0 ? `${badgeFor(item.id)} unread` : ""}</span>
           {:else}
@@ -313,14 +329,21 @@
   .horizontal .set.row .tile { flex-basis:min(82vw, 380px); }
   .horizontal .expand { flex:0 0 100%; }
   .set.explicit.grid { grid-template-columns:repeat(var(--columns), minmax(0, 1fr)); }
-  .set.card { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,240px),1fr)); gap:16px; }
-  .set.card .tile { padding:12px; border:1px solid var(--line); background:var(--surface); align-content:start; }
-  .set.card .art { width:min(100%,180px); justify-self:center; }
+  /* A card is the "tell me about it" layout, not a page: tight padding, a smaller cover and two
+     lines of description leave the information and drop the air around it. */
+  .set.card { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,200px),1fr)); gap:10px; }
+  .set.card .tile { padding:8px; border:1px solid var(--line); background:var(--surface); align-content:start; }
+  .set.card .art { width:min(100%,132px); justify-self:center; }
+  .set.card .meta { gap:0; }
+  .set.card .description { -webkit-line-clamp:2; line-clamp:2; font-size:var(--t-xs); }
   .set.row .art { width:clamp(68px,18vw,calc(var(--cover) * 0.76)); flex:none; }
   .set.row .meta { flex:1; }
   .set.row .sub, .set.card .sub { white-space:normal; overflow-wrap:anywhere; }
   .description { font-size:var(--t-sm); color:var(--text-2); display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
   .set.grid.compact .title { font-size:var(--t-xs); }
+  /* Without a title row the reserved height is the cover plus a hair, so rows stop leaving a gap
+     where the title used to be. */
+  .set.overtitle .tile { contain-intrinsic-size: auto calc(var(--cover) * 1.5 + 6px); }
   .set.explicit.grid.compact { gap: var(--s2) var(--s1); }
   .set.explicit.grid:not(.compact) { gap: var(--s3) var(--s2); }
   .set {
@@ -509,8 +532,29 @@
     opacity: 0;
     transition: opacity var(--dur);
   }
-  .tile.marked .tick {
+  .tick.marked .tick {
     opacity: 1;
+  }
+
+  /* The title laid over the bottom of the cover: a scrim so it reads on any artwork, two lines at
+     most so the tile cannot grow, and no separate row underneath. */
+  .over-title {
+    position: absolute;
+    inset: auto 0 0 0;
+    padding: 18px 4px 4px;
+    font-size: var(--t-xs);
+    line-height: 1.2;
+    color: #fff;
+    text-align: center;
+    text-shadow: 0 1px 2px rgb(0 0 0 / 80%);
+    background: linear-gradient(to top, rgb(0 0 0 / 78%), rgb(0 0 0 / 0%));
+    border-radius: 0 0 var(--r2) var(--r2);
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    pointer-events: none;
   }
 
   .meta {

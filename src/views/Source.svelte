@@ -316,6 +316,7 @@
     cover={132}
     view={settings.libraryView}
     columns={settings.browseColumns}
+    titlePlacement={settings.browseTitle}
     density={settings.browseDensity}
     horizontal={settings.browseHorizontal}
     empty={mode === "search" ? "This source found nothing." : "This source returned nothing."}

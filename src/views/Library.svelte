@@ -28,6 +28,8 @@
   import { BADGE_KINDS, DEFAULT_BADGES, PRESET_BADGES, badgeList, type Badge } from "../lib/library/badges";
   import Sheet from "../components/Sheet.svelte";
   import LibraryHeader from "../components/LibraryHeader.svelte";
+  import PageMenu from "../components/PageMenu.svelte";
+  import { LIBRARY_SECTIONS } from "../lib/nav-order";
   import AddFiles from "../components/AddFiles.svelte";
   import DriveImport from "../components/DriveImport.svelte";
   import OverflowSheet, { type LibraryStats } from "../components/OverflowSheet.svelte";
@@ -52,6 +54,17 @@
   import type { Series } from "../api/source";
 
   let { current = null, initialTab = "titles" }: { current?: string | null; initialTab?: "titles" | "updates" } = $props();
+
+  /** The section tabs in the reader's order, with anything the pref forgot put back at the end. */
+  const sections = $derived.by(() => {
+    const ordered = settings.libraryTabs
+      .map((id) => LIBRARY_SECTIONS.find((section) => section.id === id))
+      .filter((section): section is (typeof LIBRARY_SECTIONS)[number] => section !== undefined);
+    const missing = LIBRARY_SECTIONS.filter((section) => !ordered.includes(section));
+    // Both sections are always drawn: a Library with one tab cannot reach Updates, and Updates is
+    // the screen that clears the "new" badges.
+    return [...ordered, ...missing];
+  });
 
   /**
    * Which category the rail is pointing at; `null` is the whole library. It lives in
@@ -750,7 +763,7 @@
 
 <section class="view">
   <div class="pin">
-  {#if initialTab === "updates"}<h1 class="library-title">Library</h1>{:else}
+  {#if initialTab === "updates"}<PageMenu title="Library" current="library" />{:else}
   <LibraryHeader
     count={rows.length}
     total={visible.length}
@@ -777,8 +790,13 @@
   -->
   <div class="tabsrow">
     <nav class="library-tabs" aria-label="Library sections">
-      <button class="btn" aria-current={initialTab === "titles" ? "page" : undefined} onclick={() => go("/library")}>Titles</button>
-      <button class="btn" aria-current={initialTab === "updates" ? "page" : undefined} onclick={() => go("/updates")}>Updates</button>
+      {#each sections as section (section.id)}
+        <button
+          class="btn"
+          aria-current={initialTab === section.id ? "page" : undefined}
+          onclick={() => go(section.id === "updates" ? "/updates" : "/library")}
+        >{section.label}</button>
+      {/each}
     </nav>
     {#if !privacy.locked}<PinSeat />{/if}
   </div>
@@ -885,6 +903,7 @@
             view={settings.libraryView}
             cover={cover}
             columns={settings.browseColumns}
+    titlePlacement={settings.browseTitle}
             density={settings.browseDensity}
             horizontal={settings.browseHorizontal}
             sizes={fileSizes}
@@ -1065,7 +1084,6 @@
 </Sheet>
 
 <style>
-  .library-title { font-size: var(--t-2xl); font-weight: 650; }
   /* Sections and the pin share a row: 44 px tall, no extra padding above or below. */
   .tabsrow {
     display: flex;

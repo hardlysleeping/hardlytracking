@@ -13,6 +13,7 @@
   import { plugins } from "../state/plugins.svelte";
   import { notices } from "../state/notices.svelte";
   import { noticeTime } from "../lib/notice-log";
+  import PageMenu from "../components/PageMenu.svelte";
 
   // The log is what the notices said on this device, newest first. Reading it here is the point of
   // keeping it: the overlay is gone in seven seconds, and "what did that say?" lands on this page.
@@ -29,7 +30,7 @@
 
 <section class="view">
   <header class="top">
-    <h1>More</h1>
+    <PageMenu title="More" current="more" />
   </header>
 
   <nav class="list" aria-label="More">
@@ -104,11 +105,6 @@
 
   .top {
     margin-bottom: var(--s4);
-  }
-
-  h1 {
-    font-size: var(--t-2xl);
-    font-weight: 650;
   }
 
   .list {

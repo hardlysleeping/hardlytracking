@@ -25,6 +25,13 @@ import { keepCategoriesOf } from "../lib/offline/policy";
 import { DEFAULT_CONTINUE_COLLAPSED, continueCollapsedOf } from "../lib/library/continue";
 import { levelOr, type ContentLevel } from "../lib/content/levels";
 import { pinRecordOf } from "../lib/pin";
+import {
+  DEFAULT_BOTTOM_NAV,
+  DEFAULT_LIBRARY_TABS,
+  DESTINATION_IDS,
+  LIBRARY_SECTION_IDS,
+  normaliseOrder,
+} from "../lib/nav-order";
 
 /** A stored corner is one of four words; anything else is the default, not a broken layout. */
 function cornerOr(value: unknown): NavCorner {
@@ -46,6 +53,13 @@ export interface Prefs {
   browseColumns: number;
   browseDensity: "compact" | "larger";
   browseHorizontal: boolean;
+  /**
+   * Where a grid tile's title goes: under the artwork, or on it.
+   *
+   * `below` is the readable default. `overlay` buys back the whole title row on a phone — the shelf
+   * becomes covers and nothing else — which is what "compact" has to mean when the screen is 440 px.
+   */
+  browseTitle: "below" | "overlay";
   coverSize: number;
   /** Auto follows the device class; Custom is the cover-size slider. */
   libraryDensity: DensityPreference;
@@ -162,6 +176,15 @@ export interface Prefs {
   historyPane: PanePreference;
   /** Which corner the phone's floating Back/Forward buttons sit in. */
   historyNavCorner: NavCorner;
+  /**
+   * The phone bar's destinations, in bar order.
+   *
+   * Ids, not rows, and only the ones the reader kept: a page taken off the bar is not gone — the
+   * title menu lists every destination — so a short list is a real answer, not a broken one.
+   */
+  bottomNav: string[];
+  /** The Library's section tabs, in tab order. Every section is in it; only the order changes. */
+  libraryTabs: string[];
   /** Cover/page image cache ceiling, MB. */
   imageCacheLimitMb: number;
   /** Cache images at all. */
@@ -186,6 +209,7 @@ class Settings {
   browseColumns = $state(3);
   browseDensity = $state<"compact" | "larger">("larger");
   browseHorizontal = $state(false);
+  browseTitle = $state<"below" | "overlay">("below");
   coverSize = $state(132);
   libraryDensity = $state<DensityPreference>("auto");
   categoryNav = $state<CategoryNavPreference>("automatic");
@@ -234,6 +258,8 @@ class Settings {
   historyPane = $state<PanePreference>("auto");
   /** Bottom right: where the thumb already is on a phone held in one hand. */
   historyNavCorner = $state<NavCorner>("bottom-right");
+  bottomNav = $state<string[]>([...DEFAULT_BOTTOM_NAV]);
+  libraryTabs = $state<string[]>([...DEFAULT_LIBRARY_TABS]);
   imageCacheLimitMb = $state(256);
   cacheImages = $state(true);
   /** Salted hash only — see `lib/pin`. Empty means the curtain has no PIN and refuses to lock. */
@@ -260,6 +286,8 @@ class Settings {
     const density = await read("browseDensity", legacyView === "compact" ? "compact" : this.browseDensity);
     this.browseDensity = density === "compact" ? "compact" : "larger";
     this.browseHorizontal = (await read("browseHorizontal", false)) === true;
+    const title = await read("browseTitle", this.browseTitle);
+    this.browseTitle = title === "overlay" ? "overlay" : "below";
     this.coverSize = await read("coverSize", this.coverSize);
     this.libraryDensity = await read("libraryDensity", this.libraryDensity);
     this.categoryNav = await read("categoryNav", this.categoryNav);
@@ -308,6 +336,10 @@ class Settings {
     this.libraryPane = await read("libraryPane", this.libraryPane);
     this.historyPane = await read("historyPane", this.historyPane);
     this.historyNavCorner = cornerOr(await read<unknown>("historyNavCorner", this.historyNavCorner));
+    // A stored order is data from another build or a hand-edited export: known ids only, no
+    // duplicates, stored order kept, and an unreadable value is the default rather than a blank bar.
+    this.bottomNav = normaliseOrder(await read<unknown>("bottomNav", DEFAULT_BOTTOM_NAV), DESTINATION_IDS, DEFAULT_BOTTOM_NAV);
+    this.libraryTabs = normaliseOrder(await read<unknown>("libraryTabs", DEFAULT_LIBRARY_TABS), LIBRARY_SECTION_IDS, DEFAULT_LIBRARY_TABS);
     this.imageCacheLimitMb = await read("imageCacheLimitMb", this.imageCacheLimitMb);
     this.cacheImages = await read("cacheImages", this.cacheImages);
     // Defensive read: a corrupt or foreign record is "no PIN", not a lock that refuses every entry.
@@ -339,7 +371,11 @@ class Settings {
                 ? pinRecordOf(value)
                 : key === "historyNavCorner"
                   ? cornerOr(value)
-                  : value;
+                  : key === "bottomNav"
+                    ? normaliseOrder(value, DESTINATION_IDS, DEFAULT_BOTTOM_NAV)
+                    : key === "libraryTabs"
+                      ? normaliseOrder(value, LIBRARY_SECTION_IDS, DEFAULT_LIBRARY_TABS)
+                      : value;
     const plain = $state.snapshot(normalised) as Prefs[K];
     (this as unknown as Record<string, unknown>)[key] = plain;
     void this.store?.setPref(KEY + key, plain).catch(() => {});

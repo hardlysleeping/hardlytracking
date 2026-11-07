@@ -17,6 +17,7 @@
   import { providerLabel } from "../api/source";
   import { filterByLevel, hiddenNotice, levelOfSource } from "../lib/content/levels";
   import { languageLabel } from "../lib/language";
+  import PageMenu from "../components/PageMenu.svelte";
 
   let { current = null }: { current?: string | null } = $props();
 
@@ -63,7 +64,7 @@
 
 <section class="view">
   <header class="top">
-    <h1>Browse</h1>
+    <PageMenu title="Browse" current="browse" />
     <div class="acts">
       <button class="btn" onclick={() => go("/extensions")}>Extensions{installed > 0 ? ` · ${installed}` : ""}</button>
     </div>
@@ -202,11 +203,6 @@
     justify-content: space-between;
     gap: var(--s3);
     margin-bottom: var(--s4);
-  }
-
-  h1 {
-    font-size: var(--t-2xl);
-    font-weight: 650;
   }
 
   .acts {

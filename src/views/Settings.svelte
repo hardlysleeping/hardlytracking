@@ -21,10 +21,53 @@
   import { imageCache } from "../lib/cache/images";
   import { CACHE_LIMIT_CHOICES, describeCache, formatBytes, type CacheEntry } from "../lib/cache/policy";
   import { MARGIN_CHOICES, NAV_CORNER_CHOICES, PANE_CHOICES } from "../lib/view-options";
+  import { DESTINATIONS } from "../lib/destinations";
+  import { DEFAULT_BOTTOM_NAV, LIBRARY_SECTIONS, moveItem, toggleItem } from "../lib/nav-order";
   import { CPU_LEVELS, describeLevel } from "../lib/performance";
 import { CONTENT_LEVELS, type ContentLevel } from "../lib/content/levels";
 import KeepOfflinePanel from "../components/KeepOfflinePanel.svelte";
 import PrivacyPanel from "../components/PrivacyPanel.svelte";
+
+  /**
+   * The navigation editors (Layout): the phone bar and the Library's section tabs.
+   *
+   * Arrows, not drag-and-drop: one tap moves one place, it works with a keyboard and a screen
+   * reader, and the order it writes is the order the bar draws. Every destination is listed, so a
+   * page taken off the bar is still here to put back.
+   */
+  /** What the last edit refused to do — the one case is trying to hide the last visible page. */
+  let navNote = $state<string | null>(null);
+
+  const navRows = $derived([
+    ...settings.bottomNav,
+    ...DESTINATIONS.map((destination) => destination.id).filter((id) => !settings.bottomNav.includes(id)),
+  ]);
+
+  function labelOf(id: string): string {
+    return DESTINATIONS.find((destination) => destination.id === id)?.label ?? id;
+  }
+
+  /** Refused, with a reason, rather than written: an empty bar leaves no way off the page. */
+  function toggleNav(id: string): void {
+    if (settings.bottomNav.includes(id) && settings.bottomNav.length <= 1) {
+      navNote = "Keep at least one page in the bar.";
+      return;
+    }
+    navNote = null;
+    settings.set("bottomNav", toggleItem(settings.bottomNav, id, DEFAULT_BOTTOM_NAV));
+  }
+
+  function moveNav(id: string, delta: number): void {
+    const index = settings.bottomNav.indexOf(id);
+    if (index < 0) return;
+    settings.set("bottomNav", moveItem(settings.bottomNav, index, delta));
+  }
+
+  function moveSection(id: string, delta: number): void {
+    const index = settings.libraryTabs.indexOf(id);
+    if (index < 0) return;
+    settings.set("libraryTabs", moveItem(settings.libraryTabs, index, delta));
+  }
 
   /** The slider shows the cover the library actually draws, not a value a preset overrides. */
   const cover = $derived(coverWidth(settings.libraryDensity, deviceClass(viewport.width, viewport.height), settings.coverSize));
@@ -367,6 +410,76 @@ import PrivacyPanel from "../components/PrivacyPanel.svelte";
         {/each}
       </select>
     </label>
+
+    <!--
+      The bar and the tabs, above the controls that only change how much room content gets: these
+      two change *where the reader can go*, which is the shape of the app rather than its spacing.
+    -->
+    <div class="navedit">
+      <p class="navhead">
+        Bottom bar
+        <em class="sub">The pages along a phone's bar, in order. A tablet or desktop keeps all five.</em>
+      </p>
+      {#each navRows as id (id)}
+        {@const onBar = settings.bottomNav.includes(id)}
+        {@const at = settings.bottomNav.indexOf(id)}
+        <div class="row navrow">
+          <span class="navlabel">{labelOf(id)}</span>
+          <div class="navactions">
+            <button
+              class="navbtn"
+              aria-label={`Move ${labelOf(id)} up`}
+              disabled={!onBar || at === 0}
+              onclick={() => moveNav(id, -1)}
+            >↑</button>
+            <button
+              class="navbtn"
+              aria-label={`Move ${labelOf(id)} down`}
+              disabled={!onBar || at === settings.bottomNav.length - 1}
+              onclick={() => moveNav(id, 1)}
+            >↓</button>
+            <button
+              class="chip navtoggle"
+              aria-pressed={onBar}
+              aria-label={`${onBar ? "Hide" : "Show"} ${labelOf(id)} in the bottom bar`}
+              onclick={() => toggleNav(id)}
+            >{onBar ? "On bar" : "Off bar"}</button>
+          </div>
+        </div>
+      {/each}
+      {#if navNote !== null}
+        <p class="navnote" role="status">{navNote}</p>
+      {/if}
+      <!-- One line, in place of a whole paragraph about reachability. -->
+      <p class="hint">The page-title menu always lists every page, so a page taken off the bar is still one tap away.</p>
+    </div>
+
+    <div class="navedit">
+      <p class="navhead">
+        Library sections
+        <em class="sub">The order of the tabs above the shelf.</em>
+      </p>
+      {#each settings.libraryTabs as id, index (id)}
+        {@const section = LIBRARY_SECTIONS.find((item) => item.id === id)}
+        <div class="row navrow">
+          <span class="navlabel">{section?.label ?? id}</span>
+          <div class="navactions">
+            <button
+              class="navbtn"
+              aria-label={`Move ${section?.label ?? id} up`}
+              disabled={index === 0}
+              onclick={() => moveSection(id, -1)}
+            >↑</button>
+            <button
+              class="navbtn"
+              aria-label={`Move ${section?.label ?? id} down`}
+              disabled={index === settings.libraryTabs.length - 1}
+              onclick={() => moveSection(id, 1)}
+            >↓</button>
+          </div>
+        </div>
+      {/each}
+    </div>
 
     <h2>Reader</h2>
     <label class="row">
@@ -761,6 +874,73 @@ import PrivacyPanel from "../components/PrivacyPanel.svelte";
     display: flex;
     flex-wrap: wrap;
     gap: var(--s2);
+  }
+
+  /* ---- navigation editors (Layout) -------------------------------------------------------- */
+  /* One block per list: a heading in the section-label voice, then a row per item. The rows reuse
+     `.row`, so the height and spacing match the toggles above and below them. */
+  .navedit {
+    display: grid;
+    gap: 2px;
+    padding: var(--s2) 0 var(--s3);
+    border-top: 1px solid var(--line);
+  }
+
+  .navhead {
+    margin: var(--s2) 0 var(--s1);
+    font-size: var(--t-sm);
+    font-weight: 600;
+    color: var(--text-2);
+  }
+
+  .navrow {
+    gap: var(--s2);
+    min-height: 44px;
+  }
+
+  .navlabel {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .navactions {
+    display: flex;
+    align-items: center;
+    gap: var(--s1);
+    flex: none;
+  }
+
+  /* 44 × 44, the same tap target as every other control on this page. */
+  .navbtn {
+    all: unset;
+    box-sizing: border-box;
+    display: grid;
+    place-items: center;
+    width: 44px;
+    height: 44px;
+    border: 1px solid var(--line);
+    border-radius: var(--r2);
+    color: var(--text-2);
+    cursor: pointer;
+    font-size: var(--t-md);
+  }
+
+  .navbtn:disabled {
+    opacity: 0.35;
+    cursor: default;
+  }
+
+  .navtoggle {
+    min-height: 44px;
+    min-width: 76px;
+  }
+
+  .navnote {
+    margin: var(--s1) 0 0;
+    font-size: var(--t-xs);
+    color: var(--danger, #d9534f);
   }
 
   .hint {

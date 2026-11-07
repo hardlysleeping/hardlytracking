@@ -14,6 +14,7 @@
   import type { SearchScope } from "../lib/library/search";
   import { privacy } from "../state/privacy.svelte";
   import PinSeat from "./PinSeat.svelte";
+  import PageMenu from "./PageMenu.svelte";
 
   interface Props {
     /** Rows on screen. */
@@ -63,7 +64,8 @@
 
 <header class="top" class:collapsed>
   <div class="titles">
-    <h1>Library</h1>
+    <!-- The heading is the page switcher (`PageMenu`): same type, same place, plus every page. -->
+    <PageMenu title="Library" current="library" compact={collapsed} />
     {#if total > 0}
       <span class="count">{count}{count !== total ? ` of ${total}` : ""}</span>
     {/if}
@@ -176,15 +178,11 @@
     min-width: 0;
   }
 
-  h1 {
-    font-size: var(--t-2xl);
-    font-weight: 650;
-    transition: font-size var(--dur);
-  }
-
-  .top.collapsed h1 {
-    font-size: var(--t-lg);
-  }
+  /*
+   * No `h1` rules any more: the heading is a `PageMenu`, which carries the `h1`'s own type
+   * (`--t-2xl` at 650, `--t-lg` in the collapsed bar) inside the component so the title button and
+   * the old heading cannot drift apart.
+   */
 
   .count {
     font-size: var(--t-sm);

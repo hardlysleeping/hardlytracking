@@ -11,6 +11,7 @@
   import { privacy } from "../state/privacy.svelte";
   import { library } from "../state/library.svelte";
   import Cover from "../components/Cover.svelte";
+  import PageMenu from "../components/PageMenu.svelte";
   import { go, pathTo } from "../lib/nav";
   import { chapterLabel, seriesLabel } from "../lib/titles";
   import { settings } from "../state/settings.svelte";
@@ -237,7 +238,7 @@
 <section class="view">
   <div class="pin">
   <header class="top">
-    <h1>History</h1>
+    <PageMenu title="History" current="history" />
     <span class="count">{shown.length}</span>
     <button class="btn" aria-pressed={incognito.active} onclick={() => incognito.toggle()}>Incognito{incognito.active ? " on" : " off"}</button>
     <button class="btn" aria-pressed={selecting} onclick={() => { selecting = !selecting; selected = new Set(); revealed = null; }}>{selecting ? "Done" : "Select"}</button>
@@ -441,11 +442,6 @@
     flex-wrap: wrap;
     gap: var(--s2);
     margin-bottom: var(--s4);
-  }
-
-  h1 {
-    font-size: var(--t-2xl);
-    font-weight: 650;
   }
 
   .count {

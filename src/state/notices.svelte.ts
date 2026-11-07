@@ -39,7 +39,10 @@ class NoticesState {
 
   load(): void {
     if (this.log.length > 0) return;
-    this.log = readNoticeLog();
+    const stored = readNoticeLog();
+    // Only assign when there is something: writing a fresh `[]` every call re-triggers every effect
+    // that reads the log, which is an update loop on a device that has never seen a notice.
+    if (stored.length > 0) this.log = stored;
   }
 
   /**

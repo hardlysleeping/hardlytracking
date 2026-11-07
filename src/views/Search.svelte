@@ -12,6 +12,7 @@
    * is still one button away inside the pane — it is where chapters live, not where you decide.
    */
   import { untrack } from "svelte";
+  import PageMenu from "../components/PageMenu.svelte";
   import { privacy } from "../state/privacy.svelte";
   import { visibility } from "../state/visibility.svelte";
   import { library } from "../state/library.svelte";
@@ -614,7 +615,8 @@
   -->
   <div class="pin">
   <header class="bar">
-    <h1>Search</h1>
+    <!-- Wrapped so the title keeps the `margin-right: auto` that keeps the bar left-aligned. -->
+    <span class="titlewrap"><PageMenu title="Search" current="search" size="xl" /></span>
     <button
       class="chip"
       class:on={selectMode}
@@ -711,6 +713,7 @@
               cover={116}
               view={settings.libraryView}
               columns={settings.browseColumns}
+    titlePlacement={settings.browseTitle}
               density={settings.browseDensity}
               horizontal={settings.browseHorizontal}
               sizes={fileSizes}
@@ -769,7 +772,7 @@
     min-height: 36px;
   }
 
-  .bar h1 {
+  .bar .titlewrap {
     margin-right: auto;
   }
 
@@ -781,11 +784,6 @@
     stroke-width: 1.7;
     stroke-linecap: round;
     stroke-linejoin: round;
-  }
-
-  h1 {
-    font-size: var(--t-xl);
-    font-weight: 650;
   }
 
   .search {
