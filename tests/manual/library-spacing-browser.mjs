@@ -22,10 +22,9 @@ const gaps = await page.evaluate(() => {
   };
   const header = rect(".top");
   const tabs = rect(".library-tabs");
-  const pinrow = rect(".pinrow");
   const band = rect(".bandbox");
   const firstItem = rect(".body");
-  return { header, tabs, pinrow, band, firstItem, viewport: window.innerHeight };
+  return { header, tabs, band, firstItem, viewport: window.innerHeight };
 });
 
 console.log(JSON.stringify({ gaps, errors }, null, 2));

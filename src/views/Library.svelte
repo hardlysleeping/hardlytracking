@@ -10,7 +10,6 @@
    * read marks, category membership and removing a row from the shelf.
    */
   import LibraryBand from "../components/LibraryBand.svelte";
-  import PinSeat from "../components/PinSeat.svelte";
   import { privacy } from "../state/privacy.svelte";
   import { visibility } from "../state/visibility.svelte";
   $effect(() => { const store = library.profile?.store; if (store) void visibility.load(store); });
@@ -806,7 +805,7 @@
         >{section.label}</button>
       {/each}
     </nav>
-    {#if !privacy.locked}<PinSeat />{/if}
+
   </div>
   </div>
   {#if initialTab === "updates"}
@@ -818,8 +817,8 @@
     <p class="offline" role="status">{OFFLINE_NOTE}</p>
   {/if}
 
-  <!-- The pin is in the sections row above. While the curtain is down it moves to the top bar
-       (see LibraryHeader), so it is never inside the collapsible band. -->
+  <!-- The pin is a seat in the band, beside the eye and the lock. Only the curtain moves it, and
+       then it goes to the top bar (see LibraryHeader). -->
   <LibraryBand />
 
   <div class="body">
