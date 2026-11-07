@@ -4,7 +4,8 @@
    *
    * Five one-tap collections is the point — not a scroller you hunt through. `+N` opens the list
    * with a tick per collection, and the tick is the *tab* pin: which five stay in the row. The rail
-   * pin is a different mark, in a different place, and neither moves the other.
+   * pin is a different mark, in a different place, and does not put a collection in this row — but it
+   * does order what is here, so the shelf you pinned is the first one you can tap.
    *
    * `Categories…` stays at the end of the row, because that is where the owner reaches for the
    * eye, the pin and renaming.
@@ -13,6 +14,7 @@
   import Sheet from "./Sheet.svelte";
   import type { Category } from "../lib/categories";
   import { MAX_TABS, isTabPinned, tabRow } from "../lib/library/collections";
+  import { orderedCategories } from "../lib/categories";
   import { categories as categoriesState } from "../state/categories.svelte";
 
   interface Props {
@@ -29,8 +31,8 @@
   const safeVisible = $derived(visible.filter((c) => !privacy.locked || !c.hidden));
   const row = $derived(tabRow(categories.filter((c) => !privacy.locked || !c.hidden), safeVisible));
 
-  /** The sheet lists collections in the user's own order — the rail's pin does not reorder it. */
-  const listed = $derived([...safeVisible].sort((a, b) => a.order - b.order));
+  /** The sheet lists collections with the pinned ones first, the way the rail and the row do. */
+  const listed = $derived(orderedCategories(safeVisible));
 
   /** A collection picked from `+N` still has to read as current, even if it is not in the row. */
   const current = $derived(selected === null ? null : safeVisible.find((category) => category.id === selected) ?? null);

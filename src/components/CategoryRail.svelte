@@ -20,7 +20,7 @@
   let name = $state("");
   let creating = $state(false);
 
-  const shown = $derived(visibleCategories(categories.items, categories.hiddenView));
+  const shown = $derived(visibleCategories(categories.items, categories.hiddenView, categories.pinView));
 
   async function submit(): Promise<void> {
     const created = await categories.create(name);

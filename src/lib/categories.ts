@@ -150,14 +150,22 @@ export function orderedCategories(categories: Category[]): Category[] {
 }
 
 /**
- * Which categories the rail draws, per the eye.
+ * Which categories the rail, the chip row and the library draw.
  *
- * `hidden` drops them, `revealed` draws them (marked), `only` draws just them.
+ * The eye says what a shelf's *contents* do; the pin says which shelves are worth showing. Both are
+ * applied here, and the pin wins where they cross: with the eye revealing hidden shelves and the pin
+ * asking for pinned only, a pinned-but-hidden shelf stays and an unpinned visible one goes, because
+ * "only pinned" is a narrower request than "show me everything".
+ *
+ * Pinned shelves come first in every list — pinning is how a shelf gets to the front, and a mark
+ * that only glows makes the reader hunt for the thing they just pinned.
  */
-export function visibleCategories(categories: Category[], view: HiddenView): Category[] {
-  if (view === "revealed") return orderedCategories(categories);
-  if (view === "only") return orderedCategories(categories.filter((c) => c.hidden));
-  return orderedCategories(categories.filter((c) => !c.hidden));
+export function visibleCategories(categories: Category[], view: HiddenView, pinView: PinView = "all"): Category[] {
+  const byEye =
+    view === "revealed" ? categories : view === "only" ? categories.filter((c) => c.hidden) : categories.filter((c) => !c.hidden);
+  const byPin =
+    pinView === "only" ? byEye.filter((c) => c.pinned) : pinView === "without" ? byEye.filter((c) => !c.pinned) : byEye;
+  return orderedCategories(byPin);
 }
 
 /** The categories a row is filed under, resolved and in rail order. */

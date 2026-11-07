@@ -26,12 +26,14 @@ function eight() {
   ];
 }
 
-test("pinned collections fill the row first, in the user's order, then unpinned up to MAX_TABS", () => {
+test("tab pins fill the row first, then a pinned shelf, then the user's order up to MAX_TABS", () => {
   const all = eight();
   const row = tabRow(all, all);
   assert.equal(MAX_TABS, 5);
-  assert.deepEqual(row.tabs.map((c) => c.id), ["reading", "favorites", "manhwa", "completed", "romance"]);
-  assert.deepEqual(row.overflow.map((c) => c.id), ["horror", "shelf", "later"]);
+  // `shelf` is pinned, so it comes to the front with the two tab pins and pushes `romance` out of
+  // the row: pinning a shelf is how it gets to the front, in the row as well as in the rail.
+  assert.deepEqual(row.tabs.map((c) => c.id), ["reading", "favorites", "shelf", "manhwa", "completed"]);
+  assert.deepEqual(row.overflow.map((c) => c.id), ["romance", "horror", "later"]);
   assert.equal(row.tabs.length + row.overflow.length, all.length);
 });
 
@@ -39,8 +41,18 @@ test("the eye decides membership: a hidden collection is in neither list", () =>
   const all = eight();
   const visible = all.filter((c) => c.id !== "manhwa");
   const row = tabRow(all, visible);
-  assert.deepEqual(row.tabs.map((c) => c.id), ["reading", "favorites", "completed", "romance", "horror"]);
+  assert.deepEqual(row.tabs.map((c) => c.id), ["reading", "favorites", "shelf", "completed", "romance"]);
   assert.ok(!row.overflow.some((c) => c.id === "manhwa"));
+});
+
+test("the chip row puts a pinned collection first, tab pins still leading", () => {
+  const cats = [
+    category("a", 0),
+    category("b", 1, { pinned: true }),
+    category("c", 2, { tabPinned: true }),
+  ];
+  const { tabs } = tabRow(cats, cats, 5);
+  assert.deepEqual(tabs.map((x) => x.id), ["c", "b", "a"], "tab pin, then the category pin, then order");
 });
 
 test("more pinned collections than slots keeps the first MAX_TABS and overflows the rest", () => {

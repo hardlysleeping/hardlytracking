@@ -31,9 +31,11 @@ export function tabRow(
   max: number = MAX_TABS,
 ): { tabs: Category[]; overflow: Category[] } {
   const allowed = new Set(visible.map((category) => category.id));
+  // Pinned shelves lead, then the user's own order — the same rule the rail uses. Tab pins still
+  // come first inside that, so the row's five stay one tap away.
   const ordered = [...categories]
     .filter((category) => allowed.has(category.id))
-    .sort((a, b) => a.order - b.order);
+    .sort((a, b) => Number(b.pinned) - Number(a.pinned) || a.order - b.order);
   const limit = Math.max(1, max);
   const pinned = ordered.filter(isTabPinned);
   const rest = ordered.filter((category) => !isTabPinned(category));

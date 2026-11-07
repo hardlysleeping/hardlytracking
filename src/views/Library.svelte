@@ -281,7 +281,7 @@
   );
 
   /** The chips obey the eye, exactly as the rail does. */
-  const shownCategories = $derived(visibleCategories(categories.items, categories.hiddenView));
+  const shownCategories = $derived(visibleCategories(categories.items, categories.hiddenView, categories.pinView));
 
   const layout = $derived(
     libraryLayout(viewport.width, viewport.height, {

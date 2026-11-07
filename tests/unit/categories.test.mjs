@@ -73,6 +73,19 @@ test("the eye decides which categories the rail draws", () => {
   assert.deepEqual(visibleCategories(cats, "only").map((c) => c.id), ["c4", "c2"]);
 });
 
+test("only pinned narrows the category list itself, and the pin outranks the eye", () => {
+  // Eye hidden: c1 and c3 are on screen, c3 is pinned, so only pinned leaves just c3.
+  assert.deepEqual(visibleCategories(cats, "hidden", "only").map((c) => c.id), ["c3"]);
+  // Eye revealed + pin only: the pinned hidden shelf c4 stays and every unpinned one goes — "only
+  // pinned" is the narrower request, so it wins where the two marks cross.
+  assert.deepEqual(visibleCategories(cats, "revealed", "only").map((c) => c.id), ["c3", "c4"]);
+  // Without pinned is the mirror image, in the user's order.
+  assert.deepEqual(visibleCategories(cats, "revealed", "without").map((c) => c.id), ["c1", "c2"]);
+  // All is the eye alone, and the default keeps every old caller honest.
+  assert.deepEqual(visibleCategories(cats, "revealed", "all").map((c) => c.id), ["c3", "c4", "c1", "c2"]);
+  assert.deepEqual(visibleCategories(cats, "revealed").map((c) => c.id), ["c3", "c4", "c1", "c2"]);
+});
+
 test("hidden categories take their rows out of the library, and put them back when revealed", () => {
   const hidden = applyView(rows, cats, { hiddenView: "hidden", pinView: "all" }).map((r) => r.id);
   assert.deepEqual(hidden, ["s4", "s1", "s2"], "hidden rows out, pinned first, rest in order");
