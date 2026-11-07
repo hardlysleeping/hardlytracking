@@ -770,10 +770,18 @@
     onscope={(scope) => (libraryMemory.scope = scope)}
   />
   {/if}
-  <nav class="library-tabs" aria-label="Library sections">
-    <button class="btn" aria-current={initialTab === "titles" ? "page" : undefined} onclick={() => go("/library")}>Titles</button>
-    <button class="btn" aria-current={initialTab === "updates" ? "page" : undefined} onclick={() => go("/updates")}>Updates</button>
-  </nav>
+  <!--
+    One row: the sections on the left, the pin on the right. The pin used to get a row of its own
+    under these tabs, which bought nothing but 40 px of space and pushed the shelves further down
+    the screen; it still stays outside the foldable band, which is the part that mattered.
+  -->
+  <div class="tabsrow">
+    <nav class="library-tabs" aria-label="Library sections">
+      <button class="btn" aria-current={initialTab === "titles" ? "page" : undefined} onclick={() => go("/library")}>Titles</button>
+      <button class="btn" aria-current={initialTab === "updates" ? "page" : undefined} onclick={() => go("/updates")}>Updates</button>
+    </nav>
+    {#if !privacy.locked}<PinSeat />{/if}
+  </div>
   </div>
   {#if initialTab === "updates"}
     <Updates />
@@ -782,15 +790,8 @@
     <p class="offline" role="status">{OFFLINE_NOTE}</p>
   {/if}
 
-  <!--
-    The pin sits above the band, not inside it: the band folds, and which shelves are shown is not
-    something the fold should be able to take away. While the curtain is down it moves into the top
-    bar instead (see LibraryHeader), so it is never inside the collapsible section.
-  -->
-  {#if !privacy.locked}
-    <div class="pinrow"><PinSeat /></div>
-  {/if}
-
+  <!-- The pin is in the sections row above. While the curtain is down it moves to the top bar
+       (see LibraryHeader), so it is never inside the collapsible band. -->
   <LibraryBand />
 
   <div class="body">
@@ -1065,14 +1066,15 @@
 
 <style>
   .library-title { font-size: var(--t-2xl); font-weight: 650; }
-  .library-tabs { display: flex; gap: var(--s2); padding-block: var(--s2); }
-
-  /* Above the band, right-aligned: it is a filter over the shelves, and the shelves start below it. */
-  .pinrow {
+  /* Sections and the pin share a row: 44 px tall, no extra padding above or below. */
+  .tabsrow {
     display: flex;
-    justify-content: flex-end;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--s2);
     margin-bottom: var(--s1);
   }
+  .library-tabs { display: flex; gap: var(--s2); }
   .library-tabs [aria-current="page"] { color: var(--accent); border-color: var(--accent); }
   /* One line, in place: no dialog, no empty screen, nothing else on this page changes. */
   .offline {

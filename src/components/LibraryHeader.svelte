@@ -148,7 +148,7 @@
     position: relative;
     /* No safe-area padding here: the shell owns it. Adding it again pushed the heading a whole
        status bar below the notch, which is the "top bar sits too far down" report. */
-    margin-bottom: var(--s3);
+    margin-bottom: var(--s2);
     min-height: 52px;
     transition: min-height var(--dur), padding var(--dur);
   }

@@ -77,7 +77,7 @@
 {/if}
 
 <style>
-  .bandbox { display: grid; gap: 2px; margin-bottom: var(--s3); }
+  .bandbox { display: grid; gap: 2px; margin-bottom: var(--s2); }
 
   /* The tab is the band's handle, so it is the band's width — a caret in the corner read as a
      dropdown belonging to the row underneath rather than the control for it. 18px tall: a strip
