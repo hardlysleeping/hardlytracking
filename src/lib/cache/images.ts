@@ -52,6 +52,16 @@ export class ImageCache {
   private db: Database | null = null;
   private urls = new Map<string, string>();
   private inflight = new Map<string, Promise<string>>();
+  /**
+   * Object URLs dropped from `urls` but not yet revoked.
+   *
+   * Trimming used to revoke the oldest URL the moment it left the map, and an `<img>` on another
+   * screen — History, a search grid, the library — could still be pointing at it: the picture went
+   * blank and stayed blank. A URL now survives one whole trim cycle before its bytes are released,
+   * which is longer than any screen takes to re-render, and `Cover` re-asks for the picture if it
+   * still loses the race (the bytes are in the database, so that is a re-read, never a re-download).
+   */
+  private retiring: string[] = [];
   policy: CachePolicy = { ...CACHE_POLICY_DEFAULT };
 
   attach(db: Database, policy?: Partial<CachePolicy>): void {
@@ -209,15 +219,34 @@ export class ImageCache {
   }
 
   /** Enforce the ceiling. Never touches anything pinned; reports what it removed. */
-  /** Drop the oldest object URLs beyond the ceiling, revoking them so the bytes go with them. */
+  /**
+   * Drop the oldest object URLs beyond the ceiling, one generation late.
+   *
+   * The previous generation is revoked here — not the ones leaving the map now — so a URL can never
+   * be revoked while a screen that resolved it a moment ago is still drawing it.
+   */
   private trimLive(): void {
+    if (this.urls.size <= MAX_LIVE_URLS) return;
+    for (const objectUrl of this.retiring) URL.revokeObjectURL(objectUrl);
+    this.retiring = [];
     while (this.urls.size > MAX_LIVE_URLS) {
       const oldest = this.urls.keys().next();
       if (oldest.done === true) return;
       const objectUrl = this.urls.get(oldest.value);
       this.urls.delete(oldest.value);
-      if (objectUrl !== undefined) URL.revokeObjectURL(objectUrl);
+      if (objectUrl !== undefined) this.retiring.push(objectUrl);
     }
+  }
+
+  /**
+   * Ask for the picture again after an `<img>` refused the URL it was given.
+   *
+   * A revoked object URL is the usual reason: the picture is on disk, so forgetting the map entry
+   * and resolving again mints a fresh URL instead of leaving the tile on its title for good.
+   */
+  async reacquire(url: string, headers?: Record<string, string>): Promise<string> {
+    this.urls.delete(url);
+    return await this.resolve(url, headers === undefined ? {} : { headers });
   }
 
   async prune(): Promise<{ removed: number; freed: number }> {
@@ -248,6 +277,8 @@ export class ImageCache {
       await this.db.remove("imageCache", row.key);
     }
     for (const url of this.urls.values()) URL.revokeObjectURL(url);
+    for (const url of this.retiring) URL.revokeObjectURL(url);
+    this.retiring = [];
     this.urls.clear();
     return { removed: rows.length, freed };
   }

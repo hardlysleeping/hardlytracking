@@ -22,6 +22,36 @@
   }
   let { series, size = "grid", onresolve }: Props = $props();
   let broken = $state(false);
+  /**
+   * Whether this URL has already been fetched again after failing once.
+   *
+   * One retry per URL, not a loop: a URL that fails, is reacquired and fails again is a URL the
+   * source will not give up, and the title is the honest thing to draw. Reset when the cover
+   * changes, because the next title's picture is a different question.
+   */
+  let retried = $state(false);
+
+  /**
+   * A picture that would not draw gets one more try from the cache.
+   *
+   * The usual cause is an object URL the cache released after it had been trimmed while this tile
+   * still showed it — the picture is on disk, so asking again returns a fresh URL. Only when that
+   * also fails does the tile fall back to the title, which is left as the last resort rather than
+   * the first.
+   */
+  function failed(): void {
+    const url = series.cover;
+    const headers = series.coverHeaders;
+    if (retried || url === undefined || url === "") {
+      broken = true;
+      return;
+    }
+    retried = true;
+    void imageCache.reacquire(url, headers).then((next) => {
+      if (next !== url && next !== src) src = next;
+      else broken = true;
+    });
+  }
 
   /**
    * The cover through the image cache: a cached copy renders instantly and works offline, an
@@ -58,6 +88,7 @@
   $effect(() => {
     void src;
     broken = false;
+    retried = false;
   });
 
   $effect(() => {
@@ -105,7 +136,7 @@
 
 <div class="cover {size}" bind:this={tile}>
   {#if series.cover && !broken && src !== undefined}
-    <img src={src} alt="" loading="lazy" decoding="async" onerror={() => (broken = true)} />
+    <img src={src} alt="" loading="lazy" decoding="async" onerror={failed} />
   {:else}
     <span class="fallback">{series.title}</span>
   {/if}

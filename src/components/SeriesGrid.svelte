@@ -322,20 +322,23 @@
   .description { font-size:var(--t-sm); color:var(--text-2); display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
   .set.grid.compact .title { font-size:var(--t-xs); }
   .set.explicit.grid.compact { gap: var(--s2) var(--s1); }
-  .set.explicit.grid:not(.compact) { gap: var(--s4) var(--s3); }
+  .set.explicit.grid:not(.compact) { gap: var(--s3) var(--s2); }
   .set {
     /* Replacing the tapped row must not make the browser anchor to a later tile and jump. */
     overflow-anchor: none;
   }
+  /* Tight rows: a shelf of covers is read as one picture, and 16 px of row gap plus 8 px under each
+     cover turned a phone's search results into a mostly-empty column. The gap is between tiles, not
+     inside them. */
   .set.grid,
   .set.compact {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(var(--cover), 1fr));
-    gap: var(--s4) var(--s3);
+    gap: var(--s3) var(--s2);
   }
   .set.compact {
     grid-template-columns: repeat(auto-fill, minmax(calc(var(--cover) * 0.72), 1fr));
-    gap: var(--s3) var(--s2);
+    gap: var(--s2) var(--s1);
   }
   .set.row {
     display: flex;
@@ -354,7 +357,8 @@
     all: unset;
     cursor: pointer;
     display: grid;
-    gap: var(--s2);
+    /* The title starts right under the artwork, not a gap below it. */
+    gap: 3px;
     min-width: 0;
     border-radius: var(--r2);
     /* 5 000 rows is a real library, and every tile pays for its cover, its badges and its pill row
@@ -367,7 +371,7 @@
     /* The reserved height is the cover's real height at this width (2:3) plus the title block,
        derived from `--cover` rather than a guessed constant: a wrong number is not just a gap, it
        makes every row that scrolls in re-lay-out the grid, which is where the frames went. */
-    contain-intrinsic-size: auto calc(var(--cover) * 1.5 + 76px);
+    contain-intrinsic-size: auto calc(var(--cover) * 1.5 + 64px);
   }
   .set.row .tile {
     contain-intrinsic-size: auto calc(var(--cover) * 0.5 + 16px);

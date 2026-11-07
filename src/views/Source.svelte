@@ -265,6 +265,22 @@
     {:else if activeCount(filterSelection) > 0}
       <span class="hint">filters apply to search</span>
     {/if}
+    <!--
+      A listing is a page of the source *now*, and it is the one thing a source page had no way to
+      ask for again: the mode chips only re-run when the mode changes, so tapping Popular twice did
+      nothing, and a feed that had grown stale stayed stale until the source was left and reopened.
+      The rows stay on screen while the new page loads, so a refresh is not a flash of empty grid.
+    -->
+    <button
+      class="chip refresh"
+      aria-label={`Refresh ${mode === "search" ? "results" : mode}`}
+      title="Ask the source for this page again"
+      disabled={busy}
+      onclick={() => void run(1)}
+    >
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.6-5.9M20 4v4h-4" /></svg>
+      Refresh
+    </button>
   </div>
 
   </div>
@@ -343,6 +359,23 @@
 {/if}
 
 <style>
+  /* The refresh chip carries a small icon; the other chips are words only, so this is the only
+     place the icon size is stated. */
+  .chip.refresh {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-left: auto;
+  }
+  .chip.refresh svg {
+    width: 14px;
+    height: 14px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+  }
+
   .issue-panel {
     padding: var(--s3);
     border: 1px solid var(--line);
