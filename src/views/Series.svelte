@@ -498,6 +498,10 @@
   .view {
     padding: var(--s3) var(--s4) var(--s8);
     max-width: 980px;
+    /* Same gutter cap as a source page: sixteen pixels of shell margin on each side was the width
+       the issue rows and the hero were paying for. See Source.svelte for the rule. */
+    padding-left: min(var(--pad-x), var(--s2)) !important;
+    padding-right: min(var(--pad-x), var(--s2)) !important;
   }
 
   .view.embedded {
@@ -534,8 +538,20 @@
 
   .hero {
     display: flex;
-    gap: var(--s4);
+    gap: var(--s3);
     margin-bottom: var(--s4);
+    align-items: start;
+  }
+
+  /*
+   * The artwork is the one thing that says which title this is, so it takes width back from the
+   * button pair: a fixed 128 px cover on a 424 px column left the actions two full-width rows and
+   * the art with less than a third of the screen. It grows with the column, and the stacked
+   * buttons below it are content-sized instead of stretched.
+   */
+  .hero > :global(div.cover.hero) {
+    width: 100%;
+    flex: 0 0 clamp(128px, 38%, 168px);
   }
 
   .meta {
@@ -581,15 +597,18 @@
     text-align: center;
   }
 
+  /* Content-sized, not two half-columns: these are two short verbs, and stretching them to the
+     whole column is what squeezed the cover beside them. */
   .pair {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(min(100%, 8rem), 1fr));
+    display: flex;
+    flex-wrap: wrap;
     gap: var(--s2);
   }
 
   .pair .btn {
-    width: 100%;
-    padding: 0 var(--s2);
+    width: auto;
+    min-width: 7.5rem;
+    padding: 0 var(--s3);
   }
 
   .cats {
@@ -681,13 +700,15 @@
     gap: 1px;
   }
 
+  /* An issue row is the width of the column, not a card inset inside it: the indent was 16 px of
+     the screen spent on nothing, on the one list the reader scrolls fifty of. */
   .row {
     all: unset;
     cursor: pointer;
     display: flex;
     align-items: center;
     gap: var(--s2);
-    padding: var(--s3) var(--s2);
+    padding: var(--s3) 0;
     border-radius: var(--r1);
     min-height: 44px;
     width: 100%;

@@ -904,9 +904,12 @@ export class LibraryStore {
   }
 
   async setSeriesCategories(seriesId: string, categoryIds: string[]): Promise<void> {
-    const series = await this.getSeries(seriesId);
-    if (series === undefined) throw new Error(`not in the library: ${seriesId}`);
-    await this.db.put("series", { ...series, categoryIds, addedAt: Date.now() } as unknown as Record<string, unknown>);
+    // Read the row with its `addedAt`: filing a title is not adding one, and the shelf's order is
+    // `addedAt`. Stamping it here moved every title you filed into to the front of the library —
+    // the same "it jumped for no reason" bug `setSeriesCover` is careful about.
+    const row = await this.db.get<Series & { addedAt?: number }>("series", seriesId);
+    if (row === undefined) throw new Error(`not in the library: ${seriesId}`);
+    await this.db.put("series", { ...row, categoryIds });
   }
 
   /**
