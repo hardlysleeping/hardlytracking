@@ -31,6 +31,9 @@
   import { bestMatch, hostOf, resolveLinks } from "../lib/downloads/links";
   import { go, pathTo } from "../lib/nav";
 
+  /** Rendered inside the Library's Downloads tab rather than as its own page. */
+  let { embedded = false }: { embedded?: boolean } = $props();
+
   $effect(() => {
     void downloads.load();
   });
@@ -271,8 +274,13 @@
 </script>
 
 <section class="view">
-  <header class="top">
-    <h1>Downloads</h1>
+  <!--
+    Embedded in the Library's Downloads tab, the page title is the tab above it: drawing "Downloads"
+    a second time, 30 px under the word, is the duplicate heading this app keeps deleting. The count
+    stays, because it is the one line that is not repeated anywhere else.
+  -->
+  <header class="top" class:embedded>
+    {#if !embedded}<h1>Downloads</h1>{/if}
     <span class="count">
       {size(visibleDownloads.reduce((sum, row) => sum + row.bytes, 0))} · {kept} chapter{kept === 1 ? "" : "s"}{waiting > 0 ? ` · ${waiting} queued` : ""}{failed > 0 ? ` · ${failed} failed` : ""}
     </span>
@@ -486,6 +494,15 @@
     justify-content: space-between;
     gap: var(--s3);
     margin-bottom: var(--s4);
+  }
+  /* Embedded, the count is a quiet subtitle under the section tabs, not a heading row. */
+  .top.embedded {
+    margin-bottom: var(--s3);
+    padding-bottom: var(--s1);
+    border-bottom: 1px solid var(--line);
+  }
+  .top.embedded .count {
+    margin-left: 0;
   }
 
   h1 {

@@ -1,5 +1,6 @@
 <script lang="ts">
   import Updates from "./Updates.svelte";
+  import Downloads from "./Downloads.svelte";
   /**
    * The library: the shelf, and the controls that narrow it.
    *
@@ -53,7 +54,14 @@
   import SeriesPage from "./Series.svelte";
   import type { Series } from "../api/source";
 
-  let { current = null, initialTab = "titles" }: { current?: string | null; initialTab?: "titles" | "updates" } = $props();
+  let { current = null, initialTab = "titles" }: { current?: string | null; initialTab?: "titles" | "updates" | "downloads" } = $props();
+
+  /** Where a section's tab goes. Titles is the Library itself; the rest are routes under it. */
+  function sectionHref(id: string): string {
+    if (id === "updates") return "/updates";
+    if (id === "downloads") return "/downloads";
+    return "/library";
+  }
 
   /** The section tabs in the reader's order, with anything the pref forgot put back at the end. */
   const sections = $derived.by(() => {
@@ -763,7 +771,7 @@
 
 <section class="view">
   <div class="pin">
-  {#if initialTab === "updates"}<PageMenu title="Library" current="library" />{:else}
+  {#if initialTab !== "titles"}<PageMenu title="Library" current="library" />{:else}
   <LibraryHeader
     count={rows.length}
     total={visible.length}
@@ -794,7 +802,7 @@
         <button
           class="btn"
           aria-current={initialTab === section.id ? "page" : undefined}
-          onclick={() => go(section.id === "updates" ? "/updates" : "/library")}
+          onclick={() => go(sectionHref(section.id))}
         >{section.label}</button>
       {/each}
     </nav>
@@ -803,6 +811,8 @@
   </div>
   {#if initialTab === "updates"}
     <Updates />
+  {:else if initialTab === "downloads"}
+    <Downloads embedded />
   {:else}
   {#if offline}
     <p class="offline" role="status">{OFFLINE_NOTE}</p>

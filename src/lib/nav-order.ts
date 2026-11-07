@@ -14,7 +14,7 @@ import { DESTINATIONS } from "./destinations";
 /** The bar a phone has always drawn, in the order it has always drawn it. */
 export const DEFAULT_BOTTOM_NAV: string[] = ["library", "browse", "search", "history", "more"];
 
-export const DEFAULT_LIBRARY_TABS: string[] = ["titles", "updates"];
+export const DEFAULT_LIBRARY_TABS: string[] = ["titles", "updates", "downloads"];
 
 /** Every destination id a stored bar may name. Anything else is dropped, not guessed at. */
 export const DESTINATION_IDS: string[] = DESTINATIONS.map((destination) => destination.id);
@@ -24,10 +24,13 @@ export interface LibrarySection {
   label: string;
 }
 
-/** The Library's two sections. A closed list: a stored tab order names these, never a screen. */
+/** The Library's sections. A closed list: a stored tab order names these, never a screen. */
 export const LIBRARY_SECTIONS: LibrarySection[] = [
   { id: "titles", label: "Titles" },
   { id: "updates", label: "Updates" },
+  // Downloads is a Library section, not a page in More: what arrived while you were away belongs
+  // beside what is new, and the queue was the one thing nobody opened from a back room.
+  { id: "downloads", label: "Downloads" },
 ];
 
 export const LIBRARY_SECTION_IDS: string[] = LIBRARY_SECTIONS.map((section) => section.id);
@@ -49,6 +52,18 @@ export function normaliseOrder(ids: unknown, knownIds: readonly string[], fallba
     out.push(id);
   }
   return out.length > 0 ? out : [...fallback];
+}
+
+/**
+ * A stored order, with sections this build knows about that the stored value predates.
+ *
+ * A preference written before a section existed cannot name it, and "the newest section is invisible
+ * to anyone who ever reordered" is a worse bug than a tab appearing at the end once.
+ */
+export function completeOrder(ids: unknown, knownIds: readonly string[], fallback: readonly string[]): string[] {
+  const ordered = normaliseOrder(ids, knownIds, fallback);
+  const missing = knownIds.filter((id) => !ordered.includes(id));
+  return [...ordered, ...missing];
 }
 
 /**

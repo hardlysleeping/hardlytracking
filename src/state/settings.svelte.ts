@@ -30,6 +30,7 @@ import {
   DEFAULT_LIBRARY_TABS,
   DESTINATION_IDS,
   LIBRARY_SECTION_IDS,
+  completeOrder,
   normaliseOrder,
 } from "../lib/nav-order";
 
@@ -339,7 +340,9 @@ class Settings {
     // A stored order is data from another build or a hand-edited export: known ids only, no
     // duplicates, stored order kept, and an unreadable value is the default rather than a blank bar.
     this.bottomNav = normaliseOrder(await read<unknown>("bottomNav", DEFAULT_BOTTOM_NAV), DESTINATION_IDS, DEFAULT_BOTTOM_NAV);
-    this.libraryTabs = normaliseOrder(await read<unknown>("libraryTabs", DEFAULT_LIBRARY_TABS), LIBRARY_SECTION_IDS, DEFAULT_LIBRARY_TABS);
+    // Completed, not just normalised: a stored order from before Downloads existed must still grow
+    // the new section, or the tab is invisible to anyone who ever reordered them.
+    this.libraryTabs = completeOrder(await read<unknown>("libraryTabs", DEFAULT_LIBRARY_TABS), LIBRARY_SECTION_IDS, DEFAULT_LIBRARY_TABS);
     this.imageCacheLimitMb = await read("imageCacheLimitMb", this.imageCacheLimitMb);
     this.cacheImages = await read("cacheImages", this.cacheImages);
     // Defensive read: a corrupt or foreign record is "no PIN", not a lock that refuses every entry.
@@ -374,7 +377,7 @@ class Settings {
                   : key === "bottomNav"
                     ? normaliseOrder(value, DESTINATION_IDS, DEFAULT_BOTTOM_NAV)
                     : key === "libraryTabs"
-                      ? normaliseOrder(value, LIBRARY_SECTION_IDS, DEFAULT_LIBRARY_TABS)
+                      ? completeOrder(value, LIBRARY_SECTION_IDS, DEFAULT_LIBRARY_TABS)
                       : value;
     const plain = $state.snapshot(normalised) as Prefs[K];
     (this as unknown as Record<string, unknown>)[key] = plain;

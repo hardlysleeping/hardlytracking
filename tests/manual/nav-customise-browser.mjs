@@ -103,16 +103,18 @@ try {
   await route('#/updates');
   assert.equal((await title().innerText()).trim(),'Library','the Updates tab draws the Library title menu');
   assert.equal(await title().evaluate(n=>getComputedStyle(n).fontSize),token2xl,'and the same heading type');
-  assert.deepEqual(await tabs(),['Updates','Titles'],'the stored tab order is drawn');
+  // The stored order predates the Downloads section, so it is appended rather than hidden: a tab
+  // added by a newer build must not be invisible to anyone who ever reordered.
+  assert.deepEqual(await tabs(),['Updates','Titles','Downloads'],'the stored tab order is drawn');
   await page.getByRole('button',{name:'Titles',exact:true}).click();
   await page.waitForTimeout(350);
   assert.equal(await page.evaluate(()=>location.hash),'#/library','a reordered tab still goes to its own route');
   await route('#/settings');
   await page.getByRole('button',{name:'Move Titles up',exact:true}).click();
   await page.waitForTimeout(200);
-  assert.deepEqual((await prefs()).libraryTabs,['titles','updates'],'the arrow writes the new order');
+  assert.deepEqual((await prefs()).libraryTabs,['titles','updates','downloads'],'the arrow writes the new order');
   await route('#/library');
-  assert.deepEqual(await tabs(),['Titles','Updates'],'and the Library draws it');
+  assert.deepEqual(await tabs(),['Titles','Updates','Downloads'],'and the Library draws it');
   evidence.push({check:'(e) Library section tabs follow settings.libraryTabs and reorder with the arrows',tabs:await tabs()});
   await shot('e-library-tabs');
 

@@ -8,7 +8,6 @@
    * button for a page nobody opens daily. Each of those is now one door with one name.
    */
   import { library } from "../state/library.svelte";
-  import { downloads } from "../state/downloads.svelte";
   import { go } from "../lib/nav";
   import { plugins } from "../state/plugins.svelte";
   import { notices } from "../state/notices.svelte";
@@ -23,7 +22,6 @@
 
   const counts = $derived({
     library: library.library.length,
-    downloads: downloads.rows.length,
     plugins: plugins.list.length,
   });
 </script>
@@ -42,11 +40,6 @@
     <button class="row" onclick={() => go("/stats")}>
       <span class="t">Stats</span>
       <span class="s">What you have read, and when</span>
-      <span class="chev" aria-hidden="true">›</span>
-    </button>
-    <button class="row" onclick={() => go("/downloads")}>
-      <span class="t">Downloads</span>
-      <span class="s">{counts.downloads} chapter{counts.downloads === 1 ? "" : "s"}</span>
       <span class="chev" aria-hidden="true">›</span>
     </button>
     <button class="row" onclick={() => go("/plugins")}>

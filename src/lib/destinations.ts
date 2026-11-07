@@ -61,7 +61,8 @@ const UNDER: Record<string, string> = {
   stats: "more",
   sync: "more",
   messages: "more",
-  downloads: "more",
+  // Downloads is a Library section now (Titles / Updates / Downloads), not a page in More.
+  downloads: "library",
   backup: "more",
   account: "more",
 };
@@ -75,6 +76,7 @@ export function destinationOf(route: Route): string {
 export function backHref(route: Route): string | null {
   if (DESTINATIONS.some((d) => d.id === route.name)) return null;
   if (route.name === "updates" || route.name === "series" || route.name === "read") return "/library";
+  if (route.name === "downloads") return "/downloads";
   if (route.name === "source" || route.name === "extensions") return "/browse";
   // A package page is reached from the Extensions list, which is the index of packages.
   if (route.name === "software") return "/extensions";

@@ -23,7 +23,6 @@
   import Software from "./views/Software.svelte";
   import Settings from "./views/Settings.svelte";
   import Messages from "./views/Messages.svelte";
-  import Downloads from "./views/Downloads.svelte";
   import Backup from "./views/Backup.svelte";
   import Welcome from "./components/Welcome.svelte";
   import GlobalWarning from "./components/GlobalWarning.svelte";
@@ -238,7 +237,8 @@ import { sourceMarks } from "./state/source-marks.svelte";
     {:else if route.name === "messages"}
       <Messages />
     {:else if route.name === "downloads"}
-      <Downloads />
+      <!-- A Library section, so it renders inside the Library — same tabs, same back. -->
+      <Library initialTab="downloads" />
     {:else if route.name === "backup"}
       <Backup />
     {:else if route.name === "search"}

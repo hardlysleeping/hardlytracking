@@ -23,6 +23,8 @@
     <Settings />
   {:else if route.name === 'updates'}
     <Library initialTab="updates" />
+  {:else if route.name === 'downloads'}
+    <Library initialTab="downloads" />
   {:else if route.name === 'browse'}
     <Browse />
   {:else if route.name === 'search'}

@@ -6,6 +6,7 @@ import {
   DESTINATION_IDS,
   LIBRARY_SECTION_IDS,
   normaliseOrder,
+  completeOrder,
   toggleItem,
   moveItem,
 } from "../../src/lib/nav-order.ts";
@@ -13,8 +14,18 @@ import {
 test("the shipped defaults name every destination, once", () => {
   assert.deepEqual(DEFAULT_BOTTOM_NAV, ["library", "browse", "search", "history", "more"]);
   assert.deepEqual([...DEFAULT_BOTTOM_NAV].sort(), [...DESTINATION_IDS].sort());
-  assert.deepEqual(DEFAULT_LIBRARY_TABS, ["titles", "updates"]);
+  assert.deepEqual(DEFAULT_LIBRARY_TABS, ["titles", "updates", "downloads"]);
   assert.deepEqual([...DEFAULT_LIBRARY_TABS].sort(), [...LIBRARY_SECTION_IDS].sort());
+});
+
+test("a section added by a newer build appears for anyone who ever reordered", () => {
+  // A stored order written when the Library had two sections cannot name the third one. It is added
+  // at the end rather than hidden, because a tab nobody can find is not a preference.
+  assert.deepEqual(completeOrder(["updates", "titles"], LIBRARY_SECTION_IDS, DEFAULT_LIBRARY_TABS), ["updates", "titles", "downloads"]);
+  // And a list that already names everything is left exactly as the reader arranged it.
+  assert.deepEqual(completeOrder(["downloads", "titles", "updates"], LIBRARY_SECTION_IDS, DEFAULT_LIBRARY_TABS), ["downloads", "titles", "updates"]);
+  // Garbage still falls back to the default, with nothing dropped from it.
+  assert.deepEqual(completeOrder(null, LIBRARY_SECTION_IDS, DEFAULT_LIBRARY_TABS), DEFAULT_LIBRARY_TABS);
 });
 
 test("an empty list is the default, not a blank bar", () => {
