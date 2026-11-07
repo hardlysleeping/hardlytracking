@@ -32,7 +32,7 @@
     type CachedIssues,
     type CachedSearch,
   } from "../lib/search/index";
-  import { orderForPicker, pinnedSources, pruneSelection, seedSelection, togglePin } from "../lib/pinned";
+  import { orderForPicker, pinnedSources, pruneSelection, seedSelection } from "../lib/pinned";
   import { go, pathTo } from "../lib/nav";
   import { filterByLevel, levelOfSource } from "../lib/content/levels";
   import { languageLabel } from "../lib/language";
@@ -152,10 +152,6 @@
       chosen = kept.size === 0 ? new Set(seedSelection(sources, settings.pinnedSources, settings.searchPinnedOnly)) : kept;
     }
   });
-
-  function pin(id: string): void {
-    settings.set("pinnedSources", togglePin(settings.pinnedSources, id));
-  }
 
   $effect(() => {
     if (initial !== null && initial !== "" && blocks.length === 0 && !running) void run();
@@ -670,21 +666,9 @@
     {/if}
     <div class="chips">
       {#each pickerOrder as source (source.id)}
-        <span class="pick" class:on={chosen.has(source.id)}>
-          <button class="chip" class:on={chosen.has(source.id)} aria-pressed={chosen.has(source.id)} onclick={() => toggle(source.id)}>
-            {source.name}{#if languageLabel(source.lang)}<span class="lang">{languageLabel(source.lang)}</span>{/if}
-          </button>
-          <button
-            class="pinbtn"
-            class:pinned={settings.pinnedSources.includes(source.id)}
-            aria-label={settings.pinnedSources.includes(source.id) ? `Unpin ${source.name}` : `Pin ${source.name}`}
-            aria-pressed={settings.pinnedSources.includes(source.id)}
-            title={settings.pinnedSources.includes(source.id) ? "Unpin" : "Pin"}
-            onclick={() => pin(source.id)}
-          >
-            <svg viewBox="0 0 24 24"><path d="M9 4h6l-1 5 3 3H7l3-3zM12 12v8" /></svg>
-          </button>
-        </span>
+        <button class="chip" class:on={chosen.has(source.id)} aria-pressed={chosen.has(source.id)} onclick={() => toggle(source.id)}>
+          {source.name}{#if languageLabel(source.lang)}<span class="lang">{languageLabel(source.lang)}</span>{/if}
+        </button>
       {/each}
     </div>
   </div>
