@@ -9,6 +9,7 @@
    * read marks, category membership and removing a row from the shelf.
    */
   import LibraryBand from "../components/LibraryBand.svelte";
+  import PinSeat from "../components/PinSeat.svelte";
   import { privacy } from "../state/privacy.svelte";
   import { visibility } from "../state/visibility.svelte";
   $effect(() => { const store = library.profile?.store; if (store) void visibility.load(store); });
@@ -781,6 +782,15 @@
     <p class="offline" role="status">{OFFLINE_NOTE}</p>
   {/if}
 
+  <!--
+    The pin sits above the band, not inside it: the band folds, and which shelves are shown is not
+    something the fold should be able to take away. While the curtain is down it moves into the top
+    bar instead (see LibraryHeader), so it is never inside the collapsible section.
+  -->
+  {#if !privacy.locked}
+    <div class="pinrow"><PinSeat /></div>
+  {/if}
+
   <LibraryBand />
 
   <div class="body">
@@ -1056,6 +1066,13 @@
 <style>
   .library-title { font-size: var(--t-2xl); font-weight: 650; }
   .library-tabs { display: flex; gap: var(--s2); padding-block: var(--s2); }
+
+  /* Above the band, right-aligned: it is a filter over the shelves, and the shelves start below it. */
+  .pinrow {
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: var(--s1);
+  }
   .library-tabs [aria-current="page"] { color: var(--accent); border-color: var(--accent); }
   /* One line, in place: no dialog, no empty screen, nothing else on this page changes. */
   .offline {

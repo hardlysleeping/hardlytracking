@@ -12,6 +12,8 @@
    * and `⋯` is the home of the rarer actions, not a replacement for them.
    */
   import type { SearchScope } from "../lib/library/search";
+  import { privacy } from "../state/privacy.svelte";
+  import PinSeat from "./PinSeat.svelte";
 
   interface Props {
     /** Rows on screen. */
@@ -92,6 +94,14 @@
       </button>
     </div>
   {/if}
+  <!--
+    While the curtain is down the pin moves up here, centred on the search row: the visibility band
+    is folded, and which shelves are shown is not something the fold gets to hide. It is the same
+    control, with the same words, as the one above the band when the library is open.
+  -->
+  {#if privacy.locked}
+    <div class="lockpin"><PinSeat compact /></div>
+  {/if}
 </header>
 
 {#if searching}
@@ -134,11 +144,23 @@
     align-items: center;
     justify-content: space-between;
     gap: var(--s3);
+    /* The centred pin is positioned against this row, so the row is its own containing block. */
+    position: relative;
     /* No safe-area padding here: the shell owns it. Adding it again pushed the heading a whole
        status bar below the notch, which is the "top bar sits too far down" report. */
     margin-bottom: var(--s3);
     min-height: 52px;
     transition: min-height var(--dur), padding var(--dur);
+  }
+
+  /* Centred on the same row as the search icon, touching neither the title nor the icons. */
+  .lockpin {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    display: flex;
+    align-items: center;
   }
 
   /* Collapsed: the name stays, the type gets small — a 44 px bar, measured on a phone. */

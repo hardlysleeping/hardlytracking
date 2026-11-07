@@ -1,7 +1,7 @@
 <script lang="ts">
   import { categories } from "../state/categories.svelte";
   import { privacy } from "../state/privacy.svelte";
-  import { EYE_PATHS, MARKER_PATH } from "../lib/categories";
+  import { EYE_PATHS } from "../lib/categories";
   import PinSheet from "./PinSheet.svelte";
 
   /**
@@ -19,17 +19,16 @@
 </script>
 
 <!--
-  The band is the reader's shape, not a toolbar: a full-width caret tab above, then one row of
-  seats — eye, lock, pin. Three rules come from that shape and they are the whole of this file:
+  The band is the reader's shape, not a toolbar: a full-width caret tab above, then the eye and the
+  lock. Two rules come from that shape and they are the whole of this file:
 
   * The caret is always here, collapsed, locked or neither. It is the way the band is folded, so
     it is the one thing the fold cannot take away.
-  * Folding takes the lock with it. Leaving a lock floating on its own under a folded band made
-    the fold look broken — half the row went away and half stayed.
-  * Locking folds the band, and folding nothing else: the pin keeps a strip of its own. A pin is
-    *which* shelves are shown, not what is on them, so it stays under the thumb while the curtain
-    is down. Locking also never hides the pin's button — the earlier build dropped the whole row,
-    pin included, and the button the reader had just pressed vanished.
+  * Folding takes the seats with it — they are what the fold is for.
+
+  The pin is deliberately NOT a seat in here any more. It decides *which* shelves are shown rather
+  than what is on them, so it lives above the band while the library is open and moves into the top
+  bar while the curtain is down; a control that outlives the fold must not be inside the fold.
 -->
 <div class="bandbox" class:collapsed={privacy.bandCollapsed}>
   <button
@@ -49,10 +48,6 @@
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10V7a5 5 0 0 1 10 0v3M5 10h14v11H5z" /></svg>
           <span class="lbl">Unlock</span>
         </button>
-        <button class="seat pin" aria-label={`Pinned: ${categories.pinLabel}`} title="Picked shelves, not their contents" onclick={() => void categories.cyclePinView()}>
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d={MARKER_PATH} /></svg>
-          <span class="lbl">{categories.pinLabel}</span>
-        </button>
       </div>
       <p class="hint" role="status">Hidden shelves tucked away. Enter your PIN to bring them back — local screen privacy, not encryption.</p>
     {:else}
@@ -64,10 +59,6 @@
         <button class="seat lock" aria-pressed="false" aria-label="Lock local privacy screen" title={privacy.pinSet ? "Lock the screen — asks for your PIN to come back" : "Set a PIN first — a lock with no PIN cannot be opened"} onclick={lock}>
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10V7a5 5 0 0 1 10 0M5 10h14v11H5z" /></svg>
           <span class="lbl">Lock</span>
-        </button>
-        <button class="seat pin" aria-label={`Pinned: ${categories.pinLabel}`} title="Picked shelves, not their contents" onclick={() => void categories.cyclePinView()}>
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d={MARKER_PATH} /></svg>
-          <span class="lbl">{categories.pinLabel}</span>
         </button>
       </div>
     {/if}
@@ -144,7 +135,6 @@
   .seat.eye { color: var(--tone-hidden); }
   .seat.lock { --tone: var(--tone-lock-open); color: var(--tone); min-width: 64px; }
   .seat.lock.on { --tone: var(--tone-lock-closed); }
-  .seat.pin { --tone: var(--tone-pinned); color: var(--tone); }
   .seat:hover { background: color-mix(in srgb, currentColor 14%, transparent); }
   .seat:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
   .seat:active { background: color-mix(in srgb, currentColor 24%, transparent); }
