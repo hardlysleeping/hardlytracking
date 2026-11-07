@@ -1,7 +1,7 @@
 <script lang="ts">
   import { categories } from "../state/categories.svelte";
   import { privacy } from "../state/privacy.svelte";
-  import { EYE_PATHS, PIN_PATHS } from "../lib/categories";
+  import { EYE_PATHS, LOCK_PATHS, PIN_PATHS } from "../lib/categories";
   import PinSheet from "./PinSheet.svelte";
 
   /**
@@ -46,7 +46,7 @@
     {#if privacy.locked}
       <div class="row compact pinless">
         <button class="seat lock on" aria-pressed="true" aria-label="Unlock local privacy screen" title="Local screen privacy only — enter your PIN" onclick={() => (sheet = "unlock")}>
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10V7a5 5 0 0 1 10 0v3M5 10h14v11H5z" /></svg>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d={LOCK_PATHS.closed} /></svg>
           <span class="lbl">Unlock</span>
         </button>
       </div>
@@ -65,7 +65,7 @@
           <span class="lbl">{categories.hiddenLabel}</span>
         </button>
         <button class="seat lock" aria-pressed="false" aria-label="Lock local privacy screen" title={privacy.pinSet ? "Lock the screen — asks for your PIN to come back" : "Set a PIN first — a lock with no PIN cannot be opened"} onclick={lock}>
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10V7a5 5 0 0 1 10 0M5 10h14v11H5z" /></svg>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d={LOCK_PATHS.open} /></svg>
           <span class="lbl">Lock</span>
         </button>
         <button

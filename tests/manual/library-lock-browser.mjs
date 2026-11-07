@@ -79,9 +79,19 @@ try {
  await unlock();
  assert.equal(await eye().count(),0,'unlocking gives back the fold the reader chose');
  await page.getByRole('button',{name:'Show visibility controls',exact:true}).click();
+ // The lock's own glyph changes with the state: an open shackle while the screen is open, a closed
+ // one while it is down. Two glyphs that both stopped short of the body read as the same lock.
+ const lockGlyph=async()=>(await page.locator('.bandbox .seat.lock path').getAttribute('d'))??'';
+ const openGlyph=await lockGlyph();
+ assert.ok(openGlyph.length>0&&!openGlyph.trim().endsWith('v3'),`unlocked seat should show an open shackle, got ${openGlyph}`);
  await lock();
- // Locking folds the band; the tab is the way back to the Unlock seat, so open it to measure.
- await page.getByRole('button',{name:'Show visibility controls',exact:true}).click();await page.waitForTimeout(100);
+ // Locking folds the band; the tab is the way back to the Unlock seat, so open it to read the glyph.
+ await page.getByRole('button',{name:'Show visibility controls',exact:true}).click();await page.waitForTimeout(150);
+ const closedGlyph=await lockGlyph();
+ assert.ok(closedGlyph.trim().endsWith('v3'),`locked seat should show a closed shackle, got ${closedGlyph}`);
+ assert.notEqual(closedGlyph,openGlyph,'the lock glyph changes with the state');
+ evidence.push({check:'lock glyph: open shackle when unlocked, closed when locked',openGlyph,closedGlyph});
+ // The band is open again above, so the locked geometry is measured with the Unlock seat in view.
  await geometry('iphone17-pro-max-portrait-locked',440,956,{top:62,bottom:34,left:0,right:0});
  for(const name of ['Library','History','Stats','Downloads','Browse','Source','Series']){
    await view(name);

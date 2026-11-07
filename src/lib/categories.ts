@@ -59,6 +59,18 @@ export const EYE_PATHS: Record<HiddenView, string> = {
   only: "M2 12s3.6-6 10-6c2 0 3.7.6 5.1 1.4M22 12s-3.6 6-10 6c-2 0-3.7-.6-5.1-1.4 M4 20 20 4",
 };
 
+/**
+ * The lock, in the two states the band can be in.
+ *
+ * `closed` is a shackle with both legs in the body — the curtain is down. `open` swings the shackle
+ * up and out of the body with nothing coming back down on the right, which is the only difference
+ * the eye reads at 18 px; two locks that both stopped short of the body looked like the same lock.
+ */
+export const LOCK_PATHS = {
+  closed: "M5 10h14v11H5z M7 10V7a5 5 0 0 1 10 0v3",
+  open: "M5 10h14v11H5z M7 10V7a5 5 0 0 1 9.4-2.4",
+} as const;
+
 /** The pin wears the same three states: a marker, and a marker crossed out when pinned is excluded. */
 export const PIN_PATHS: Record<PinView, string> = {
   all: MARKER_PATH,
