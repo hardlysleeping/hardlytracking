@@ -28,6 +28,7 @@
   import { BADGE_KINDS, DEFAULT_BADGES, PRESET_BADGES, badgeList, type Badge } from "../lib/library/badges";
   import Sheet from "../components/Sheet.svelte";
   import LibraryHeader from "../components/LibraryHeader.svelte";
+  import LibrarySettingsPanel from "../components/LibrarySettingsPanel.svelte";
   import PageMenu from "../components/PageMenu.svelte";
   import { LIBRARY_SECTIONS } from "../lib/nav-order";
   import AddFiles from "../components/AddFiles.svelte";
@@ -93,6 +94,20 @@
   let categoriesOpen = $state(false);
   /** Display knobs (cover size, continue strip) — the settings that are not a filter. */
   let displayOpen = $state(false);
+  /**
+   * The Library's own options, in a popup on this page.
+   *
+   * The same panel the Settings page draws, one door closer: the gear in the top bar and the
+   * `⋯` sheet's "Library settings" both open this, and neither changes the route.
+   */
+  let settingsOpen = $state(false);
+  let header = $state<{ focusSettings: () => void } | null>(null);
+
+  function closeSettings(): void {
+    settingsOpen = false;
+    // Focus goes back to the control that opened the sheet, not to the top of the document.
+    void tick().then(() => header?.focusSettings());
+  }
   let driveOpen = $state(false);
   /**
    * The local-file component, mounted without its buttons.
@@ -772,6 +787,7 @@
   <div class="pin">
   {#if initialTab !== "titles"}<PageMenu title="Library" current="library" />{:else}
   <LibraryHeader
+    bind:this={header}
     count={rows.length}
     total={visible.length}
     {searching}
@@ -786,6 +802,7 @@
     onselect={toggleSelection}
     onrefresh={() => void refreshLibrary()}
     onoverflow={() => (menuOpen = true)}
+    onsettings={() => (settingsOpen = true)}
     ontext={(value) => (libraryMemory.query = value)}
     onscope={(scope) => (libraryMemory.scope = scope)}
   />
@@ -988,6 +1005,12 @@
 
 <DriveImport open={driveOpen} onclose={() => (driveOpen = false)} />
 
+<Sheet open={settingsOpen} title="Library settings" onclose={closeSettings}>
+  <!-- Same component the Settings page renders: one implementation, two doors. `browse` is off
+       because `<BrowseDisplay />` already sits inline above the shelf, a few pixels from here. -->
+  <LibrarySettingsPanel browse={false} />
+</Sheet>
+
 <Sheet open={displayOpen} title="Display" onclose={() => (displayOpen = false)}>
   <div class="rows">
     <div class="row presets">
@@ -1045,7 +1068,7 @@
   onrefresh={() => void refreshLibrary()}
   onselect={() => (selection = new Set())}
   oncategories={() => (categoriesOpen = true)}
-  onsettings={() => go("/settings")}
+  onsettings={() => (settingsOpen = true)}
   onaddfiles={() => adders?.pickFiles()}
   onaddfolder={() => adders?.pickFolder()}
   ondrive={() => (driveOpen = true)}

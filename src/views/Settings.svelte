@@ -10,26 +10,25 @@
   import { library } from "../state/library.svelte";
   import { downloads } from "../state/downloads.svelte";
   import { inbox } from "../state/inbox.svelte";
-  import BrowseDisplay from "../components/BrowseDisplay.svelte";
-  import { DENSITY_OPTIONS, coverWidth, deviceClass } from "../lib/layout-modes";
-  import { viewport } from "../lib/layout.svelte";
   import { go } from "../lib/nav";
   import { onMount } from "svelte";
   import SyncAccount from "../components/SyncAccount.svelte";
   import TrackersPanel from "../components/TrackersPanel.svelte";
+  import LibrarySettingsPanel from "../components/LibrarySettingsPanel.svelte";
+  import HistorySettingsPanel from "../components/HistorySettingsPanel.svelte";
   import { hostInfo, hostToken, htServerEnabled, pairingLink, remoteHost, type HostInfo } from "../lib/host";
   import { imageCache } from "../lib/cache/images";
   import { CACHE_LIMIT_CHOICES, describeCache, formatBytes, type CacheEntry } from "../lib/cache/policy";
-  import { MARGIN_CHOICES, NAV_CORNER_CHOICES, PANE_CHOICES } from "../lib/view-options";
+  import { MARGIN_CHOICES, NAV_CORNER_CHOICES } from "../lib/view-options";
   import { DESTINATIONS } from "../lib/destinations";
-  import { DEFAULT_BOTTOM_NAV, LIBRARY_SECTIONS, moveItem, toggleItem } from "../lib/nav-order";
+  import { DEFAULT_BOTTOM_NAV, moveItem, toggleItem } from "../lib/nav-order";
   import { CPU_LEVELS, describeLevel } from "../lib/performance";
 import { CONTENT_LEVELS, type ContentLevel } from "../lib/content/levels";
 import KeepOfflinePanel from "../components/KeepOfflinePanel.svelte";
 import PrivacyPanel from "../components/PrivacyPanel.svelte";
 
   /**
-   * The navigation editors (Layout): the phone bar and the Library's section tabs.
+   * The navigation editor (Layout): the phone bar, the rail and the sidebar.
    *
    * Arrows, not drag-and-drop: one tap moves one place, it works with a keyboard and a screen
    * reader, and the order it writes is the order the bar draws. Every destination is listed, so a
@@ -63,15 +62,6 @@ import PrivacyPanel from "../components/PrivacyPanel.svelte";
     settings.set("bottomNav", moveItem(settings.bottomNav, index, delta));
   }
 
-  function moveSection(id: string, delta: number): void {
-    const index = settings.libraryTabs.indexOf(id);
-    if (index < 0) return;
-    settings.set("libraryTabs", moveItem(settings.libraryTabs, index, delta));
-  }
-
-  /** The slider shows the cover the library actually draws, not a value a preset overrides. */
-  const cover = $derived(coverWidth(settings.libraryDensity, deviceClass(viewport.width, viewport.height), settings.coverSize));
-
   const bytes = $derived(
     downloads.bytes < 1024 * 1024
       ? `${(downloads.bytes / 1024).toFixed(0)} KB`
@@ -79,12 +69,6 @@ import PrivacyPanel from "../components/PrivacyPanel.svelte";
         ? `${(downloads.bytes / 1024 / 1024).toFixed(1)} MB`
         : `${(downloads.bytes / 1024 / 1024 / 1024).toFixed(2)} GB`,
   );
-
-  /**
-   * History controls. Clearing the log is destructive, so it is always two taps, and the copy says
-   * exactly what survives — progress, read marks, library and downloads.
-   */
-  let clearing = $state<"all" | "range" | null>(null);
 
   /** Phone access: what this server says about itself, and the pairing state of this device. */
   let info = $state<HostInfo | null>(null);
@@ -169,40 +153,6 @@ import PrivacyPanel from "../components/PrivacyPanel.svelte";
       copied = false;
     }
   }
-  let cleared = $state<string | null>(null);
-
-  const RETENTION_PRESETS = [0, 30, 90, 180, 365];
-  const RANGES = [
-    { id: "today", label: "Today" },
-    { id: "7", label: "Last 7 days" },
-    { id: "30", label: "Last 30 days" },
-    { id: "all", label: "All time" },
-  ] as const;
-  let rangeChoice = $state<(typeof RANGES)[number]["id"]>("7");
-
-  /** `custom` when the stored number is not one of the presets. */
-  let retentionChoice = $state(
-    RETENTION_PRESETS.includes(settings.historyRetentionDays) ? String(settings.historyRetentionDays) : "custom",
-  );
-  let customDays = $state(RETENTION_PRESETS.includes(settings.historyRetentionDays) ? 30 : settings.historyRetentionDays);
-
-  function midnight(daysAgo = 0): number {
-    const start = new Date();
-    start.setHours(0, 0, 0, 0);
-    return start.getTime() - daysAgo * 86_400_000;
-  }
-
-  async function clearNow(): Promise<void> {
-    const range =
-      clearing === "range" && rangeChoice !== "all"
-        ? { since: midnight(rangeChoice === "today" ? 0 : Number(rangeChoice)) }
-        : {};
-    const removed = await library.clearHistory(range);
-    const scope = clearing === "all" || (clearing === "range" && rangeChoice === "all") ? "all history" : RANGES.find((r) => r.id === rangeChoice)?.label.toLowerCase() ?? "history";
-    cleared = `Deleted ${removed.sessions} session${removed.sessions === 1 ? "" : "s"} and ${removed.history} history entr${removed.history === 1 ? "y" : "ies"} from ${scope}. Progress and read marks were not touched.`;
-    clearing = null;
-  }
-
   /** The age gate is shown, not applied: choosing Adult asks before it shows anything. */
   let ageGate = $state(false);
 
@@ -277,57 +227,13 @@ import PrivacyPanel from "../components/PrivacyPanel.svelte";
     {/if}
   </details>
 
+  <!--
+    One implementation, two doors: the Library page's gear popup draws this same panel, so the
+    options a reader changes on the shelf can never drift from the ones listed here.
+  -->
   <details class="group" open>
     <summary><h2>Library</h2></summary>
-    <BrowseDisplay />
-    <label class="row">
-      <span>Cover size</span>
-      <input
-        type="range"
-        min="96"
-        max="200"
-        step="4"
-        value={cover}
-        oninput={(event) => {
-          settings.set("coverSize", Number(event.currentTarget.value));
-          settings.set("libraryDensity", "manual");
-        }}
-      />
-    </label>
-    <div class="row">
-      <span>Density</span>
-      <div class="chips">
-        {#each DENSITY_OPTIONS as option (option.id)}
-          <button class="chip" class:on={settings.libraryDensity === option.id} onclick={() => settings.set("libraryDensity", option.id)}>
-            {option.label}
-          </button>
-        {/each}
-      </div>
-    </div>
-    <label class="row">
-      <span>Category navigation</span>
-      <select class="field" value={settings.categoryNav} onchange={(event) => settings.set("categoryNav", event.currentTarget.value as typeof settings.categoryNav)}>
-        <option value="automatic">Automatic</option>
-        <option value="tabs">Tabs</option>
-        <option value="sidebar">Sidebar</option>
-      </select>
-    </label>
-    <label class="row">
-      <span>Library panes<em class="sub">Two panes put the series beside the shelf, like a tablet.</em></span>
-      <select
-        class="field"
-        value={settings.libraryPane}
-        onchange={(event) => settings.set("libraryPane", event.currentTarget.value as typeof settings.libraryPane)}
-      >
-        {#each PANE_CHOICES as choice (choice.id)}
-          <option value={choice.id}>{choice.label}</option>
-        {/each}
-      </select>
-    </label>
-    <label class="row">
-      <span>Show “Continue reading”</span>
-      <input type="checkbox" checked={settings.showContinue} onchange={(event) => settings.set("showContinue", event.currentTarget.checked)} />
-    </label>
+    <LibrarySettingsPanel />
   </details>
 
   <details class="group" open>
@@ -398,18 +304,8 @@ import PrivacyPanel from "../components/PrivacyPanel.svelte";
         {/each}
       </div>
     </div>
-    <label class="row">
-      <span>History panes<em class="sub">Two panes: the timeline on the left, the entry you pick on the right.</em></span>
-      <select
-        class="field"
-        value={settings.historyPane}
-        onchange={(event) => settings.set("historyPane", event.currentTarget.value as typeof settings.historyPane)}
-      >
-        {#each PANE_CHOICES as choice (choice.id)}
-          <option value={choice.id}>{choice.label}</option>
-        {/each}
-      </select>
-    </label>
+    <!-- Back/forward corner stays here: it places the floating back/forward pair on every page
+         that draws one, not only History. History's own pane layout moved into the History panel. -->
 
     <!--
       The bar and the tabs, above the controls that only change how much room content gets: these
@@ -454,33 +350,6 @@ import PrivacyPanel from "../components/PrivacyPanel.svelte";
       <p class="hint">The page-title menu always lists every page, so a page taken off the bar is still one tap away on any device.</p>
     </div>
 
-    <div class="navedit">
-      <p class="navhead">
-        Library sections
-        <em class="sub">The order of the tabs above the shelf.</em>
-      </p>
-      {#each settings.libraryTabs as id, index (id)}
-        {@const section = LIBRARY_SECTIONS.find((item) => item.id === id)}
-        <div class="row navrow">
-          <span class="navlabel">{section?.label ?? id}</span>
-          <div class="navactions">
-            <button
-              class="navbtn"
-              aria-label={`Move ${section?.label ?? id} up`}
-              disabled={index === 0}
-              onclick={() => moveSection(id, -1)}
-            >↑</button>
-            <button
-              class="navbtn"
-              aria-label={`Move ${section?.label ?? id} down`}
-              disabled={index === settings.libraryTabs.length - 1}
-              onclick={() => moveSection(id, 1)}
-            >↓</button>
-          </div>
-        </div>
-      {/each}
-    </div>
-
     <h2>Reader</h2>
     <label class="row">
       <span>Reading mode</span>
@@ -514,89 +383,10 @@ import PrivacyPanel from "../components/PrivacyPanel.svelte";
     </label>
   </details>
 
+  <!-- The History page's gear popup draws this same panel — one implementation, two doors. -->
   <details class="group" open>
     <summary><h2>History</h2></summary>
-    <label class="row">
-      <span>Pause reading history<em class="sub">No new sessions and no new history entries — incognito reading. Progress, read marks and Continue Reading keep working.</em></span>
-      <input type="checkbox" checked={settings.historyPaused} onchange={(event) => settings.set("historyPaused", event.currentTarget.checked)} />
-    </label>
-    <label class="row">
-      <span>Keep reading history<em class="sub">Applies to reading sessions only. Progress, read marks, categories, bookmarks and downloads are never deleted by retention.</em></span>
-      <select
-        class="field"
-        value={String(retentionChoice)}
-        onchange={(event) => {
-          const value = event.currentTarget.value;
-          if (value === "custom") {
-            retentionChoice = "custom";
-            settings.set("historyRetentionDays", customDays);
-          } else {
-            retentionChoice = value;
-            settings.set("historyRetentionDays", Number(value));
-            void library.pruneSessions();
-          }
-        }}
-      >
-        <option value="0">Forever</option>
-        <option value="30">30 days</option>
-        <option value="90">90 days</option>
-        <option value="180">6 months</option>
-        <option value="365">1 year</option>
-        <option value="custom">Custom…</option>
-      </select>
-    </label>
-    {#if retentionChoice === "custom"}
-      <label class="row">
-        <span>Days</span>
-        <input
-          class="field num"
-          type="number"
-          min="1"
-          max="3650"
-          value={customDays}
-          onchange={(event) => {
-            const days = Math.max(1, Math.min(3650, Number(event.currentTarget.value) || 30));
-            customDays = days;
-            settings.set("historyRetentionDays", days);
-            void library.pruneSessions();
-          }}
-        />
-      </label>
-    {/if}
-    {#if clearing === null}
-      <button class="row link" onclick={() => (clearing = "all")}>
-        <span>Clear reading history</span>
-        <span class="chev">›</span>
-      </button>
-      <button class="row link" onclick={() => (clearing = "range")}>
-        <span>Clear history by date…</span>
-        <span class="chev">›</span>
-      </button>
-    {:else if clearing === "all"}
-      <div class="confirm">
-        <p>Delete all recorded reading sessions and reading-history entries? Your current chapter, page progress, read/unread state, library, and downloads will not be changed.</p>
-        <span class="acts2">
-          <button class="chip" onclick={() => (clearing = null)}>Cancel</button>
-          <button class="chip danger" onclick={() => void clearNow()}>Delete</button>
-        </span>
-      </div>
-    {:else}
-      <div class="confirm">
-        <p>Delete recorded sessions and history entries from a period. Progress, read marks, library and downloads are not changed.</p>
-        <div class="range">
-          {#each RANGES as range (range.id)}
-            <button class="chip" class:on={rangeChoice === range.id} onclick={() => (rangeChoice = range.id)}>{range.label}</button>
-          {/each}
-        </div>
-        <span class="acts2">
-          <button class="chip" onclick={() => (clearing = null)}>Cancel</button>
-          <button class="chip danger" onclick={() => void clearNow()}>Delete</button>
-        </span>
-      </div>
-    {/if}
-    {#if cleared !== null}
-      <p class="hint">{cleared}</p>
-    {/if}
+    <HistorySettingsPanel />
   </details>
 
   <details class="group" open>
@@ -963,41 +753,6 @@ import PrivacyPanel from "../components/PrivacyPanel.svelte";
     color: var(--text-3);
     line-height: 1.5;
     max-width: 46ch;
-  }
-
-  .confirm {
-    display: grid;
-    gap: var(--s3);
-    padding: var(--s3) 0 var(--s2);
-    border-top: 1px solid var(--line);
-  }
-
-  .confirm p {
-    margin: 0;
-    font-size: var(--t-sm);
-    color: var(--text-2);
-    line-height: 1.6;
-  }
-
-  .acts2 {
-    display: flex;
-    gap: var(--s2);
-    justify-content: flex-end;
-  }
-
-  .range {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--s2);
-  }
-
-  .chip.danger {
-    color: var(--danger, #d9534f);
-    border-color: currentColor;
-  }
-
-  .field.num {
-    width: 96px;
   }
 
   .space {

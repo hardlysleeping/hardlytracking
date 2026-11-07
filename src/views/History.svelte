@@ -6,6 +6,8 @@
    * long ago, and a Continue button. The groups are Today / Yesterday / This week / Earlier.
    */
   import Sheet from "../components/Sheet.svelte";
+  import HistorySettingsPanel from "../components/HistorySettingsPanel.svelte";
+  import { tick } from "svelte";
   import { incognito } from "../state/incognito.svelte";
   import { historyGroups, historySwipe, selectedHistoryIds, toggleHistoryPin } from "../lib/history-controls";
   import { privacy } from "../state/privacy.svelte";
@@ -44,6 +46,20 @@
   let error = $state<string | null>(null);
   let start: { x: number; y: number; id: number } | null = null;
   let swiped = false;
+
+  /**
+   * The History page's own options, in a popup here rather than a trip to Settings.
+   *
+   * The panel is the same component the Settings page draws; opening it does not touch the route,
+   * and closing it hands focus back to the gear.
+   */
+  let settingsOpen = $state(false);
+  let gear = $state<HTMLButtonElement | null>(null);
+
+  function closeSettings(): void {
+    settingsOpen = false;
+    void tick().then(() => gear?.focus());
+  }
 
   function toggleSelected(id: string): void {
     const next = new Set(selected);
@@ -238,10 +254,32 @@
 <section class="view">
   <div class="pin">
   <header class="top">
-    <PageMenu title="History" current="history" />
-    <span class="count">{shown.length}</span>
+    <div class="headline">
+      <PageMenu title="History" current="history" />
+      <span class="count">{shown.length}</span>
+    </div>
+    <!--
+      The pills and the gear travel together: at 390 px the group is wider than the space left
+      beside the title, so the whole group drops to its own line, right-aligned, rather than the
+      gear being stranded on the left under the heading.
+    -->
+    <div class="tools">
     <button class="btn" aria-pressed={incognito.active} onclick={() => incognito.toggle()}>Incognito{incognito.active ? " on" : " off"}</button>
     <button class="btn" aria-pressed={selecting} onclick={() => { selecting = !selecting; selected = new Set(); revealed = null; }}>{selecting ? "Done" : "Select"}</button>
+    <button
+      class="btn ghost icon gear"
+      bind:this={gear}
+      aria-label="History settings"
+      title="History settings"
+      aria-haspopup="dialog"
+      onclick={() => (settingsOpen = true)}
+    >
+      <svg viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="3.2" />
+        <path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-1.8-.3 1.6 1.6 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.6 1.6 0 0 0-1-1.5 1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0 .3-1.8 1.6 1.6 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.6 1.6 0 0 0 1.5-1 1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3H9a1.6 1.6 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 1 1.5 1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8V9a1.6 1.6 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1Z" />
+      </svg>
+    </button>
+    </div>
   </header>
   {#if incognito.active}<p class="privacy-note" role="status">Incognito is on until you turn it off or restart the app. History and reading sessions are paused; progress and read marks still save.</p>{:else if settings.historyPaused}<p class="privacy-note">History is paused in Settings.</p>{/if}
   {#if selecting}
@@ -326,6 +364,11 @@
     </div>
   {/if}
 </section>
+
+<Sheet open={settingsOpen} title="History settings" onclose={closeSettings}>
+  <!-- The same component the Settings page renders: one implementation, two doors. -->
+  <HistorySettingsPanel />
+</Sheet>
 
 <Sheet open={pending.length > 0} title="Remove reading history?" onclose={() => { if (!removing) { pending = []; error = null; } }}>
   <p>Remove {pending.length} {pending.length === 1 ? "entry" : "entries"} and their reading sessions? Progress, read marks, bookmarks and downloads will stay.</p>
@@ -444,9 +487,35 @@
     margin-bottom: var(--s4);
   }
 
+  .headline {
+    display: flex;
+    align-items: baseline;
+    gap: var(--s2);
+    min-width: 0;
+  }
+
+  /* Pushed right as one group, so the gear keeps the top-right corner at every width. */
+  .tools {
+    display: flex;
+    align-items: center;
+    gap: var(--s2);
+    margin-left: auto;
+  }
+
   .count {
     font-size: var(--t-sm);
     color: var(--text-3);
+  }
+
+  /* The gear keeps the page's glyph grammar: 18 px, stroked, no fill. */
+  .gear svg {
+    width: 18px;
+    height: 18px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.6;
+    stroke-linecap: round;
+    stroke-linejoin: round;
   }
 
   .group {

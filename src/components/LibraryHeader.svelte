@@ -30,6 +30,8 @@
     onselect: () => void;
     onrefresh: () => void;
     onoverflow: () => void;
+    /** The gear: the Library's own options, in a popup on this page — never a trip to Settings. */
+    onsettings: () => void;
     ontext: (value: string) => void;
     onscope: (scope: SearchScope) => void;
   }
@@ -45,9 +47,17 @@
     onselect,
     onrefresh,
     onoverflow,
+    onsettings,
     ontext,
     onscope,
   }: Props = $props();
+
+  /** The gear, so the sheet can hand focus back to the control that opened it. */
+  let gear = $state<HTMLButtonElement | null>(null);
+
+  export function focusSettings(): void {
+    gear?.focus();
+  }
 
   /** Collapsed once the shelf has moved: 24 px is a scroll, not a rubber-band bounce. */
   let collapsed = $state(false);
@@ -70,8 +80,8 @@
       <span class="count">{count}{count !== total ? ` of ${total}` : ""}</span>
     {/if}
   </div>
-  {#if total > 0}
-    <div class="acts">
+  <div class="acts">
+    {#if total > 0}
       <button
         class="btn ghost icon"
         aria-label="Search the library"
@@ -94,8 +104,22 @@
       <button class="btn ghost icon" aria-label="More library actions" onclick={onoverflow}>
         <svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.4" /><circle cx="12" cy="12" r="1.4" /><circle cx="19" cy="12" r="1.4" /></svg>
       </button>
-    </div>
-  {/if}
+    {/if}
+    <button
+      class="btn ghost icon gear"
+      bind:this={gear}
+      aria-label="Library settings"
+      title="Library settings"
+      aria-haspopup="dialog"
+      onclick={onsettings}
+    >
+      <svg viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="3.2" />
+        <path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-1.8-.3 1.6 1.6 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.6 1.6 0 0 0-1-1.5 1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0 .3-1.8 1.6 1.6 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.6 1.6 0 0 0 1.5-1 1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3H9a1.6 1.6 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 1 1.5 1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8V9a1.6 1.6 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1Z" />
+      </svg>
+    </button>
+    <!-- An empty library still has settings: the gear is the one control a blank shelf keeps. -->
+  </div>
   <!--
     While the curtain is down the pin moves up here, centred on the search row: the visibility band
     is folded, and which shelves are shown is not something the fold gets to hide. It is the same
