@@ -1,6 +1,6 @@
 [package]
 name = "hardlytracking"
-version = "0.7.5"
+version = "0.7.6"
 description = "HardlyTracking - a manga reader with Mihon extension support"
 authors = ["hardlysleeping"]
 edition = "2021"
