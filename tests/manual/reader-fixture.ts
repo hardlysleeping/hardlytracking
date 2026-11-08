@@ -34,6 +34,8 @@ downloads.local = async()=>args.has('partial') ? {
 settings.readerMode = (args.get('mode')??'vertical') as any;
 settings.readerFit = (args.get('fit')??'width') as any;
 settings.pageGap = 12;
+// A page size for the title under test, so a check can load straight into it (?scale=0.7).
+if (args.has('scale')) settings.readerScale = {'fixture:series': Number(args.get('scale'))} as any;
 if (args.has('ahead')) settings.readerAhead = Number(args.get('ahead')) as any;
 settings.tapZones = true;
 settings.set = ((key: string,value: unknown)=>{(settings as any)[key]=value;}) as any;

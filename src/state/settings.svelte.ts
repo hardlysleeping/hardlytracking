@@ -40,6 +40,7 @@ function cornerOr(value: unknown): NavCorner {
 }
 
 import { DEFAULT_READ_AHEAD, readAheadOf, type ReadAhead } from "../lib/reader-ahead";
+import { scaleMapOf } from "../lib/reader-scale";
 import { browseMode, columnsFor } from "../lib/browse-display";
 export type LibraryView = "grid" | "compact" | "list" | "row" | "card";
 export type Sort = "title" | "recent" | "source";
@@ -117,6 +118,14 @@ export interface Prefs {
   continueDismissed: string[];
   readerMode: ReaderMode;
   readerFit: Fit;
+  /**
+   * Page size per title, 0.5–1, keyed by series id.
+   *
+   * One field, not one pref per series, and 1 is stored as *no entry*: the fit is the default, so
+   * a map that only names the titles the reader shrank stays small and an export stays honest.
+   * The reading surface is shared by every chapter of a title, so the scale is too.
+   */
+  readerScale: Record<string, number>;
   readerAhead: ReadAhead;
   autoscrollSpeed: AutoscrollSpeed;
   autoscrollCurve: AutoscrollCurve;
@@ -232,6 +241,7 @@ class Settings {
 
   readerMode = $state<ReaderMode>("vertical");
   readerFit = $state<Fit>("width");
+  readerScale = $state<Record<string, number>>({});
   readerAhead = $state<ReadAhead>(DEFAULT_READ_AHEAD);
   autoscrollSpeed = $state<AutoscrollSpeed>(DEFAULT_AUTOSCROLL_SPEED);
   autoscrollCurve = $state<AutoscrollCurve>(DEFAULT_AUTOSCROLL_CURVE);
@@ -314,6 +324,7 @@ class Settings {
     this.continueDismissed = await read("continueDismissed", this.continueDismissed);
     this.readerMode = await read("readerMode", this.readerMode);
     this.readerFit = await read("readerFit", this.readerFit);
+    this.readerScale = scaleMapOf(await read<unknown>("readerScale", {}));
     this.readerAhead = readAheadOf(await read<unknown>("readerAhead", DEFAULT_READ_AHEAD));
     this.autoscrollSpeed = autoscrollSpeedOf(await read<unknown>("autoscrollSpeed", DEFAULT_AUTOSCROLL_SPEED));
     this.autoscrollCurve = autoscrollCurveOf(await read<unknown>("autoscrollCurve", DEFAULT_AUTOSCROLL_CURVE));
@@ -370,7 +381,9 @@ class Settings {
             ? autoscrollCurveOf(value)
             : key === "keepCategories"
               ? keepCategoriesOf(value)
-              : key === "privacyPin"
+              : key === "readerScale"
+                ? scaleMapOf(value)
+                : key === "privacyPin"
                 ? pinRecordOf(value)
                 : key === "historyNavCorner"
                   ? cornerOr(value)

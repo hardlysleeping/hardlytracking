@@ -5,6 +5,7 @@ import vm from 'node:vm';
 import ts from 'typescript';
 import { DEFAULT_READ_AHEAD, READ_AHEAD_CHOICES, readAheadOf } from '../../src/lib/reader-ahead.ts';
 import { ReaderQueue, readerOrder } from '../../src/lib/reader.ts';
+import { scaleMapOf } from '../../src/lib/reader-scale.ts';
 import { DEFAULT_BOTTOM_NAV, DEFAULT_LIBRARY_TABS, DESTINATION_IDS, LIBRARY_SECTION_IDS, completeOrder, normaliseOrder } from '../../src/lib/nav-order.ts';
 
 test('ahead choices are finite, default three; malformed preferences cannot expand the queue',()=>{
@@ -54,6 +55,8 @@ function freshSettings(){
   if(id.includes('lib/autoscroll'))return{autoscrollCurveOf:value=>value,autoscrollSpeedOf:value=>value,DEFAULT_AUTOSCROLL_CURVE:'linear',DEFAULT_AUTOSCROLL_SPEED:'steady'};
   if(id.includes('offline/policy'))return{keepCategoriesOf:value=>Array.isArray(value)?value.filter(v=>typeof v==='string'):[]};
   // The screen-curtain PIN is read defensively; nothing is stored in this fixture.
+  // Page size per title: the real validators are pure and dependency-free.
+  if(id.includes('lib/reader-scale'))return{scaleMapOf};
   if(id.includes('lib/pin'))return{pinRecordOf:value=>typeof value==='string'?value:''};
   if(id.includes('view-options'))return{isNavCorner:value=>['bottom-right','bottom-left','top-left','top-right'].includes(value)};
   if(id.includes('library/continue'))return{DEFAULT_CONTINUE_COLLAPSED:false,continueCollapsedOf:value=>value===true};

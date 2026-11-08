@@ -28,6 +28,7 @@
   import Sheet from "../components/Sheet.svelte";
   import { plugins } from "../state/plugins.svelte";
   import { READ_AHEAD_CHOICES, readAheadOf } from "../lib/reader-ahead";
+  import { SCALE_MAX, SCALE_MAX_PERCENT, SCALE_MIN_PERCENT, scaleFor, scaleOf, scalePercent, withScale } from "../lib/reader-scale";
   import { advancePx, AUTOSCROLL_CURVES, AUTOSCROLL_SPEEDS, progressOf } from "../lib/autoscroll";
   import { ReaderQueue, ReaderTap, readerOrder, type ReaderJob } from "../lib/reader";
 
@@ -67,6 +68,8 @@
     disposed = true;
     generation++; loadController?.abort(); queue.cancel();
     if (saveTimer !== null) clearTimeout(saveTimer);
+    flushScale();
+    if (scaleTimer !== null) { clearTimeout(scaleTimer); scaleTimer = null; }
   });
 
   function lazyPage(node: HTMLImageElement, page: Page): { destroy: () => void } {
@@ -264,6 +267,69 @@
    * there had a back link to a series that does not exist and two dead chapter buttons.
    */
   let owner = untrack(() => seriesId);
+
+  /**
+   * Page size, per title (see `lib/reader-scale`).
+   *
+   * `1` is the fit, which is what every title is drawn at until the reader says otherwise; below it
+   * the image keeps its proportions and is centred, so a wide tablet can have margins. The choice
+   * belongs to the series, so `scaleOwner` — not `owner` — is what the map is keyed by: it is
+   * `$state`, and it follows the corrected owner after `load()` has asked the library.
+   *
+   * A drag writes `draftScale` only, so the surface follows the thumb without an IndexedDB write
+   * per pixel; the pref is written when the drag settles.
+   */
+  let scaleOwner = $state(seriesId);
+  let draftScale = $state<number | null>(null);
+  let scaleTimer: ReturnType<typeof setTimeout> | null = null;
+  let pendingScale: number | null = null;
+
+  const pageScale = $derived(draftScale ?? scaleFor(settings.readerScale, scaleOwner));
+  const scaled = $derived(pageScale < SCALE_MAX);
+  const scaleValue = $derived(scalePercent(pageScale));
+
+  function writeScale(value: number): void {
+    if (scaleTimer !== null) clearTimeout(scaleTimer);
+    scaleTimer = null;
+    pendingScale = null;
+    settings.set("readerScale", withScale(settings.readerScale, scaleOwner, value));
+  }
+
+  /** A scale still waiting for its debounce is written now: a closed sheet must not lose it. */
+  function flushScale(): void {
+    const value = pendingScale;
+    if (value !== null) writeScale(value);
+  }
+
+  /**
+   * Shrink or grow the page, and keep the reader's place.
+   *
+   * Scaling changes every page's height, so a scroll position measured in pixels lands somewhere
+   * else — on a long webtoon, half a chapter away. The current page's own offset is the anchor:
+   * measure it before the change, put it back after the layout has settled.
+   */
+  function setPageScale(value: number): void {
+    const next = scaleOf(value);
+    if (next === pageScale) return;
+    const host = scroller;
+    const anchor = host?.querySelector<HTMLElement>(`[data-page="${index}"]`);
+    // How far *into* the current page the reader is, not where the page was in pixels: shrinking
+    // the pages changes every offset above it, and the browser clamps a shrunken scroll range
+    // before this runs, so a delta of offsets would leave the reader somewhere else entirely.
+    const offset = (element: HTMLElement): number => horizontal ? element.offsetLeft : element.offsetTop;
+    const carry = anchor == null || host === null ? 0 : (horizontal ? host.scrollLeft : host.scrollTop) - offset(anchor);
+    draftScale = next;
+    pendingScale = next;
+    if (scaleTimer !== null) clearTimeout(scaleTimer);
+    scaleTimer = setTimeout(() => { scaleTimer = null; const held = pendingScale; pendingScale = null; if (held !== null) writeScale(held); }, 250);
+    void tick().then(() => {
+      const after = host?.querySelector<HTMLElement>(`[data-page="${index}"]`);
+      if (host === null || !after || !after.isConnected) return;
+      const target = offset(after) + carry;
+      if (horizontal) host.scrollTo({ left: target, behavior: "instant" });
+      else host.scrollTo({ top: target, behavior: "instant" });
+    });
+  }
 
   const MODES = [
     { id: "vertical", label: "Vertical" },
@@ -466,6 +532,11 @@
     busy = true;
     error = null;
     index = 0;
+    // A page size belongs to the title, so a chapter change keeps it and a new title starts at the
+    // fit — but a drag that had not been written yet belongs to the title being left.
+    flushScale();
+    draftScale = null;
+    scaleOwner = seriesId;
     partialNotice = null;
     // A chapter that fails to load must not leave the last one's pages on screen: "1 / 124" beside
     // another book's error reads as if this chapter were 124 pages long.
@@ -503,6 +574,7 @@
       // A URL that names another series is corrected before anything is written with it: from here
       // on the address bar, the back link and the two chapter buttons all use `owner`.
       owner = await guard(ownerOf(seriesId, id, signal));
+      scaleOwner = owner;
       if (owner !== seriesId) history.replaceState(null, "", `#${pathTo("read", owner, id)}`);
 
       // The chapter list is a nicety for the name and the prev/next buttons; with the host down
@@ -720,6 +792,7 @@
       class:horizontal
       class:rtl
       class:webtoon={settings.readerMode === 'webtoon'}
+      class:scaled
       data-fit={settings.readerFit}
       bind:this={scroller}
       onscroll={onScroll}
@@ -736,6 +809,7 @@
       role="region"
       aria-label="Reading surface"
       style:--gap="{settings.pageGap}px"
+      style:--page-scale={pageScale}
     >
       {#each pages as page (page.index)}
         <div
@@ -799,7 +873,7 @@
   </footer>
 </section>
 
-<Sheet open={settingsOpen} title="Reader" onclose={() => (settingsOpen = false)}>
+<Sheet open={settingsOpen} title="Reader" onclose={() => { settingsOpen = false; flushScale(); }}>
   <div class="group">
     <span class="label">Reading mode</span>
     <div class="chips">
@@ -815,6 +889,27 @@
         <button class="chip" class:on={settings.readerFit === option.id} onclick={() => settings.set("readerFit", option.id)}>{option.label}</button>
       {/each}
     </div>
+  </div>
+  <div class="group">
+    <span class="label">Page size</span>
+    <div class="sizer">
+      <input
+        type="range"
+        min={SCALE_MIN_PERCENT}
+        max={SCALE_MAX_PERCENT}
+        step="1"
+        value={scaleValue}
+        aria-label="Page size"
+        aria-valuetext={`${scaleValue} percent`}
+        oninput={(event) => setPageScale(Number(event.currentTarget.value) / 100)}
+        onchange={() => flushScale()}
+      />
+      <span class="scaleval">{scaleValue}%</span>
+      {#if scaled}
+        <button class="chip" onclick={() => { setPageScale(SCALE_MAX); flushScale(); }}>Fit</button>
+      {/if}
+    </div>
+    <p class="hint">Remembered for this title, in every reading mode. All the way out is the fit: the page fills the screen.</p>
   </div>
   <div class="group">
     <span class="label">Read ahead</span>
@@ -950,6 +1045,9 @@
        use the full bottom edge; only interactive chrome reserves the home inset. */
     --reader-width: calc(100vw - var(--safe-l) - var(--safe-r));
     --reader-height: calc(100dvh - var(--safe-t));
+    /* The title's page size. 1 is the fit; below it every fit is drawn at that fraction and
+       centred, so the reader gets margins without the fit changing underneath. */
+    --page-scale: 1;
     position: absolute;
     top: var(--safe-t);
     bottom: 0;
@@ -983,13 +1081,17 @@
     justify-content: safe center;
     min-width: 100%;
     width: max-content;
-    min-height: calc(min(var(--reader-width), 900px) / var(--aspect));
+    min-height: calc(min(var(--reader-width), 900px) * var(--page-scale) / var(--aspect));
   }
+  /* A scaled page centres in its slot: a margin on both sides is the point of the setting, and a
+     page pinned to one edge of a wide tablet is not centred. Unscaled pages keep the fit's own
+     alignment, so nothing moves at 100 %. */
+  .scroller.scaled .page { align-items: center; }
   .scroller.horizontal .page { scroll-snap-align: start; }
   img {
     display: block;
     flex: none;
-    width: min(var(--reader-width), 900px);
+    width: calc(min(var(--reader-width), 900px) * var(--page-scale));
     height: auto;
     max-width: none;
     user-select: none;
@@ -999,8 +1101,8 @@
   img:not([src]) { visibility: hidden; }
   /* object-fit cannot resize an auto-sized image, and width/height are not valid values.
      Give each fit actual dimensions. Height may pan horizontally; Whole page never clips. */
-  .scroller[data-fit='height'] .page { min-height: var(--reader-height); }
-  .scroller[data-fit='height'] img { width: auto; height: var(--reader-height); }
+  .scroller[data-fit='height'] .page { min-height: calc(var(--reader-height) * var(--page-scale)); }
+  .scroller[data-fit='height'] img { width: auto; height: calc(var(--reader-height) * var(--page-scale)); }
   .scroller[data-fit='contain'] .page {
     width: 100%;
     min-height: var(--reader-height);
@@ -1009,8 +1111,8 @@
   .scroller[data-fit='contain'] img {
     width: auto;
     height: auto;
-    max-width: var(--reader-width);
-    max-height: var(--reader-height);
+    max-width: calc(var(--reader-width) * var(--page-scale));
+    max-height: calc(var(--reader-height) * var(--page-scale));
   }
   /* Paged slots stay surface-wide/high even for a small image. */
   .scroller.horizontal .page { min-height: var(--reader-height); }
@@ -1116,8 +1218,35 @@
     gap: var(--s2);
   }
 
+  /* The page-size slider: the track takes the room, the readout keeps a fixed width so the number
+     does not shove the Fit button around as it changes. */
+  .sizer {
+    display: flex;
+    align-items: center;
+    gap: var(--s3);
+    min-height: 44px;
+  }
+
+  .sizer input {
+    flex: 1;
+    min-width: 0;
+    accent-color: var(--accent);
+  }
+
+  .scaleval {
+    min-width: 3.6em;
+    font-size: var(--t-sm);
+    color: var(--text-2);
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+
   @media (pointer: coarse) {
     .ahead .chip { box-sizing: border-box; min-height: 44px; min-width: 44px; justify-content: center; }
+    /* A range input's box is the track; on a finger it has to be a thumb-sized target, and a
+       percentage that can only be dragged in a 16 px band is a slider nobody can use. */
+    .sizer input { min-height: 44px; }
+    .sizer { gap: var(--s2); }
   }
 
   .row {
