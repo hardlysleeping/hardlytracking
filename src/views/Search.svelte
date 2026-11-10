@@ -20,6 +20,9 @@
   import type { Chapter, Series, Source } from "../api/source";
   import SeriesGrid from "../components/SeriesGrid.svelte";
   import BrowseDisplay from "../components/BrowseDisplay.svelte";
+  import ChipRow from "../components/ChipRow.svelte";
+  import Sheet from "../components/Sheet.svelte";
+  import type { FilterChip } from "../lib/library/filter";
   import { downloads } from "../state/downloads.svelte";
   import SeriesActions from "../components/SeriesActions.svelte";
   import Cover from "../components/Cover.svelte";
@@ -121,6 +124,26 @@
 
   /** What the selector draws: the user's pinned sources first, then the rest by name. */
   const pickerOrder = $derived(orderForPicker(sources, settings.pinnedSources));
+
+  /**
+   * The source filter as the library draws its filters: one door in the tools row, the state it is
+   * in named on the door, and a chip you can take back. The chip cloud itself lives in a sheet —
+   * sixty sources under the field made the page about the picker instead of the results.
+   */
+  let sourcesOpen = $state(false);
+
+  const pinnedAll = $derived(pinned.length > 0 && chosen.size === pinned.length && pinned.every((source) => chosen.has(source.id)));
+
+  const sourceChips = $derived.by<FilterChip[]>(() => {
+    if (sources.length === 0 || chosen.size === sources.length) return [];
+    if (chosen.size === 0) return [{ key: "sources", label: "No sources" }];
+    if (pinnedAll) return [{ key: "sources", label: `Pinned (${pinned.length})` }];
+    return [{ key: "sources", label: `${chosen.size} of ${sources.length} sources` }];
+  });
+
+  function clearSourceFilter(): void {
+    chosen = new Set(sources.map((source) => source.id));
+  }
 
   /** What this device already has. A search result is a proposal; the library is the decision. */
   const saved = $derived(new Set(library.library.map((row) => row.id)));
@@ -673,24 +696,33 @@
   </form>
   </div>
 
-  <BrowseDisplay />
-  <div class="picker">
-    <span class="label">Sources · {chosen.size} of {sources.length} selected</span>
-    <button class="chip" onclick={() => (chosen = new Set(sources.map((source) => source.id)))}>All</button>
-    <button class="chip" onclick={() => (chosen = new Set())}>None</button>
-    {#if pinned.length > 0}
-      <button class="chip" class:on={chosen.size === pinned.length && pinned.every((s) => chosen.has(s.id))} onclick={() => (chosen = new Set(pinned.map((s) => s.id)))}>
-        Pinned ({pinned.length})
+  <div class="tools" class:collapsed={settings.toolsCollapsed}>
+    <!--
+      The same fold the library uses: one handle for the questions a reader asks in bursts, and a
+      summary on the handle so a narrowed search is still readable with the row away.
+    -->
+    <button
+      class="fold"
+      aria-expanded={!settings.toolsCollapsed}
+      aria-label={settings.toolsCollapsed ? "Show the source filter" : "Hide the source filter"}
+      title={settings.toolsCollapsed ? "Show the source filter" : "Hide the source filter"}
+      onclick={() => settings.set("toolsCollapsed", !settings.toolsCollapsed)}
+    >
+      <svg class="caret" class:up={!settings.toolsCollapsed} viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6" /></svg>
+      {#if settings.toolsCollapsed}
+        <span class="summary">Filter · {chosen.size} of {sources.length} sources</span>
+      {/if}
+    </button>
+    {#if !settings.toolsCollapsed}
+      <button class="btn ghost" onclick={() => (sourcesOpen = true)}>
+        Filter · {chosen.size} of {sources.length}
       </button>
     {/if}
-    <div class="chips">
-      {#each pickerOrder as source (source.id)}
-        <button class="chip" class:on={chosen.has(source.id)} aria-pressed={chosen.has(source.id)} onclick={() => toggle(source.id)}>
-          {source.name}{#if languageLabel(source.lang)}<span class="lang">{languageLabel(source.lang)}</span>{/if}
-        </button>
-      {/each}
-    </div>
   </div>
+
+  <ChipRow chips={sourceChips} onremove={clearSourceFilter} />
+
+  <BrowseDisplay />
 
   <div class="stage">
     <div class="results">
@@ -701,9 +733,9 @@
       {#if blocks.length === 0}
         <p class="empty">
           {#if chosen.size === 0}
-            No sources selected. Tap a source above — or All — and every one you tick answers on its own.
+            No sources selected. Open Filter above and tick the ones you want — each answers on its own.
           {:else if settings.searchPinnedOnly && chosen.size === pinned.length && pinned.every((source) => chosen.has(source.id))}
-            Searching your {pinned.length} pinned source{pinned.length === 1 ? "" : "s"}. Pin more, or tap All to widen it.
+            Searching your {pinned.length} pinned source{pinned.length === 1 ? "" : "s"}. Pin more, or open Filter to widen it.
           {:else}
             {chosen.size} of {sources.length} sources selected. Type a title and press Search.
           {/if}
@@ -751,6 +783,31 @@
     </div>
 
   </div>
+
+  <Sheet open={sourcesOpen} title="Sources" onclose={() => (sourcesOpen = false)}>
+    <div class="group">
+      <div class="quick">
+        <button class="chip" onclick={clearSourceFilter}>All</button>
+        <button class="chip" onclick={() => (chosen = new Set())}>None</button>
+        {#if pinned.length > 0}
+          <button class="chip" class:on={pinnedAll} onclick={() => (chosen = new Set(pinned.map((source) => source.id)))}>
+            Pinned ({pinned.length})
+          </button>
+        {/if}
+      </div>
+      <div class="sourcegrid">
+        {#each pickerOrder as source (source.id)}
+          <button class="chip" class:on={chosen.has(source.id)} aria-pressed={chosen.has(source.id)} onclick={() => toggle(source.id)}>
+            {source.name}{#if languageLabel(source.lang)}<span class="lang">{languageLabel(source.lang)}</span>{/if}
+          </button>
+        {/each}
+      </div>
+    </div>
+    <p class="picked">{chosen.size} of {sources.length} selected — every ticked source answers on its own.</p>
+    <div class="sheetfoot">
+      <button class="btn primary" onclick={() => (sourcesOpen = false)}>Done</button>
+    </div>
+  </Sheet>
 
   <SeriesActions
     series={actions && visibility.allows(actions) ? actions : null}
@@ -814,25 +871,57 @@
     min-height: 40px;
   }
 
-  .picker {
-    display: grid;
+  /* The same tools row the library uses: one fold, and the filter named on the door that opens it. */
+  .tools {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
     gap: var(--s2);
     margin-bottom: var(--s4);
   }
-
-  .label {
-    font-size: var(--t-xs);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    color: var(--text-3);
-  }
-
-  .chips {
+  .tools .fold {
     display: flex;
+    align-items: center;
+    gap: var(--s1);
+    min-height: 24px;
+    padding: 0 2px;
+    border: 0;
+    background: transparent;
+    color: var(--text-3);
+    font: inherit;
+    cursor: pointer;
+  }
+  .tools .fold:hover, .tools .fold:focus-visible { color: var(--text-1); }
+  .tools .fold .caret { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; transition: transform 140ms ease; }
+  .tools .fold .caret.up { transform: rotate(180deg); }
+  .tools .fold .summary { font-size: var(--t-sm); }
+  .tools.collapsed { margin-bottom: var(--s3); }
+  @media (prefers-reduced-motion: reduce) { .tools .fold .caret { transition: none; } }
+
+  /* The sheet: the quick answers first, then the ticked list, wrapped — not a scrolling box. */
+  .group { display: grid; gap: var(--s3); }
+  .quick { display: flex; flex-wrap: wrap; gap: var(--s2); }
+  .sourcegrid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
     gap: var(--s2);
-    flex-wrap: wrap;
-    max-height: 132px;
-    overflow-y: auto;
+  }
+  .sourcegrid .chip {
+    justify-content: flex-start;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  .picked {
+    margin: var(--s3) 0 0;
+    font-size: var(--t-sm);
+    color: var(--text-2);
+  }
+  .sheetfoot {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: var(--s4);
   }
 
   .lang {
