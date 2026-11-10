@@ -2,40 +2,64 @@
   import { settings } from "../state/settings.svelte";
   import { viewport } from "../lib/layout.svelte";
   import { browseMode, columnsFor, maxColumns } from "../lib/browse-display";
+
+  /**
+   * One display menu, expanded in place.
+   *
+   * It is a menu — a single control with a frame, a label and its options inside — but it never
+   * drops down: the options are laid out in the menu itself, so seeing what Rows looks like costs
+   * nothing and changing to it costs one click. The options are icons with their names under them,
+   * because a shelf's shape is recognised by its picture, not by three words that all sound alike.
+   */
   const mode = $derived(browseMode(settings.libraryView));
   const columns = $derived(columnsFor(settings.browseColumns, viewport.width, viewport.height));
   const ceiling = $derived(maxColumns(viewport.width, viewport.height));
+
+  const LAYOUTS = [
+    { id: "row" as const, label: "Rows", path: "M4 7h16M4 12h16M4 17h16" },
+    { id: "grid" as const, label: "Grid", path: "M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z" },
+    { id: "card" as const, label: "Cards", path: "M6 3h12v11H6zM6 17h12M6 20h8" },
+  ];
+
+  const TITLES = [
+    { id: "below" as const, label: "Below", path: "M4 4h16v10H4zM6 18h12" },
+    { id: "overlay" as const, label: "On cover", path: "M4 4h16v14H4zM7 14h10" },
+  ];
+
 </script>
 
-<!-- Every control here is a chip in the same row grammar as the layout buttons. A <select> and a
-     checkbox drew two unrelated boxes beside those chips and read as three different kinds of
-     control for one setting; a chip that stays pressed says the same thing and looks like its
-     neighbours. The helper sentence went with them — the slider and its "N across" output are the
-     explanation. Nothing is behind a menu: the three layouts are always visible side by side, and
-     the options that belong to the chosen one sit beside them. -->
-<div class="display" aria-label="Browse display">
-  <div class="modes" role="group" aria-label="Layout">
-    {#each ["row", "grid", "card"] as view}
-      <button class="chip" class:on={mode === view} aria-pressed={mode === view}
-        onclick={() => settings.set("libraryView", view as "row" | "grid" | "card")}>{view === "row" ? "Row" : view === "grid" ? "Grid" : "Card"}</button>
+<div class="menu" role="group" aria-label="Display">
+  <div class="seg" role="group" aria-label="Layout">
+    {#each LAYOUTS as item (item.id)}
+      <button
+        class="opt"
+        class:on={mode === item.id}
+        aria-pressed={mode === item.id}
+        title={`${item.label} layout`}
+        onclick={() => settings.set("libraryView", item.id)}
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d={item.path} /></svg>
+        <span>{item.label}</span>
+      </button>
     {/each}
-    {#if mode === "grid"}
-      <!--
-        Where the title goes is the one grid choice that changes how much book a phone shows: under
-        the cover is readable, on it is compact, and the reader picks per shelf rather than having
-        one opinion imposed on every screen.
-      -->
-      {#each [["below", "Title below"], ["overlay", "Title on cover"]] as pair}
-        <button class="chip" class:on={settings.browseTitle === pair[0]} aria-pressed={settings.browseTitle === pair[0]}
-          onclick={() => settings.set("browseTitle", pair[0] as "below" | "overlay")}>{pair[1]}</button>
-      {/each}
-      {#each [["compact", "Compact"], ["large", "Larger"]] as pair}
-        <button class="chip" class:on={settings.libraryDensity === pair[0]} aria-pressed={settings.libraryDensity === pair[0]}
-          onclick={() => settings.set("libraryDensity", pair[0] as "compact" | "large")}>{pair[1]}</button>
-      {/each}
-    {/if}
   </div>
+
   {#if mode === "grid"}
+    <span class="rule" aria-hidden="true"></span>
+    <div class="seg" role="group" aria-label="Title placement">
+      {#each TITLES as item (item.id)}
+        <button
+          class="opt"
+          class:on={settings.browseTitle === item.id}
+          aria-pressed={settings.browseTitle === item.id}
+          title={`Title ${item.label.toLowerCase()}`}
+          onclick={() => settings.set("browseTitle", item.id)}
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d={item.path} /></svg>
+          <span>{item.label}</span>
+        </button>
+      {/each}
+    </div>
     <label class="columns">
       <output>{columns} across</output>
       <input aria-label="Grid columns" type="range" min="2" max={ceiling} step="1" value={columns}
@@ -45,7 +69,8 @@
 </div>
 
 <style>
-  .display {
+  /* The frame is what makes it one menu rather than a scatter of buttons in the tools row. */
+  .menu {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
@@ -53,16 +78,66 @@
     min-width: 0;
     max-width: 100%;
     margin: 0 0 var(--s3);
+    padding: 4px;
+    border: 1px solid var(--line);
+    border-radius: var(--r2);
+    background: var(--surface-2);
   }
-  .modes { display: flex; flex-wrap: wrap; gap: var(--s1); min-width: 0; }
+
+  .seg {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px;
+    min-width: 0;
+  }
+
+  .rule {
+    width: 1px;
+    align-self: stretch;
+    min-height: 26px;
+    background: var(--line);
+  }
+
+  .opt {
+    display: grid;
+    justify-items: center;
+    gap: 1px;
+    min-width: 52px;
+    padding: 3px 6px;
+    border: 0;
+    border-radius: var(--r1);
+    background: transparent;
+    color: var(--text-3);
+    font: inherit;
+    cursor: pointer;
+  }
+
+  .opt svg {
+    width: 17px;
+    height: 17px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.6;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .opt span { font-size: 10px; line-height: 1.2; }
+
+  .opt:hover, .opt:focus-visible { color: var(--text-1); background: var(--surface); }
+
+  .opt.on { color: var(--accent, var(--text-1)); background: var(--surface); box-shadow: inset 0 0 0 1px var(--accent, var(--line)); }
+
   .columns {
     display: flex;
     align-items: center;
     gap: var(--s2);
+    margin-left: auto;
+    padding-right: 2px;
     min-width: 0;
     font-size: var(--t-sm);
     color: var(--text-2);
   }
   .columns output { min-width: 5.5ch; font-variant-numeric: tabular-nums; }
-  .columns input { width: 116px; min-width: 0; margin: 0; }
+  .columns input { width: 100px; min-width: 0; margin: 0; }
 </style>
