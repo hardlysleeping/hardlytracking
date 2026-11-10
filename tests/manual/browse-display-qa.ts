@@ -27,5 +27,5 @@ library.library = items;
 library.ready = true;
 categories.items = [{id:'qa-category',name:'Long fixture collection name',hidden:false,pinned:false,order:0}];
 let app;
-window.qa = {viewport,settings,store,library,items, async screen(name) {if(app) await unmount(app); app = mount(name==='Library'?Library:Search,{target:document.querySelector('#qa'),props:name==='Search'?{initial:'fixture'}:{}});}, persist(){const keys=['libraryView','browseColumns','browseDensity','browseHorizontal'];sessionStorage.setItem('browse-fixture-settings',JSON.stringify(Object.fromEntries(keys.map(k=>[k,settings[k]]))));}};
+window.qa = {viewport,settings,store,library,items, async screen(name) {if(app) await unmount(app); app = mount(name==='Library'?Library:Search,{target:document.querySelector('#qa'),props:name==='Search'?{initial:'fixture'}:{}});}, persist(){const keys=['libraryView','browseColumns','browseDensity'];sessionStorage.setItem('browse-fixture-settings',JSON.stringify(Object.fromEntries(keys.map(k=>[k,settings[k]]))));}};
 await window.qa.screen(new URLSearchParams(location.search).get('screen') || 'Library');

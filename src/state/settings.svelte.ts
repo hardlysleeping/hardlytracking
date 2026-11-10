@@ -60,7 +60,6 @@ export interface Prefs {
    */
   rowStyle: RowStyle;
   browseColumns: number;
-  browseHorizontal: boolean;
   /**
    * Where a grid tile's title goes: under the artwork, or on it.
    *
@@ -239,7 +238,6 @@ class Settings {
   libraryView = $state<LibraryView>("grid");
   rowStyle = $state<RowStyle>("line");
   browseColumns = $state(3);
-  browseHorizontal = $state(false);
   browseTitle = $state<"below" | "overlay">("below");
   coverSize = $state(132);
   libraryDensity = $state<DensityPreference>("auto");
@@ -318,7 +316,6 @@ class Settings {
     const legacyView = await read("libraryView", this.libraryView);
     this.libraryView = browseMode(legacyView);
     this.browseColumns = columnsFor(await read("browseColumns", this.browseColumns), 1280);
-    this.browseHorizontal = (await read("browseHorizontal", false)) === true;
     this.rowStyle = rowStyleOf(await read<unknown>("rowStyle", this.rowStyle));
     this.toolsCollapsed = (await read<boolean>("toolsCollapsed", false)) === true;
     const title = await read("browseTitle", this.browseTitle);

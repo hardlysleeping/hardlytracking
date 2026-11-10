@@ -732,7 +732,6 @@
               columns={settings.browseColumns}
     titlePlacement={settings.browseTitle}
     rowStyle={settings.rowStyle}
-              horizontal={settings.browseHorizontal}
               sizes={fileSizes}
               empty=""
               current={shown?.id ?? null}

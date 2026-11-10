@@ -37,7 +37,6 @@
     series: Series[];
     view?: "grid" | "compact" | "list" | "row" | "card";
     columns?: number;
-    horizontal?: boolean;
     sizes?: Map<string, number>;
     totals?: Map<string, number>;
     /** Minimum cover width in px; the column count follows from it. */
@@ -94,7 +93,6 @@
     series,
     view = "grid",
     columns,
-    horizontal = false,
     sizes = new Map(),
     totals = new Map(),
     cover = 132,
@@ -250,7 +248,7 @@
 {#if series.length === 0}
   <p class="empty">{empty}</p>
 {:else}
-  <div class="browse-rail" class:horizontal tabindex={horizontal ? 0 : undefined} role="region" aria-label={horizontal ? "Horizontally browsable titles" : undefined}>
+  <div class="browse-rail">
   <div class="set {mode}" class:overtitle={overlaid} class:compact={view === "compact"} class:explicit={columns !== undefined} class:row-line={mode === "row" && row === "line"} class:row-preview={mode === "row" && row === "preview"} class:row-table={mode === "row" && row === "table"} style:--columns={columnCount} style:--cover="{cover}px">
     {#each drawn as item (item.id)}
       {#if expanded !== null && expandAfter !== null && item.id === (expansionAnchor ?? expandAfter)}
@@ -380,11 +378,6 @@
 
 <style>
   .browse-rail { min-width:0; max-width:100%; }
-  .browse-rail.horizontal { overflow-x:auto; overscroll-behavior-x:contain; padding-bottom:8px; }
-  .browse-rail.horizontal .set { display:flex; flex-direction:row; gap:12px; }
-  .horizontal .set .tile { flex:0 0 min(75vw, 220px); }
-  .horizontal .set.row .tile { flex-basis:min(82vw, 380px); }
-  .horizontal .expand { flex:0 0 100%; }
   .set.explicit.grid { grid-template-columns:repeat(var(--columns), minmax(0, 1fr)); }
   /* A card is the "tell me about it" layout, not a page: tight padding, a smaller cover and two
      lines of description leave the information and drop the air around it. */

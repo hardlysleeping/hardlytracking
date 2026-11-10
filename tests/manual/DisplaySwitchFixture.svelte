@@ -32,7 +32,6 @@
     series={rows}
     {view}
     columns={settings.browseColumns}
-    horizontal={settings.browseHorizontal}
     rowStyle={settings.rowStyle}
     titlePlacement={settings.browseTitle}
     {unread}

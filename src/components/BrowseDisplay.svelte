@@ -4,7 +4,7 @@
   import { ROW_STYLES, browseMode, columnsFor, maxColumns } from "../lib/browse-display";
 
   /**
-   * The display controls: one door for the layout, one for sideways, and the column slider.
+   * The display controls: one door for the layout, and the column slider.
    *
    * Three layout buttons and two title buttons used to sit side by side with the slider — five
    * controls of three different widths for one question ("how does the shelf look?"), and a fourth
@@ -28,9 +28,6 @@
     { id: "below" as const, label: "Title below the cover", short: "Below", path: "M4 4h16v10H4zM6 18h12" },
     { id: "overlay" as const, label: "Title on the cover", short: "On cover", path: "M4 4h16v14H4zM7 14h10" },
   ];
-
-  /** Sideways: the shelf runs left to right. */
-  const SIDEWAYS = "M3 12h18M7 8l-4 4 4 4M17 8l4 4-4 4";
 
   const current = $derived(MODES.find((view) => view.id === mode) ?? MODES[1]);
   let open = $state(false);
@@ -63,20 +60,6 @@
 </script>
 
 <div class="display" aria-label="Browse display">
-  <!-- Sideways first and bare: it is the one control here that changes the shelf rather than the
-       tiles, and it is either on or off, so a word under it was a label for a state the pressed
-       glyph already shows. Far left keeps it out of the way of the layout door. -->
-  <button
-    class="chip icon"
-    class:on={settings.browseHorizontal}
-    aria-pressed={settings.browseHorizontal}
-    aria-label="Sideways: scroll the shelf horizontally"
-    title="Sideways: scroll the shelf horizontally"
-    onclick={() => settings.set("browseHorizontal", !settings.browseHorizontal)}
-  >
-    <svg viewBox="0 0 24 24" aria-hidden="true"><path d={SIDEWAYS} /></svg>
-  </button>
-
   <div class="picker" use:dismiss>
     <button
       class="chip door"
@@ -167,22 +150,6 @@
     max-width: 100%;
     margin: 0 0 var(--s3);
   }
-  .chip.icon {
-    padding: 5px;
-    width: 32px;
-    height: 32px;
-    justify-content: center;
-  }
-  .chip.icon svg {
-    width: 18px;
-    height: 18px;
-    fill: none;
-    stroke: currentColor;
-    stroke-width: 1.7;
-    stroke-linecap: round;
-    stroke-linejoin: round;
-  }
-
   /* The door: the current layout's own glyph, its name, and a caret. It reads as a control with a
      state rather than a button that opens something unknown. */
   .picker { position: relative; min-width: 0; }

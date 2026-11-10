@@ -1,5 +1,6 @@
 // The display menu: every layout reachable from every other, the row shapes switch and stick, the
-// sideways door is a bare glyph on the left, and Escape/outside-press closes the menu.
+// sideways control is gone and a stored "on" cannot bring it back, and Escape/outside-press closes
+// the menu.
 //
 //   PLAYWRIGHT_MODULE=/path/to/playwright/index.mjs node tests/manual/display-switch-browser.mjs
 import assert from "node:assert/strict";
@@ -50,16 +51,25 @@ try {
   }
   evidence.push({ check: "row shapes switch", shapes: ["line", "preview", "table"] });
 
-  // The sideways door: first control in the row, glyph only, no word.
+  // Sideways is removed, not hidden: no control offers it, and the layout door is the only button.
   await page.keyboard.press("Escape");
-  const controls = page.locator(".display > button, .display > .picker");
-  const first = controls.first();
-  assert.match((await first.getAttribute("aria-label")) ?? "", /^Sideways/, "sideways is the first control");
-  assert.equal((await first.innerText()).trim(), "", "and carries no label");
-  const sidewaysBox = await first.boundingBox();
-  const doorBox = await door().boundingBox();
-  assert.ok(sidewaysBox.x < doorBox.x, "aligned left of the layout door");
-  evidence.push({ check: "sideways is a bare glyph on the far left", x: Math.round(sidewaysBox.x) });
+  assert.equal(await page.getByRole("button", { name: /^Sideways/ }).count(), 0, "no sideways control");
+  assert.equal(await page.locator(".display > button").count(), 0, "the layout door is the only button left");
+  const railClass = (await page.locator(".browse-rail").getAttribute("class")) ?? "";
+  assert.doesNotMatch(railClass, /horizontal/, "the rail has no horizontal mode");
+
+  // A stored sideways-on from an older build must not leave the shelf sideways: nothing reads it now.
+  await page.evaluate(() => sessionStorage.setItem("display-fixture-prefs", JSON.stringify({ browseHorizontal: true })));
+  await page.reload();
+  await page.waitForSelector(".set .tile");
+  const restored = (await page.locator(".browse-rail").getAttribute("class")) ?? "";
+  assert.doesNotMatch(restored, /horizontal/, "a stored sideways-on revived the rail");
+  const display = await page.locator(".set").evaluate((node) => getComputedStyle(node).display);
+  assert.notEqual(display, "flex", `a stored sideways-on flexed the shelf (${display})`);
+  evidence.push({ check: "sideways removed and a stored on ignored", rail: restored, display });
+  await page.evaluate(() => sessionStorage.removeItem("display-fixture-prefs"));
+  await page.reload();
+  await page.waitForSelector(".set .tile");
 
   // Escape closes the menu, and a press outside closes it.
   await door().click();
@@ -68,7 +78,9 @@ try {
   await page.waitForTimeout(80);
   assert.equal(await page.locator(".menu").count(), 0, "Escape closes the menu");
   await door().click();
-  await page.locator(".set").click({ position: { x: 4, y: 4 } });
+  // Somewhere the menu cannot cover: with the sideways glyph gone the door sits at the far left,
+  // so a press at the grid's top-left corner lands on the menu itself.
+  await page.mouse.click(220, 900);
   await page.waitForTimeout(80);
   assert.equal(await page.locator(".menu").count(), 0, "a press elsewhere closes the menu");
   evidence.push({ check: "Escape and outside press close the menu" });

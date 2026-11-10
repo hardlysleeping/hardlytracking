@@ -952,7 +952,6 @@
             columns={settings.browseColumns}
     titlePlacement={settings.browseTitle}
     rowStyle={settings.rowStyle}
-            horizontal={settings.browseHorizontal}
             sizes={fileSizes}
             totals={counts.total}
             empty={emptyMessage}

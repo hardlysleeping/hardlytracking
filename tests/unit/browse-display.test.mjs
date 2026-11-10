@@ -30,15 +30,22 @@ test('only actual finite known byte counts produce sizes', () => {
 test('collection restore cannot override global display and both screens consume it', () => {
   const library = readFileSync(new URL('../../src/views/Library.svelte',import.meta.url),'utf8');
   const restore = library.slice(library.indexOf('async function restoreView('),library.indexOf('  $effect(() =>',library.indexOf('async function restoreView(')));
-  assert.doesNotMatch(restore,/settings\.set\("(?:libraryView|coverSize|browseColumns|browseHorizontal)"/);
+  assert.doesNotMatch(restore,/settings\.set\("(?:libraryView|coverSize|browseColumns)"/);
   for (const view of ['Library','Search']) {
     const source = readFileSync(new URL(`../../src/views/${view}.svelte`,import.meta.url),'utf8');
     assert.match(source,/<BrowseDisplay\s*\/>/);
-    for (const key of ['libraryView','browseColumns','browseHorizontal']) assert.ok(source.includes(`settings.${key}`));
+    for (const key of ['libraryView','browseColumns']) assert.ok(source.includes(`settings.${key}`));
   }
   const settings = readFileSync(new URL('../../src/state/settings.svelte.ts',import.meta.url),'utf8');
-  assert.match(settings,/browseHorizontal = \$state\(false\)/);
-  for (const key of ['browseColumns','browseHorizontal']) assert.ok(settings.includes(`read("${key}"`));
+  for (const key of ['browseColumns']) assert.ok(settings.includes(`read("${key}"`));
+  // Sideways was removed as a feature, not hidden: a stored `true` must have nothing left to read it.
+  assert.doesNotMatch(settings,/browseHorizontal/);
+  const grid = readFileSync(new URL('../../src/components/SeriesGrid.svelte',import.meta.url),'utf8');
+  assert.doesNotMatch(grid,/horizontal/i);
+  for (const file of ['Library','Search','Source']) {
+    const source = readFileSync(new URL(`../../src/views/${file}.svelte`,import.meta.url),'utf8');
+    assert.doesNotMatch(source,/horizontal=\{settings\./);
+  }
 });
 
 test('the grid has one density, so no dead Compact/Larger pair comes back', () => {

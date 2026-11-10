@@ -402,7 +402,6 @@
     columns={settings.browseColumns}
     titlePlacement={settings.browseTitle}
     rowStyle={settings.rowStyle}
-    horizontal={settings.browseHorizontal}
     empty={mode === "search" ? "This source found nothing." : "This source returned nothing."}
     expandAfter={visibleExpanded}
     expanded={issuePanel}
