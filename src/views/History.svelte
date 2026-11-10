@@ -21,6 +21,7 @@
   import Cover from "../components/Cover.svelte";
   import PageMenu from "../components/PageMenu.svelte";
   import { go, pathTo } from "../lib/nav";
+  import type { ProviderKind, Series } from "../api/source";
   import { chapterLabel, seriesLabel } from "../lib/titles";
   import { settings } from "../state/settings.svelte";
   import { viewport } from "../lib/layout.svelte";
@@ -33,6 +34,8 @@
   interface Row {
     seriesId: string;
     chapterId: string;
+    /** The provider the id names, so "add to library" does not need the source to answer. */
+    provider: ProviderKind;
     /** The title's categories, so a hidden category can take its history with it. */
     categoryIds: string[];
     at: number;
@@ -117,17 +120,55 @@
    * `dalvik` is an implementation word; the panel says "Black Clover from <extension name>" or, when
    * the extension is not installed any more, "an extension you no longer have".
    */
+  /** The provider an id names. Every id we write starts with one of these words. */
+  function providerOf(seriesId: string): ProviderKind {
+    const prefix = seriesId.split(":")[0];
+    const kinds: ProviderKind[] = ["mihon", "dalvik", "htserver", "komga", "local", "archive", "webdav"];
+    return kinds.find((kind) => kind === prefix) ?? "archive";
+  }
+
   function sourceLabel(seriesId: string): string {
-    const [provider, ...rest] = seriesId.split(":");
-    if (provider === "dalvik") {
-      const sourceId = rest.join(":").split(":")[0];
-      const match = library.sources.find((source) => source.id === `dalvik:src:${sourceId}` || source.id.endsWith(`:${sourceId}`));
-      return match?.name ?? "an extension you no longer have";
+    const provider = providerOf(seriesId);
+    // The installed source knows its own name, and a title read from a source that is still here
+    // should say that name even when the id alone does not spell it (an extension, a Komga library).
+    const installed =
+      library.sources.find((source) => seriesId.startsWith(`${source.id}:`)) ??
+      library.sources.find((source) => source.provider === provider);
+    if (installed !== undefined) return installed.name;
+    // Not installed any more: the shipped names, then the word the id uses — never "Unknown".
+    const names: Record<ProviderKind, string> = {
+      archive: "Internet Archive",
+      local: "This device",
+      komga: "Komga",
+      mihon: "Suwayomi",
+      webdav: "WebDAV",
+      htserver: "HardlyTracking Server",
+      dalvik: "an extension you no longer have",
+    };
+    return names[provider];
+  }
+
+  /** Titles already in the library, so the button knows which way it goes. */
+  const saved = $derived(new Set(library.library.map((row) => row.id)));
+
+  function openTitle(row: Row): void {
+    go(pathTo("series", row.seriesId));
+  }
+
+  async function toggleSaved(row: Row): Promise<void> {
+    if (saved.has(row.seriesId)) {
+      await library.unsave(row.seriesId);
+      return;
     }
-    if (provider === "mihon") return "Suwayomi";
-    if (provider === "komga") return "Komga";
-    if (provider === "local") return "This device";
-    return "Unknown source";
+    // What the row already knows is the whole record: id, provider, title, cover. Chapters are not
+    // needed to file a title, and asking a source that may be offline would make this button fail.
+    const series: Series = {
+      id: row.seriesId,
+      provider: row.provider,
+      title: row.title,
+      ...(row.cover === undefined ? {} : { cover: row.cover }),
+    };
+    await library.save(series);
   }
 
   /** A row opens the reader everywhere except in the split, where it fills the pane. */
@@ -168,6 +209,7 @@
       rows = history.map((row) => ({
         seriesId: row.seriesId,
         chapterId: row.chapterId,
+        provider: providerOf(row.seriesId),
         categoryIds: byId.get(row.seriesId)?.categoryIds ?? [],
         at: row.at,
         title: seriesLabel(byId.get(row.seriesId)?.title),
@@ -383,6 +425,13 @@
         <button class="btn primary" onclick={() => go(pathTo("read", pickedRow.seriesId, pickedRow.chapterId))}>
           Continue reading
         </button>
+        <!-- The other two things a history row is for: go to the title, or file it. -->
+        <div class="dacts">
+          <button class="btn" onclick={() => openTitle(pickedRow)}>Open title</button>
+          <button class="btn ghost" onclick={() => void toggleSaved(pickedRow)}>
+            {saved.has(pickedRow.seriesId) ? "Remove from library" : "Add to library"}
+          </button>
+        </div>
       </aside>
     {/if}
     </div>
@@ -473,6 +522,14 @@
     color: var(--text-1);
   }
 
+  .dacts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--s2);
+  }
+
+  .dacts .btn { flex: 1 1 auto; }
+
   .squeeze {
     margin: 0 0 var(--s3);
     font-size: var(--t-xs);
@@ -543,7 +600,7 @@
   }
 
   .group {
-    margin-bottom: var(--s5);
+    margin-bottom: var(--s4);
   }
 
   h2 {
@@ -565,9 +622,15 @@
   .row {
     display: flex;
     align-items: center;
-    gap: var(--s3);
-    padding: var(--s2);
+    gap: var(--s2);
+    padding: 4px var(--s2);
     border-radius: var(--r2);
+  }
+
+  /* The row is a shortcut, not a shelf: the cover is a landmark, and 34 px is enough to recognise
+     one. The text keeps the three facts it already carried. */
+  .row :global(.cover.row) {
+    width: 34px;
   }
 
   .row:hover {
@@ -582,7 +645,7 @@
   }
 
   .t {
-    font-size: var(--t-md);
+    font-size: var(--t-sm);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;

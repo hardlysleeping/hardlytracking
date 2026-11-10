@@ -20,10 +20,7 @@
   import type { Chapter, Series, Source } from "../api/source";
   import SeriesGrid from "../components/SeriesGrid.svelte";
   import BrowseDisplay from "../components/BrowseDisplay.svelte";
-  import ChipRow from "../components/ChipRow.svelte";
-  import Sheet from "../components/Sheet.svelte";
-  import type { FilterChip } from "../lib/library/filter";
-  import { downloads } from "../state/downloads.svelte";
+    import { downloads } from "../state/downloads.svelte";
   import SeriesActions from "../components/SeriesActions.svelte";
   import Cover from "../components/Cover.svelte";
 
@@ -125,21 +122,8 @@
   /** What the selector draws: the user's pinned sources first, then the rest by name. */
   const pickerOrder = $derived(orderForPicker(sources, settings.pinnedSources));
 
-  /**
-   * The source filter as the library draws its filters: one door in the tools row, the state it is
-   * in named on the door, and a chip you can take back. The chip cloud itself lives in a sheet —
-   * sixty sources under the field made the page about the picker instead of the results.
-   */
-  let sourcesOpen = $state(false);
-
+  /** Is the current selection exactly the pinned set? It decides whether the Pinned chip reads as on. */
   const pinnedAll = $derived(pinned.length > 0 && chosen.size === pinned.length && pinned.every((source) => chosen.has(source.id)));
-
-  const sourceChips = $derived.by<FilterChip[]>(() => {
-    if (sources.length === 0 || chosen.size === sources.length) return [];
-    if (chosen.size === 0) return [{ key: "sources", label: "No sources" }];
-    if (pinnedAll) return [{ key: "sources", label: `Pinned (${pinned.length})` }];
-    return [{ key: "sources", label: `${chosen.size} of ${sources.length} sources` }];
-  });
 
   function clearSourceFilter(): void {
     chosen = new Set(sources.map((source) => source.id));
@@ -696,31 +680,30 @@
   </form>
   </div>
 
-  <div class="tools" class:collapsed={settings.toolsCollapsed}>
-    <!--
-      The same fold the library uses: one handle for the questions a reader asks in bursts, and a
-      summary on the handle so a narrowed search is still readable with the row away.
-    -->
-    <button
-      class="fold"
-      aria-expanded={!settings.toolsCollapsed}
-      aria-label={settings.toolsCollapsed ? "Show the source filter" : "Hide the source filter"}
-      title={settings.toolsCollapsed ? "Show the source filter" : "Hide the source filter"}
-      onclick={() => settings.set("toolsCollapsed", !settings.toolsCollapsed)}
-    >
-      <svg class="caret" class:up={!settings.toolsCollapsed} viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6" /></svg>
-      {#if settings.toolsCollapsed}
-        <span class="summary">Filter · {chosen.size} of {sources.length} sources</span>
+  <!--
+    The source selector, expanded where it stands. There is no door and no menu to open: every
+    source is a visible option, the quick answers sit on the same line as the count, and the
+    results simply begin below it.
+  -->
+  <div class="selector" id="search-sources">
+    <div class="selectrow">
+      <span class="label">Sources · {chosen.size} of {sources.length}</span>
+      <button class="chip" onclick={clearSourceFilter}>All</button>
+      <button class="chip" onclick={() => (chosen = new Set())}>None</button>
+      {#if pinned.length > 0}
+        <button class="chip" class:on={pinnedAll} onclick={() => (chosen = new Set(pinned.map((source) => source.id)))}>
+          Pinned ({pinned.length})
+        </button>
       {/if}
-    </button>
-    {#if !settings.toolsCollapsed}
-      <button class="btn ghost" onclick={() => (sourcesOpen = true)}>
-        Filter · {chosen.size} of {sources.length}
-      </button>
-    {/if}
+    </div>
+    <div class="sourcegrid">
+      {#each pickerOrder as source (source.id)}
+        <button class="chip" class:on={chosen.has(source.id)} aria-pressed={chosen.has(source.id)} onclick={() => toggle(source.id)}>
+          {source.name}{#if languageLabel(source.lang)}<span class="lang">{languageLabel(source.lang)}</span>{/if}
+        </button>
+      {/each}
+    </div>
   </div>
-
-  <ChipRow chips={sourceChips} onremove={clearSourceFilter} />
 
   <BrowseDisplay />
 
@@ -784,31 +767,6 @@
 
   </div>
 
-  <Sheet open={sourcesOpen} title="Sources" onclose={() => (sourcesOpen = false)}>
-    <div class="group">
-      <div class="quick">
-        <button class="chip" onclick={clearSourceFilter}>All</button>
-        <button class="chip" onclick={() => (chosen = new Set())}>None</button>
-        {#if pinned.length > 0}
-          <button class="chip" class:on={pinnedAll} onclick={() => (chosen = new Set(pinned.map((source) => source.id)))}>
-            Pinned ({pinned.length})
-          </button>
-        {/if}
-      </div>
-      <div class="sourcegrid">
-        {#each pickerOrder as source (source.id)}
-          <button class="chip" class:on={chosen.has(source.id)} aria-pressed={chosen.has(source.id)} onclick={() => toggle(source.id)}>
-            {source.name}{#if languageLabel(source.lang)}<span class="lang">{languageLabel(source.lang)}</span>{/if}
-          </button>
-        {/each}
-      </div>
-    </div>
-    <p class="picked">{chosen.size} of {sources.length} selected — every ticked source answers on its own.</p>
-    <div class="sheetfoot">
-      <button class="btn primary" onclick={() => (sourcesOpen = false)}>Done</button>
-    </div>
-  </Sheet>
-
   <SeriesActions
     series={actions && visibility.allows(actions) ? actions : null}
     onclose={() => (actions = null)}
@@ -871,36 +829,30 @@
     min-height: 40px;
   }
 
-  /* The same tools row the library uses: one fold, and the filter named on the door that opens it. */
-  .tools {
+  /* The selector is expanded, so it needs no chrome of its own beyond one quiet border: the chips
+     are the content, not a control that hides them. */
+  .selector {
+    display: grid;
+    gap: var(--s2);
+    margin: 0 0 var(--s4);
+    padding: var(--s3);
+    border: 1px solid var(--line);
+    border-radius: var(--r2);
+    background: var(--surface-2);
+  }
+  .selectrow {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
     gap: var(--s2);
-    margin-bottom: var(--s4);
   }
-  .tools .fold {
-    display: flex;
-    align-items: center;
-    gap: var(--s1);
-    min-height: 24px;
-    padding: 0 2px;
-    border: 0;
-    background: transparent;
+  .label {
+    margin-right: auto;
+    font-size: var(--t-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
     color: var(--text-3);
-    font: inherit;
-    cursor: pointer;
   }
-  .tools .fold:hover, .tools .fold:focus-visible { color: var(--text-1); }
-  .tools .fold .caret { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; transition: transform 140ms ease; }
-  .tools .fold .caret.up { transform: rotate(180deg); }
-  .tools .fold .summary { font-size: var(--t-sm); }
-  .tools.collapsed { margin-bottom: var(--s3); }
-  @media (prefers-reduced-motion: reduce) { .tools .fold .caret { transition: none; } }
-
-  /* The sheet: the quick answers first, then the ticked list, wrapped — not a scrolling box. */
-  .group { display: grid; gap: var(--s3); }
-  .quick { display: flex; flex-wrap: wrap; gap: var(--s2); }
   .sourcegrid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
@@ -912,29 +864,6 @@
     overflow: hidden;
     white-space: nowrap;
     text-overflow: ellipsis;
-  }
-  .picked {
-    margin: var(--s3) 0 0;
-    font-size: var(--t-sm);
-    color: var(--text-2);
-  }
-  .sheetfoot {
-    display: flex;
-    justify-content: flex-end;
-    margin-top: var(--s4);
-  }
-
-  .lang {
-    margin-left: 5px;
-    font-size: 10px;
-    text-transform: uppercase;
-    color: var(--text-3);
-  }
-
-  .summary {
-    margin: 0 0 var(--s4);
-    font-size: var(--t-sm);
-    color: var(--text-2);
   }
 
   .notice {
