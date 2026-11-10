@@ -132,6 +132,20 @@
     });
   });
 
+  async function exportToMihon(): Promise<void> {
+    downloadsNote = "Writing downloaded chapters…";
+    try {
+      const outcome = await library.exportToMihonDownloads();
+      const parts: string[] = [];
+      if (outcome.written > 0) parts.push(`${outcome.written} chapters written to ${outcome.folder}`);
+      if (outcome.skipped > 0) parts.push(`${outcome.skipped} skipped (nothing downloaded, or no matching source installed)`);
+      downloadsNote = parts.length === 0 ? "Nothing downloaded to send yet" : parts.join(" · ");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      downloadsNote = /no folder|cancel/i.test(message) ? null : message;
+    }
+  }
+
   async function importDownloads(): Promise<void> {
     downloadsNote = "Reading the download folder…";
     try {
@@ -1125,6 +1139,7 @@
   onaddfiles={() => adders?.pickFiles()}
   onaddfolder={() => adders?.pickFolder()}
   onimportdownloads={canImportDownloads ? () => void importDownloads() : null}
+  onexporttomihon={canImportDownloads ? () => void exportToMihon() : null}
   ondrive={() => (driveOpen = true)}
   {stats}
 />

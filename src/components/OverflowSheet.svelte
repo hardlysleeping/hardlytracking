@@ -31,10 +31,12 @@
     onaddfolder: () => void;
     /** Index another app's download folder in place — hidden on a build that cannot read one. */
     onimportdownloads?: (() => void) | null;
+    /** Write our downloaded chapters back into that same folder. */
+    onexporttomihon?: (() => void) | null;
     ondrive: () => void;
     stats: LibraryStats;
   }
-  let { open, onclose, onrefresh, onselect, oncategories, onsettings, onaddfiles, onaddfolder, onimportdownloads = null, ondrive, stats }: Props = $props();
+  let { open, onclose, onrefresh, onselect, oncategories, onsettings, onaddfiles, onaddfolder, onimportdownloads = null, onexporttomihon = null, ondrive, stats }: Props = $props();
 
   let page = $state<"menu" | "stats">("menu");
 
@@ -61,6 +63,9 @@
         <button class="menu-item" onclick={() => run(onaddfolder)}><span>Add folder…</span></button>
         {#if onimportdownloads !== null}
           <button class="menu-item" onclick={() => run(() => onimportdownloads?.())}><span>Import Mihon downloads…</span></button>
+        {/if}
+        {#if onexporttomihon !== null}
+          <button class="menu-item" onclick={() => run(() => onexporttomihon?.())}><span>Send downloads to Mihon…</span></button>
         {/if}
         <button class="menu-item" onclick={() => run(ondrive)}><span>From drive…</span></button>
       </div>

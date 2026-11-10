@@ -65,7 +65,11 @@ public class DownloadsFolderPlugin extends Plugin {
     @PluginMethod
     public void pick(PluginCall call) {
         Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
-        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+        // Write as well as read: reading is the import, writing is a chapter exported back so Mihon
+        // sees it. Both are inside the folder the user picks here and nowhere else.
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
+            | Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+            | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
         startActivityForResult(call, intent, "picked");
     }
 
@@ -78,7 +82,10 @@ public class DownloadsFolderPlugin extends Plugin {
         }
         Uri uri = result.getData().getData();
         try {
-            getContext().getContentResolver().takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            getContext().getContentResolver().takePersistableUriPermission(
+                uri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+            );
         } catch (SecurityException ignored) {
             // Some providers hand back a grant that cannot be persisted; the tree still works now.
         }
@@ -117,36 +124,79 @@ public class DownloadsFolderPlugin extends Plugin {
         for (DocumentFile entry : root.listFiles()) {
             if (!entry.isDirectory() || !entry.canRead()) continue;
             if (isIgnored(entry.getName())) continue;
-            JSObject row = new JSObject();
-            row.put("title", entry.getName() == null ? "" : entry.getName());
-            row.put("path", entry.getUri().toString());
-            JSArray chapters = new JSArray();
-            for (DocumentFile child : entry.listFiles()) {
-                if (!child.canRead()) continue;
-                String name = child.getName();
-                if (name == null || isIgnored(name)) continue;
-                boolean folder = child.isDirectory();
-                String ext = extensionOf(name);
-                if (!folder && !isChapterFile(ext)) continue;
-                if (folder && isEmptyFolder(child)) continue;
-                JSObject chapter = new JSObject();
-                chapter.put("name", folder ? name : stripExtension(name));
-                chapter.put("path", child.getUri().toString());
-                chapter.put("kind", folder ? "folder" : "file");
-                if (!folder) {
-                    chapter.put("ext", ext);
-                    chapter.put("bytes", child.length());
-                }
-                chapters.put(chapter);
+            // Mihon nests one level deeper than it looks: <root>/<source>/<manga>/<chapter>. The
+            // tree is read by shape rather than by counting slashes, because the folder the user
+            // picks may be the root, one source, or one manga — all three should work.
+            if (isMangaDir(entry)) {
+                series.put(seriesRow(entry, null));
+                continue;
             }
-            if (chapters.length() == 0) continue;
-            row.put("chapters", chapters);
-            series.put(row);
+            for (DocumentFile manga : entry.listFiles()) {
+                if (!manga.isDirectory() || !manga.canRead() || isIgnored(manga.getName())) continue;
+                if (!isMangaDir(manga)) continue;
+                series.put(seriesRow(manga, entry.getName()));
+            }
         }
         JSObject answer = new JSObject();
         answer.put("folder", describe(root));
         answer.put("series", series);
         call.resolve(answer);
+    }
+
+    /** One manga folder: its title, the source folder it sits in, and its chapters. */
+    private JSObject seriesRow(DocumentFile folder, String source) {
+        JSObject row = new JSObject();
+        row.put("title", folder.getName() == null ? "" : folder.getName());
+        row.put("path", folder.getUri().toString());
+        if (source != null) row.put("source", source);
+        JSArray chapters = new JSArray();
+        for (DocumentFile child : folder.listFiles()) {
+            if (!child.canRead()) continue;
+            String name = child.getName();
+            if (name == null || isIgnored(name)) continue;
+            boolean isFolder = child.isDirectory();
+            String ext = extensionOf(name);
+            if (!isFolder && !isChapterFile(ext)) continue;
+            if (isFolder && isEmptyFolder(child)) continue;
+            JSObject chapter = new JSObject();
+            chapter.put("name", isFolder ? name : stripExtension(name));
+            chapter.put("path", child.getUri().toString());
+            chapter.put("kind", isFolder ? "folder" : "file");
+            if (!isFolder) {
+                chapter.put("ext", ext);
+                chapter.put("bytes", child.length());
+            }
+            chapters.put(chapter);
+        }
+        row.put("chapters", chapters);
+        return row;
+    }
+
+    /**
+     * Does this folder hold chapters, rather than holding manga folders?
+     *
+     * A chapter is a folder of images or an archive/PDF file, so one look at the children settles it.
+     * That is what lets the scan accept the root, one source folder, or one manga folder as the pick.
+     */
+    private static boolean isMangaDir(DocumentFile folder) {
+        for (DocumentFile child : folder.listFiles()) {
+            String name = child.getName();
+            if (name == null || isIgnored(name)) continue;
+            if (child.isFile()) {
+                if (isChapterFile(extensionOf(name))) return true;
+                continue;
+            }
+            if (child.isDirectory() && hasImage(child)) return true;
+        }
+        return false;
+    }
+
+    private static boolean hasImage(DocumentFile folder) {
+        for (DocumentFile child : folder.listFiles()) {
+            String name = child.getName();
+            if (name != null && child.isFile() && isImage(extensionOf(name))) return true;
+        }
+        return false;
     }
 
     /** One chapter folder's page documents, in name order — the folder's own listing, no copy. */
@@ -173,6 +223,77 @@ public class DownloadsFolderPlugin extends Plugin {
         JSObject answer = new JSObject();
         answer.put("pages", pages);
         call.resolve(answer);
+    }
+
+    /**
+     * Write one chapter's CBZ into the tree, making the folders Mihon expects on the way.
+     *
+     * `segments` is the path below the chosen folder (`[source, manga, chapter.cbz]`), already
+     * named by the caller with Mihon's own rules. Creating a directory that exists is not an error —
+     * a second export of the same title must not fail on the folder it made the first time.
+     *
+     * This is the only method here that writes, and it writes *inside the folder the user granted*.
+     * Nothing outside it, and nothing deleted.
+     */
+    @PluginMethod
+    public void write(PluginCall call) {
+        DocumentFile root = root();
+        if (root == null) {
+            call.reject("no download folder has been chosen");
+            return;
+        }
+        JSArray segments = call.getArray("segments");
+        String base64 = call.getString("base64");
+        if (segments == null || segments.length() == 0 || base64 == null) {
+            call.reject("nothing to write");
+            return;
+        }
+        try {
+            DocumentFile folder = root;
+            int last = segments.length() - 1;
+            for (int index = 0; index < last; index += 1) {
+                String name = segments.getString(index);
+                DocumentFile next = folder.findFile(name);
+                if (next == null) next = folder.createDirectory(name);
+                if (next == null || !next.isDirectory()) {
+                    call.reject("could not create " + name + " in " + folder.getName());
+                    return;
+                }
+                folder = next;
+            }
+            String fileName = segments.getString(last);
+            DocumentFile existing = folder.findFile(fileName);
+            if (existing != null) existing.delete();
+            DocumentFile target = folder.createFile(mimeOfName(fileName), fileName);
+            if (target == null) {
+                call.reject("could not create " + fileName);
+                return;
+            }
+            byte[] bytes = Base64.decode(base64, Base64.DEFAULT);
+            try (java.io.OutputStream out = getContext().getContentResolver().openOutputStream(target.getUri(), "wt")) {
+                if (out == null) {
+                    call.reject("could not open " + fileName + " for writing");
+                    return;
+                }
+                out.write(bytes);
+                out.flush();
+            }
+            JSObject answer = new JSObject();
+            answer.put("path", target.getUri().toString());
+            answer.put("bytes", bytes.length);
+            call.resolve(answer);
+        } catch (Exception error) {
+            call.reject("could not write " + segments + ": " + error.getMessage());
+        }
+    }
+
+    /** The MIME type a DownloadsProvider entry needs before it will create the document. */
+    private static String mimeOfName(String name) {
+        String ext = extensionOf(name);
+        if (ext.equals("cbz") || ext.equals("zip")) return "application/zip";
+        if (ext.equals("cbr")) return "application/x-cbr";
+        if (ext.equals("pdf")) return "application/pdf";
+        return "application/octet-stream";
     }
 
     /** One document's bytes, base64 — a page, or a chapter's CBZ. */

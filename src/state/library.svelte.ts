@@ -14,12 +14,15 @@ import { isPinnedRepo } from "../lib/extensions/pinned-repo";
 import { downloadPortableSource } from "../lib/extensions/portable-install";
 import { listDeviceExtensions, readDeviceExtensionApk } from "../lib/extensions/device";
 import {
+  downloadsWriter,
   importDownloads,
   pickDownloadsFolder,
   savedDownloadsFolder,
   scanDownloadsFolder,
   type DownloadsImportResult,
 } from "../lib/files/mihon-downloads";
+import { exportChapter } from "../lib/files/mihon-export";
+import { splitSeriesId } from "../lib/backup/export";
 import type { PortableManifest } from "../lib/extensions/portable";
 import { apiUrl, remoteHost } from "../lib/host";
 import type { ExtensionEntry } from "../lib/extensions/index";
@@ -717,6 +720,51 @@ class LibraryState {
     const result = await importDownloads(this.profile.store, scan);
     if (result.series > 0) await this.refreshLibrary();
     return { result, folder: folder.name };
+  }
+
+  /**
+   * Write downloaded chapters *back out* into Mihon's download folder, as `.cbz` in its own layout.
+   *
+   * Only chapters whose pages we actually hold are written: an export of nothing is a folder of empty
+   * archives. A title's source name comes from the installed extension, because Mihon's top folder is
+   * the source's *name*, not its id — with no source installed the title is skipped and counted.
+   *
+   * This is the half that needs Mihon's cooperation to be useful: its "downloaded?" check reads the
+   * directory listing, so a matching name appears there, and a chapter Mihon has never heard of does
+   * not.
+   */
+  async exportToMihonDownloads(): Promise<{ written: number; skipped: number; folder: string }> {
+    if (this.profile === null) throw new Error(this.notOpenMessage);
+    const store = this.profile.store;
+    const saved = await savedDownloadsFolder();
+    const folder = saved ?? (await pickDownloadsFolder());
+    if (folder === null) throw new Error("no folder was chosen");
+    const writer = await downloadsWriter();
+    let written = 0;
+    let skipped = 0;
+    for (const series of await store.listSeries()) {
+      if (series.provider !== "mihon" && series.provider !== "dalvik") continue;
+      const { sourceId } = splitSeriesId(series.id);
+      const source = this.sources.find((row) => row.id === `dalvik:src:${sourceId}` || row.id === `mihon:src:${sourceId}`);
+      if (source === undefined) {
+        skipped += 1;
+        continue;
+      }
+      for (const chapter of await store.listChapters(series.id)) {
+        const wrote = await exportChapter(
+          store,
+          chapter.id,
+          { seriesTitle: series.title, sourceName: source.name, chapterName: chapter.name },
+          writer,
+        );
+        if (wrote === null) {
+          skipped += 1;
+          continue;
+        }
+        written += 1;
+      }
+    }
+    return { written, skipped, folder: folder.name };
   }
 
   async refreshLibrary(): Promise<void> {

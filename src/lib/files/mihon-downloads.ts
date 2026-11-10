@@ -23,6 +23,8 @@ export interface DownloadsFolderBridge {
   scan(): Promise<MihonScanAnswer>;
   chapter(options: { path: string }): Promise<{ pages: Array<{ name: string; path: string }> }>;
   file(options: { path: string }): Promise<{ base64: string }>;
+  /** The one write: a chapter's CBZ, inside the folder the user granted. */
+  write(options: { segments: string[]; base64: string }): Promise<{ path: string; bytes: number }>;
 }
 
 /** The chosen root, as the shell describes it. */
@@ -432,6 +434,15 @@ export async function importDownloads(
   }
   options.onProgress?.({ title: "", done, total: scan.series.length });
   return result;
+}
+
+/** The writer an export uses: the same bridge, narrowed to the one call that writes. */
+export async function downloadsWriter(
+  load: () => Promise<DownloadsFolderBridge | null> = loadBridge,
+): Promise<{ write: (options: { segments: string[]; base64: string }) => Promise<{ path: string; bytes: number }> }> {
+  const bridge = await load();
+  if (bridge === null) throw new Error("this build cannot write into another app's downloads");
+  return { write: (options) => bridge.write(options) };
 }
 
 /** A file chapter's bytes (a CBZ), for the archive reader. */
