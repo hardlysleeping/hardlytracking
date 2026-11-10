@@ -76,6 +76,9 @@
     align-items: center;
     gap: var(--s2);
     min-width: 0;
+    /* The frame is the menu's own outline, so it stops at the last option instead of drawing a
+       border across the rest of the page. */
+    width: fit-content;
     max-width: 100%;
     margin: 0 0 var(--s3);
     padding: 4px;
