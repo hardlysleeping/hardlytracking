@@ -12,6 +12,7 @@ import { installOnHtServer, setHtServerExtensionEnabled, uninstallOnHtServer } f
 import { downloadApk, loadRepository, type Repository } from "../lib/extensions/repository";
 import { isPinnedRepo } from "../lib/extensions/pinned-repo";
 import { downloadPortableSource } from "../lib/extensions/portable-install";
+import { listDeviceExtensions, readDeviceExtensionApk } from "../lib/extensions/device";
 import type { PortableManifest } from "../lib/extensions/portable";
 import { apiUrl, remoteHost } from "../lib/host";
 import type { ExtensionEntry } from "../lib/extensions/index";
@@ -631,6 +632,44 @@ class LibraryState {
     this.extensions = await this.profile.listExtensions();
     await this.loadSources();
     return installed;
+  }
+
+  /**
+   * Install the extensions this device already has, from another Mihon-family app.
+   *
+   * The APKs are on disk already — Mihon installed them — so this is a read and a re-install into
+   * our runtime rather than a download: same package, same version, no repository needed. Anything
+   * already installed *here* is skipped (a repair is the update path's job, not this one), and one
+   * unreadable APK must not stop the rest, so failures are collected rather than thrown.
+   */
+  async importDeviceExtensions(): Promise<{ installed: string[]; skipped: number; failed: string[] }> {
+    if (this.profile === null) throw new Error(this.notOpenMessage);
+    const profile = this.profile;
+    const found = await listDeviceExtensions();
+    const present = new Set(this.extensions.map((row) => row.packageId));
+    const installed: string[] = [];
+    const failed: string[] = [];
+    let skipped = 0;
+    for (const row of found) {
+      if (present.has(row.packageId)) {
+        skipped += 1;
+        continue;
+      }
+      try {
+        const apk = await readDeviceExtensionApk(row.packageId);
+        await profile.installApk(apk, row.packageId, {
+          name: row.name,
+          versionName: row.versionName === "" ? undefined : row.versionName,
+          versionCode: row.versionCode === 0 ? undefined : row.versionCode,
+        });
+        installed.push(row.name);
+      } catch {
+        failed.push(row.name);
+      }
+    }
+    this.extensions = await this.profile.listExtensions();
+    await this.loadSources();
+    return { installed, skipped, failed };
   }
 
   /** A runtime that is down is a banner, never an empty source list. */

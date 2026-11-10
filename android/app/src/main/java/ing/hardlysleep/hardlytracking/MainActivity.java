@@ -10,6 +10,7 @@ public class MainActivity extends BridgeActivity {
         // Before super: a plugin registered after the bridge is built is not in the bridge.
         registerPlugin(MihonRuntimePlugin.class);
         registerPlugin(FolderPickerPlugin.class);
+        registerPlugin(DeviceExtensionsPlugin.class);
         super.onCreate(savedInstanceState);
     }
 }

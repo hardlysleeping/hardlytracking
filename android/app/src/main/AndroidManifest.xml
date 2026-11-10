@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <!-- Cleartext is deliberate: a phone pairs with a PC running HardlyTracking over plain http on a
          LAN or tailnet address, and downloads/CBZ reads come from that same host. The app's own token
@@ -42,4 +43,11 @@
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- Extension packages belong to other apps (Mihon, Tachiyomi, Komikku), and Android 11+ hides
+         other apps' packages unless asked. The prefix cannot be expressed as a <queries> rule, and
+         this app is side-loaded — never on Play — so the broad permission is the honest one. Without
+         it "reuse the extensions this device already has" lists nothing. -->
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"
+        tools:ignore="QueryAllPackagesPermission" />
 </manifest>

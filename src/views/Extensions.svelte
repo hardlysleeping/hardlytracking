@@ -16,6 +16,7 @@
   import { settings } from "../state/settings.svelte";
   import { REPORT_REASONS, sourceReport, type ReportReason } from "../lib/report/source";
   import { extensionLabel, extensionLanguages, sourcesOfExtension } from "../lib/extensions/installed";
+  import { listDeviceExtensions, type DeviceExtension } from "../lib/extensions/device";
   import { filterEntries, keepLanguages, languageCounts, languagesOf } from "../lib/extensions/browse-filter";
   import ExtensionLanguageSheet from "../components/ExtensionLanguageSheet.svelte";
   import { softwareHref } from "../lib/software";
@@ -435,6 +436,41 @@ import { probeWebdav } from "../api/webdav";
   let checking = $state(false);
   let checkNote = $state<string | null>(null);
 
+  /**
+   * Extension packages this device already has from another Mihon-family app.
+   *
+   * Read once on arrival, and only on a shell that can answer: in a browser the list is empty and
+   * the whole affordance stays hidden. Nothing is installed until the button is pressed.
+   */
+  let device = $state<DeviceExtension[]>([]);
+  let importing = $state(false);
+  let deviceNote = $state<string | null>(null);
+  $effect(() => {
+    void listDeviceExtensions().then((rows) => {
+      device = rows;
+    });
+  });
+  /** The ones our runtime does not hold yet: an already-installed row is not a second install. */
+  const freshOnDevice = $derived(device.filter((row) => !installed.some((own) => own.packageId === row.packageId)));
+
+  async function importFromDevice(): Promise<void> {
+    importing = true;
+    deviceNote = null;
+    try {
+      const outcome = await library.importDeviceExtensions();
+      const parts: string[] = [];
+      if (outcome.installed.length > 0) parts.push(`Installed ${outcome.installed.length}: ${outcome.installed.join(", ")}.`);
+      if (outcome.skipped > 0) parts.push(`${outcome.skipped} already installed.`);
+      if (outcome.failed.length > 0) parts.push(`Could not read ${outcome.failed.join(", ")}.`);
+      deviceNote = parts.length === 0 ? "No extensions found on this device." : parts.join(" ");
+      device = await listDeviceExtensions();
+    } catch (problem) {
+      deviceNote = problem instanceof Error ? problem.message : String(problem);
+    } finally {
+      importing = false;
+    }
+  }
+
   async function checkUpdates(): Promise<void> {
     if (library.repos.length === 0) {
       checkNote = "Add a repository first — an update comes from the repository an extension was installed from.";
@@ -562,14 +598,27 @@ import { probeWebdav } from "../api/webdav";
       <div class="blank">
         <p class="blankline">Nothing installed yet.</p>
         <p class="blanksub">Add a repository, then install an extension from its index. Its sources appear under Browse.</p>
-        <button class="btn primary" onclick={() => (section = "repositories")}>Add a repository</button>
+        {#if freshOnDevice.length > 0}
+          <button class="btn primary" onclick={() => void importFromDevice()} disabled={importing}>
+            {importing ? "Importing…" : `Import ${freshOnDevice.length} from this device`}
+          </button>
+          <p class="blanksub">or reuse the extension APKs already installed on this device.</p>
+        {/if}
+        <button class="btn" class:primary={freshOnDevice.length === 0} onclick={() => (section = "repositories")}>Add a repository</button>
       </div>
     {:else}
       <div class="updbar">
         <button class="chip" onclick={() => void checkUpdates()} disabled={checking}>
           {checking ? "Checking…" : "Check for updates"}
         </button>
+        {#if freshOnDevice.length > 0}
+          <!-- The device's own APKs, reused: no repository, no download, same versions Mihon runs. -->
+          <button class="chip" onclick={() => void importFromDevice()} disabled={importing}>
+            {importing ? "Importing…" : `Import ${freshOnDevice.length} from this device`}
+          </button>
+        {/if}
         {#if checkNote !== null}<span class="updnote">{checkNote}</span>{/if}
+        {#if deviceNote !== null}<span class="updnote">{deviceNote}</span>{/if}
       </div>
       <ul class="rows">
         {#each installed as row (row.extensionId)}
