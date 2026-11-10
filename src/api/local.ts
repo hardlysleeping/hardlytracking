@@ -9,6 +9,29 @@
 import { joinId, nativeId, paged, type Chapter, type Paged, type Series, type Source, type SourceProvider } from "./source";
 import type { LibraryStore } from "../lib/db/store";
 import { openComic } from "../lib/files/index";
+import { openDownloadsChapter, readDownloadsFile } from "../lib/files/mihon-downloads";
+import type { BookRow } from "../lib/db/store";
+
+/**
+ * A book's pages, wherever the bytes are.
+ *
+ * Ours: the blob the importer stored. Another app's (`location`): read through the shell one page at
+ * a time, so indexing a download folder costs no storage and no copy. A row that names an owner this
+ * build has no reader for says so — an empty chapter would look like a broken download.
+ */
+async function bookComic(book: BookRow) {
+  const location = book.location;
+  if (location === undefined) {
+    if (book.blob === undefined) throw new Error(`${book.name} has no file to read`);
+    return openComic(book.blob, book.name);
+  }
+  if (location.kind !== "mihondl") throw new Error(`${book.name}: no reader for ${location.kind}`);
+  if (location.format === "folder") {
+    return openDownloadsChapter({ name: book.name, path: location.path, kind: "folder", ext: "", bytes: 0 });
+  }
+  const blob = await readDownloadsFile({ name: book.name, path: location.path, kind: "file", ext: location.ext, bytes: 0 });
+  return openComic(blob, book.name);
+}
 
 export const LOCAL_SOURCE_ID = "local:src:library";
 
@@ -62,7 +85,7 @@ export function createLocalProvider(store: LibraryStore): SourceProvider {
       const books = await store.listBooks();
       const book = books.find((row) => row.chapterId === chapterId);
       if (book === undefined) return store.getPages(chapterId);
-      const comic = await openComic(book.blob, book.name);
+      const comic = await bookComic(book);
       return Array.from({ length: comic.pageCount }, (_, index) => ({
         index,
         // A stable pseudo-URL: `pageSrc` keys its blob cache on it, so a page keeps one URL while the

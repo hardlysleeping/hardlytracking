@@ -456,6 +456,7 @@ export function createArchiveProvider(options: ArchiveProviderOptions = {}): Sou
     const key = `${identifier}/${name}`;
     const stored = await options.store?.getBook(key);
     if (stored !== undefined) {
+      if (stored.blob === undefined) throw new Error(`${stored.name} is not stored on this device`);
       const comic = await openComic(stored.blob, stored.name);
       return { name: stored.name, pageCount: comic.pageCount, open: (index) => comic.open(index) };
     }

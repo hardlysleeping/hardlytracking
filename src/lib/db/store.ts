@@ -186,8 +186,31 @@ export interface BookRow {
   kind: "cbz" | "cbr" | "pdf";
   pageCount: number;
   bytes: number;
-  blob: Blob;
+  /**
+   * The file itself, when this app copied it into the library.
+   *
+   * Absent for a row that points at a file another app owns (`location`): those bytes stay where
+   * Mihon put them and are read on demand, which is the whole point of indexing a download folder
+   * rather than importing it.
+   */
+  blob?: Blob;
+  /** Where the pages really live, when they are not ours. */
+  location?: BookLocation;
   addedAt: number;
+}
+
+/**
+ * A book kept somewhere else, readable only through the shell.
+ *
+ * `kind` names the owner so a future reader — a second app whose layout we index — adds a case
+ * instead of another optional field. The path is a document handle, never a filesystem path.
+ */
+export interface BookLocation {
+  kind: "mihondl";
+  path: string;
+  format: "folder" | "file";
+  /** `cbz`/`cbr`/`zip`/`pdf` for a file, empty for a folder of pages. */
+  ext: string;
 }
 
 export class LibraryStore {

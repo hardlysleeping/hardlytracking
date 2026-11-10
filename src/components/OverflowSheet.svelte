@@ -29,10 +29,12 @@
     /** Local files: the pickers live in Library, so they open *after* this sheet has closed. */
     onaddfiles: () => void;
     onaddfolder: () => void;
+    /** Index another app's download folder in place — hidden on a build that cannot read one. */
+    onimportdownloads?: (() => void) | null;
     ondrive: () => void;
     stats: LibraryStats;
   }
-  let { open, onclose, onrefresh, onselect, oncategories, onsettings, onaddfiles, onaddfolder, ondrive, stats }: Props = $props();
+  let { open, onclose, onrefresh, onselect, oncategories, onsettings, onaddfiles, onaddfolder, onimportdownloads = null, ondrive, stats }: Props = $props();
 
   let page = $state<"menu" | "stats">("menu");
 
@@ -57,6 +59,9 @@
       <div class="menu-list">
         <button class="menu-item" onclick={() => run(onaddfiles)}><span>Add files…</span></button>
         <button class="menu-item" onclick={() => run(onaddfolder)}><span>Add folder…</span></button>
+        {#if onimportdownloads !== null}
+          <button class="menu-item" onclick={() => run(() => onimportdownloads?.())}><span>Import Mihon downloads…</span></button>
+        {/if}
         <button class="menu-item" onclick={() => run(ondrive)}><span>From drive…</span></button>
       </div>
     </div>

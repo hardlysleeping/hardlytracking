@@ -290,6 +290,7 @@ export function createWebdavProvider(options: WebdavOptions): SourceProvider {
 
     const stored = await options.store.getBook(seriesId);
     if (stored !== undefined) {
+      if (stored.blob === undefined) throw new Error(`${stored.name} is not stored on this device`);
       const comic = await openComic(stored.blob, stored.name);
       void coverOf(seriesId, (index) => comic.open(index));
       return { seriesId, chapterId, name: stored.name, pages: comic.pageCount, open: (index) => comic.open(index) };

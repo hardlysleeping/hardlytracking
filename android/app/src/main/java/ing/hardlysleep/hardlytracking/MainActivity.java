@@ -11,6 +11,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(MihonRuntimePlugin.class);
         registerPlugin(FolderPickerPlugin.class);
         registerPlugin(DeviceExtensionsPlugin.class);
+        registerPlugin(DownloadsFolderPlugin.class);
         super.onCreate(savedInstanceState);
     }
 }

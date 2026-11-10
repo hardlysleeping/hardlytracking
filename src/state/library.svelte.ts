@@ -13,6 +13,13 @@ import { downloadApk, loadRepository, type Repository } from "../lib/extensions/
 import { isPinnedRepo } from "../lib/extensions/pinned-repo";
 import { downloadPortableSource } from "../lib/extensions/portable-install";
 import { listDeviceExtensions, readDeviceExtensionApk } from "../lib/extensions/device";
+import {
+  importDownloads,
+  pickDownloadsFolder,
+  savedDownloadsFolder,
+  scanDownloadsFolder,
+  type DownloadsImportResult,
+} from "../lib/files/mihon-downloads";
 import type { PortableManifest } from "../lib/extensions/portable";
 import { apiUrl, remoteHost } from "../lib/host";
 import type { ExtensionEntry } from "../lib/extensions/index";
@@ -692,6 +699,24 @@ class LibraryState {
     }
     this.sources = found;
     this.sourceNotes = notes;
+  }
+
+  /**
+   * Index another app's download folder into this library — read in place, nothing copied.
+   *
+   * Asked once for the folder (a persisted read grant), then one scan. A folder already in the
+   * library is skipped by the importer rather than re-added, so running this twice is safe and is
+   * also how new downloads get picked up: the tree is the source, the rows are a view of it.
+   */
+  async importDownloadsFolder(): Promise<{ result: DownloadsImportResult; folder: string }> {
+    if (this.profile === null) throw new Error(this.notOpenMessage);
+    const playedFolder = await savedDownloadsFolder();
+    const folder = playedFolder ?? (await pickDownloadsFolder());
+    if (folder === null) throw new Error("no folder was chosen");
+    const scan = await scanDownloadsFolder();
+    const result = await importDownloads(this.profile.store, scan);
+    if (result.series > 0) await this.refreshLibrary();
+    return { result, folder: folder.name };
   }
 
   async refreshLibrary(): Promise<void> {

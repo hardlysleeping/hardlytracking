@@ -32,6 +32,7 @@
   import PageMenu from "../components/PageMenu.svelte";
   import { LIBRARY_SECTIONS } from "../lib/nav-order";
   import AddFiles from "../components/AddFiles.svelte";
+  import { canReadDownloadsFolder } from "../lib/files/mihon-downloads";
   import DriveImport from "../components/DriveImport.svelte";
   import OverflowSheet, { type LibraryStats } from "../components/OverflowSheet.svelte";
   import FilterSheet from "../components/FilterSheet.svelte";
@@ -117,6 +118,34 @@
    * than inside the sheet's `{#if open}` block.
    */
   let adders = $state<{ pickFiles: () => void; pickFolder: () => void } | null>(null);
+  /**
+   * "Import Mihon downloads…" — another app's download folder, indexed in place.
+   *
+   * Offered only on a build whose shell can read a folder (Android). The line under the shelf says
+   * what happened, because an import that quietly does nothing is indistinguishable from a bug.
+   */
+  let canImportDownloads = $state(false);
+  let downloadsNote = $state<string | null>(null);
+  $effect(() => {
+    void canReadDownloadsFolder().then((can) => {
+      canImportDownloads = can;
+    });
+  });
+
+  async function importDownloads(): Promise<void> {
+    downloadsNote = "Reading the download folder…";
+    try {
+      const { result, folder } = await library.importDownloadsFolder();
+      const parts: string[] = [];
+      if (result.series > 0) parts.push(`${result.series} titles, ${result.chapters} chapters from ${folder}`);
+      if (result.skipped.length > 0) parts.push(`${result.skipped.length} already here`);
+      if (result.errors.length > 0) parts.push(result.errors.join("; "));
+      downloadsNote = parts.length === 0 ? `Nothing to import in ${folder}` : parts.join(" · ");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      downloadsNote = /no folder|cancel/i.test(message) ? null : message;
+    }
+  }
 
   /** The applied filter is a setting, not component state: a reload must keep it. */
   const filter = $derived(settings.libraryFilter);
@@ -919,6 +948,10 @@
         -->
         <AddFiles bind:this={adders} showButtons={false} />
 
+        {#if downloadsNote !== null}
+          <p class="downnote">{downloadsNote}</p>
+        {/if}
+
         <BrowseDisplay />
         {#if !library.ready}
           <p class="empty">Opening the library…</p>
@@ -1091,6 +1124,7 @@
   onsettings={() => (settingsOpen = true)}
   onaddfiles={() => adders?.pickFiles()}
   onaddfolder={() => adders?.pickFolder()}
+  onimportdownloads={canImportDownloads ? () => void importDownloads() : null}
   ondrive={() => (driveOpen = true)}
   {stats}
 />
@@ -1136,6 +1170,12 @@
 </Sheet>
 
 <style>
+  /* The line an import answers with: one sentence, under the shelf controls, never a dialog. */
+  .downnote {
+    margin: 0 0 var(--s3);
+    color: var(--text-2);
+    font-size: var(--t-sm);
+  }
   /* Sections and the pin share a row: 44 px tall, no extra padding above or below. */
   .tabsrow {
     display: flex;
