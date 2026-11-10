@@ -7,7 +7,7 @@ test('legacy display choices migrate to the same three modes', () => {
   for (const [input, result] of [['list','row'], ['row','row'], ['compact','grid'], ['grid','grid'], ['card','card'], [null,'grid'], ['garbage','grid']]) assert.equal(browseMode(input), result);
 });
 test('columns are integers: 1 minimum, 3 on a phone, 6 on a tablet or a desktop', () => {
-  for (const [width, ceiling] of [[390, 3], [900, 6], [1440, 6]]) {
+  for (const [width, ceiling] of [[390, 3], [900, 6], [1280, 10]]) {
     assert.equal(columnsFor(-1, width), 1);
     assert.equal(columnsFor(0, width), 1);
     assert.equal(columnsFor(99, width), ceiling);

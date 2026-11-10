@@ -32,7 +32,10 @@ export function rowStyleOf(value: unknown): RowStyle {
  * than the words under it, so tapping the right one stops being reliable.
  */
 export function maxColumns(width: number, height = width): number {
-  return deviceClass(width, height) === "phone" ? 3 : 6;
+  const device = deviceClass(width, height);
+  // A desktop window is wide enough for ten covers at the default size; a phone gets three and a
+  // tablet six, so the slider only ever offers columns the screen can actually draw.
+  return device === "phone" ? 3 : device === "tablet" ? 6 : 10;
 }
 export function columnsFor(value: unknown, width: number, height = width): number {
   const n = typeof value === "number" && Number.isFinite(value) ? Math.round(value) : 3;

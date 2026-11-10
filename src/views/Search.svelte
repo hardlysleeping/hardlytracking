@@ -638,6 +638,18 @@
   <header class="bar">
     <!-- Wrapped so the title keeps the `margin-right: auto` that keeps the bar left-aligned. -->
     <span class="titlewrap"><PageMenu title="Search" current="search" size="xl" /></span>
+    <!-- One glyph in two states: a ticked box means "you are ticking results". The word took the
+         space a second control could use. -->
+    <button
+      class="btn ghost icon"
+      class:on={selectMode}
+      aria-pressed={selectMode}
+      aria-label={selectMode ? "Done ticking results" : "Tick several results and save them together"}
+      title={selectMode ? "Done ticking results" : "Tick several results and save them together"}
+      onclick={() => setSelectMode(!selectMode)}
+    >
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d={selectMode ? CHECKED_BOX : EMPTY_BOX} /></svg>
+    </button>
     <button
       class="chip pinnedonly"
       class:on={settings.searchPinnedOnly}
@@ -693,23 +705,7 @@
     </div>
   </div>
 
-  <!-- The display menu and the tick that starts a multi-select sit on one line: both act on the
-       results below, so they belong beside the results rather than in the heading bar. -->
-  <div class="displayrow">
-    <BrowseDisplay />
-    <!-- One glyph in two states: a ticked box means "you are ticking results". The word took the
-         space a second control could use. -->
-    <button
-      class="btn ghost icon"
-      class:on={selectMode}
-      aria-pressed={selectMode}
-      aria-label={selectMode ? "Done ticking results" : "Tick several results and save them together"}
-      title={selectMode ? "Done ticking results" : "Tick several results and save them together"}
-      onclick={() => setSelectMode(!selectMode)}
-    >
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d={selectMode ? CHECKED_BOX : EMPTY_BOX} /></svg>
-    </button>
-  </div>
+  <BrowseDisplay />
 
   <div class="stage">
     <div class="results">
@@ -846,14 +842,6 @@
     border-radius: var(--r2);
     background: var(--surface-2);
   }
-  .displayrow {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: flex-start;
-    gap: var(--s2);
-    margin-bottom: var(--s3);
-  }
-  .displayrow :global(.menu) { margin-bottom: 0; }
   .selectrow {
     display: flex;
     flex-wrap: wrap;

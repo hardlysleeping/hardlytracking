@@ -12,6 +12,8 @@
    * because a shelf's shape is recognised by its picture, not by three words that all sound alike.
    */
   const mode = $derived(browseMode(settings.libraryView));
+  /** The placement the toggle will switch to when pressed. */
+  const otherTitle = $derived(settings.browseTitle === "below" ? "overlay" : "below");
   const columns = $derived(columnsFor(settings.browseColumns, viewport.width, viewport.height));
   const ceiling = $derived(maxColumns(viewport.width, viewport.height));
 
@@ -21,10 +23,6 @@
     { id: "card" as const, label: "Cards", path: "M6 3h12v11H6zM6 17h12M6 20h8" },
   ];
 
-  const TITLES = [
-    { id: "below" as const, label: "Below", path: "M4 4h16v10H4zM6 18h12" },
-    { id: "overlay" as const, label: "On cover", path: "M4 4h16v14H4zM7 14h10" },
-  ];
 
 </script>
 
@@ -47,18 +45,18 @@
   {#if mode === "grid"}
     <span class="rule" aria-hidden="true"></span>
     <div class="seg" role="group" aria-label="Title placement">
-      {#each TITLES as item (item.id)}
-        <button
-          class="opt"
-          class:on={settings.browseTitle === item.id}
-          aria-pressed={settings.browseTitle === item.id}
-          title={`Title ${item.label.toLowerCase()}`}
-          onclick={() => settings.set("browseTitle", item.id)}
-        >
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d={item.path} /></svg>
-          <span>{item.label}</span>
-        </button>
-      {/each}
+      <!-- One control for one either/or: pressing it swaps the title under the cover and on it. -->
+      <button
+        class="opt"
+        aria-pressed={settings.browseTitle === "overlay"}
+        title={settings.browseTitle === "below" ? "Title below the cover — press to put it on the cover" : "Title on the cover — press to put it below"}
+        onclick={() => settings.set("browseTitle", otherTitle)}
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d={settings.browseTitle === "below" ? "M4 4h16v10H4zM6 18h12" : "M4 4h16v14H4zM7 14h10"} />
+        </svg>
+        <span>{settings.browseTitle === "below" ? "Below" : "On cover"}</span>
+      </button>
     </div>
     <label class="columns">
       <output>{columns} across</output>
