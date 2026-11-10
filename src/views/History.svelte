@@ -500,7 +500,7 @@
     padding: var(--s3) var(--s4) var(--s7);
     --pad-x: var(--s4);
     --pad-y: var(--s3);
-    max-width: 820px;
+    max-width: 1200px;
   }
 
   .top {

@@ -93,7 +93,7 @@
 <style>
   .view {
     padding: var(--s4) var(--s4) var(--s7);
-    max-width: 720px;
+    max-width: 1200px;
   }
 
   .top {
