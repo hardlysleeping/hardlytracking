@@ -166,6 +166,26 @@ export function trimBase(baseUrl: string): string {
  * can point at the same address with different logins, and their libraries must stay distinct or a
  * mark hidden on one login would hide the same-named library on the other.
  */
+/**
+ * The sentence inside a JSON error body, when it has one.
+ *
+ * Komga answers plain text, but the app's own `/api/komga` hop writes `{ error, detail }` — printing
+ * that object at a person is noise, and its `error` is the sentence they need ("Komga unreachable at
+ * http://…"). Anything else falls through as the raw text, cut to a length a note can hold.
+ */
+export function errorDetail(body: string): string {
+  const text = body.trim();
+  if (text.startsWith("{")) {
+    try {
+      const parsed = JSON.parse(text) as { error?: unknown };
+      if (typeof parsed.error === "string" && parsed.error !== "") return parsed.error.slice(0, 160);
+    } catch {
+      // Not JSON after all: the raw text is the answer.
+    }
+  }
+  return text.slice(0, 160);
+}
+
 export function komgaSourceId(serverId: string, libraryId: string): string {
   return joinId("komga", `${serverId}:${libraryId}`);
 }
@@ -354,8 +374,14 @@ export function createKomgaProvider(options: KomgaOptions): SourceProvider {
       throw new KomgaError(`Komga refused the login for "${options.username}" at ${baseUrl}`, response.status);
     }
     if (!response.ok) {
-      const detail = await response.text().catch(() => "");
-      throw new KomgaError(`Komga answered ${response.status}${detail === "" ? "" : `: ${detail.slice(0, 160)}`}`, response.status);
+      const detail = errorDetail(await response.text().catch(() => ""));
+      // The address, not just the number: a 404 with a right login is almost always a wrong path
+      // (a reverse proxy in front of Komga, a typo, another service on that port), and the only way
+      // to see which is to know what was asked.
+      throw new KomgaError(
+        `Komga answered ${response.status} for ${baseUrl}${path}${detail === "" ? "" : `: ${detail}`}`,
+        response.status,
+      );
     }
     if (response.status === 204) return undefined as T;
     const text = await response.text();

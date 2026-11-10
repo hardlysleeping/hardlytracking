@@ -241,3 +241,20 @@ test("a chapter row names the series that owns it, so a link can resolve one fro
   assert.equal(chapter.name, "Plastic Man 001");
   assert.equal(await s.getChapter("local:ch:nope:1"), undefined);
 });
+
+test("a title seen once keeps its cover, and a better one replaces it", async () => {
+  const s = store();
+  // Seen while browsing: the row arrives with a cover.
+  await s.putKnownSeries({ id: "archive:item", title: "A Title", cover: "https://archive.org/services/img/item", at: 1 });
+  assert.equal((await s.getKnownSeries("archive:item")).cover, "https://archive.org/services/img/item");
+
+  // Seen again from History, where no cover is known: the remembered one must survive.
+  await s.putKnownSeries({ id: "archive:item", title: "A Title", at: 2 });
+  assert.equal((await s.getKnownSeries("archive:item")).cover, "https://archive.org/services/img/item");
+
+  // A better cover is taken, while the first name is kept.
+  await s.putKnownSeries({ id: "archive:item", title: "Renamed", cover: "https://example.test/new.jpg", at: 3 });
+  const row = await s.getKnownSeries("archive:item");
+  assert.equal(row.cover, "https://example.test/new.jpg");
+  assert.equal(row.title, "A Title");
+});

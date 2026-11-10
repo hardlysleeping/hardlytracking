@@ -1,6 +1,8 @@
 ext {
     minSdkVersion = 23
-    compileSdkVersion = 35
+    // 36, not 35: the extension API this shell now carries (via `extensions-lib`) and okhttp 5 are
+    // compiled against 36, and AGP refuses a dependency built for a newer platform.
+    compileSdkVersion = 36
     targetSdkVersion = 35
     androidxActivityVersion = '1.9.2'
     androidxAppCompatVersion = '1.7.0'

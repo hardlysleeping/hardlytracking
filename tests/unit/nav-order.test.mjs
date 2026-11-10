@@ -12,7 +12,7 @@ import {
 } from "../../src/lib/nav-order.ts";
 
 test("the shipped defaults name every destination, once", () => {
-  assert.deepEqual(DEFAULT_BOTTOM_NAV, ["library", "browse", "search", "history", "more"]);
+  assert.deepEqual(DEFAULT_BOTTOM_NAV, ["library", "history", "search", "browse", "more"]);
   assert.deepEqual([...DEFAULT_BOTTOM_NAV].sort(), [...DESTINATION_IDS].sort());
   assert.deepEqual(DEFAULT_LIBRARY_TABS, ["titles", "updates", "downloads"]);
   assert.deepEqual([...DEFAULT_LIBRARY_TABS].sort(), [...LIBRARY_SECTION_IDS].sort());

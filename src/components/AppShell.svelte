@@ -13,6 +13,7 @@
   import { go } from "../lib/nav";
   import { navHistory } from "../lib/nav-history.svelte";
   import { settings } from "../state/settings.svelte";
+  import BottomBar from "./BottomBar.svelte";
 
   let { active, routeKey = "", children }: { active: string; routeKey?: string; children: Snippet } = $props();
 
@@ -169,20 +170,11 @@
   {/if}
 
   {#if device === "phone"}
-    <nav class="bar" aria-label="Main">
-      {#each bar as destination (destination.id)}
-        <button
-          class="item"
-          class:on={active === destination.id}
-          aria-current={active === destination.id ? "page" : undefined}
-          aria-label={destination.label}
-          title={destination.label}
-          onclick={() => go(destination.href)}
-        >
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d={destination.icon} /></svg>
-        </button>
-      {/each}
-    </nav>
+    <!--
+      One component for the real menu and for the picture of it in Settings, so the settings preview
+      cannot show a bar the app does not draw.
+    -->
+    <BottomBar items={bar} {active} floating onpick={(destination) => go(destination.href)} />
   {/if}
 </div>
 
@@ -351,6 +343,10 @@
   .sidebar nav {
     flex-direction: column;
     gap: 2px;
+    /* The destinations sit in the middle of the column, not pinned under the brand: a
+       full-height sidebar with five buttons stacked at the top reads as an unfinished menu.
+       `auto` on both sides is what centres them without moving the brand. */
+    margin-block: auto;
   }
 
   .sidebar .item {
@@ -373,6 +369,8 @@
     border-right: 1px solid var(--line);
     background: var(--surface);
     flex-direction: column;
+    /* Same as the sidebar: the rail is a full-height column, so its icons belong in the middle. */
+    justify-content: center;
     gap: var(--s2);
   }
 
@@ -387,35 +385,7 @@
     background: var(--surface-2);
   }
 
-  /* ---- bottom bar (compact) ---- */
-  .bar {
-    position: fixed;
-    /* Full-bleed background, inset content: on its side the notch eats the first and last item. */
-    inset: auto var(--safe-r) 0 var(--safe-l);
-    z-index: 20;
-    /* An iOS tab bar is 49 pt of content plus the home-indicator inset. Two steps of padding on
-     * each side made ours ~20 px taller than that, which is the "fat band" a phone user sees. */
-    padding: 4px var(--s1) calc(4px + var(--safe-b)) var(--s1);
-    background: color-mix(in srgb, var(--surface) 92%, transparent);
-    backdrop-filter: blur(14px);
-    border-top: 1px solid var(--line);
-    justify-content: space-around;
-  }
 
-  .bar .item {
-    flex: 1;
-    /* Icon-only: the labels were taken off the phone bar, so the button is the icon and the tap
-     * target. 48px of content keeps the target at Apple's 44pt minimum while the bar stays a
-     * single row of glyphs — `--nav-h` in app.css is this height plus the padding and the hairline. */
-    height: 48px;
-    min-height: 48px;
-    padding: 0;
-    justify-content: center;
-  }
-
-  .bar .item.on {
-    color: var(--accent);
-  }
   /* Visible only while focused: a skip link that shows all the time is chrome
      the reader did not ask for. */
   .skip-link {

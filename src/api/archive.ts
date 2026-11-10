@@ -60,6 +60,12 @@ export const ARCHIVE_SOURCE: Source = {
   lang: "en",
   supportsLatest: true,
   baseUrl: ARCHIVE_BASE,
+  /**
+   * Trending first, because Popular is sorted by *all-time* downloads and therefore reads the same
+   * list for months — the one row on this page that never appeared to change. Trending sorts by
+   * downloads in the last week, Popular keeps the all-time list, Latest keeps new uploads.
+   */
+  browseTabs: ["trending", "popular", "latest"],
 };
 
 /** Leaf width for streamed pages. 1200 is legible on a phone at 3x without pulling the 2 MB scan. */
@@ -561,6 +567,17 @@ export function createArchiveProvider(options: ArchiveProviderOptions = {}): Sou
       return enabled() ? [{ ...ARCHIVE_SOURCE }] : [];
     },
 
+    /**
+     * Downloads in the last week — archive.org's own `week` sort field, not a date filter of ours.
+     *
+     * This is the listing that moves: an item is here because people are reading it now, so the
+     * first row of an Archive page changes day to day instead of once a season.
+     */
+    async trending(_sourceId, page) {
+      return search("", page, "-week");
+    },
+
+    /** All-time downloads. Stable by definition, which is why it is no longer the first tab. */
     async popular(_sourceId, page) {
       return search("", page, "-downloads");
     },

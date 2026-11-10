@@ -5,10 +5,14 @@
  * views cannot disagree about whether a series is saved.
  */
 import { openLibraryProfile, progressWriter, type LibraryProfile } from "../api/profile";
+import { transport } from "../api/transport";
 import { providerFor, type DalvikHost } from "../api/registry";
 import { packageIdFromApkName, type InstalledExtension } from "../api/dalvik";
 import { installOnHtServer, setHtServerExtensionEnabled, uninstallOnHtServer } from "../api/htserver";
 import { downloadApk, loadRepository, type Repository } from "../lib/extensions/repository";
+import { isPinnedRepo } from "../lib/extensions/pinned-repo";
+import { downloadPortableSource } from "../lib/extensions/portable-install";
+import type { PortableManifest } from "../lib/extensions/portable";
 import { apiUrl, remoteHost } from "../lib/host";
 import type { ExtensionEntry } from "../lib/extensions/index";
 import type { RepoRow, SourceMappingRow, ViewStateRow } from "../lib/db/store";
@@ -137,6 +141,13 @@ class LibraryState {
   /** The library itself could not be opened. This one is fatal, and the shell says so. */
   openError = $state<string | null>(null);
   sources = $state<Source[]>([]);
+  /**
+   * Which configured sources did not answer, in their own words, from the last source load.
+   *
+   * `error` is a strip that clears itself; this is the persistent form, because "your Komga is not
+   * answering" is a state of the device, not a passing event. Browse draws it beside the list.
+   */
+  sourceNotes = $state<string[]>([]);
   library = $state<Series[]>([]);
   /** The APKs installed on the extension host, newest install last. */
   extensions = $state<InstalledExtension[]>([]);
@@ -352,10 +363,16 @@ class LibraryState {
       // Covers and page images live in the same database, behind the user's ceiling. The ceiling
       // and the on/off switch come from the saved settings *before* the first prune: attaching with
       // defaults evicted copies against a limit the reader never chose.
-      imageCache.attach(this.profile.store.database, {
-        limitBytes: settings.imageCacheLimitMb * 1024 * 1024,
-        cacheImages: settings.cacheImages,
-      });
+      // The transport, not a bare `fetch`: inside a packaged Tauri build a cover on a third-party
+      // site has no CORS header, so a webview fetch cannot read the bytes and nothing is ever kept.
+      imageCache.attach(
+        this.profile.store.database,
+        {
+          limitBytes: settings.imageCacheLimitMb * 1024 * 1024,
+          cacheImages: settings.cacheImages,
+        },
+        transport,
+      );
       void imageCache.prune();
       void this.pruneSessions();
       // Arm the tracker hook: a read mark becomes a queued push once a service is connected
@@ -558,9 +575,29 @@ class LibraryState {
 
   async removeRepository(url: string): Promise<void> {
     if (this.profile === null) return;
+    // The app's own list is not the user's to delete; the store refuses it too, and both refusals
+    // say the same thing so a stray call cannot half-remove it (row gone, index still cached).
+    if (isPinnedRepo(url)) throw new Error("HardlyTracking Extensions is the app's own repository and cannot be removed");
     await this.profile.store.removeRepo(url);
     this.indexes.delete(url);
     this.repos = await this.profile.store.listRepos();
+  }
+
+  /**
+   * Install one portable package from the official repository.
+   *
+   * The bytes are text, fetched here and kept on the row: a package has no host that remembers it.
+   * The profile starts it before writing the row, so a broken update leaves the working version.
+   */
+  async installPortableEntry(manifest: PortableManifest, repoUrl: string): Promise<InstalledExtension> {
+    if (this.profile === null) throw new Error(this.notOpenMessage);
+    const profile = this.profile;
+    const source = await downloadPortableSource(manifest);
+    if (this.profile !== profile) throw new Error("The library changed before the extension could be installed.");
+    const installed = await profile.installPortable({ manifest, source, repoUrl });
+    this.extensions = await profile.listExtensions();
+    await this.loadSources();
+    return installed;
   }
 
   /** The entries of a repository, read once and kept for the session. */
@@ -600,14 +637,22 @@ class LibraryState {
   async loadSources(): Promise<void> {
     if (this.profile === null) return;
     const found: Source[] = [];
+    const notes: string[] = [];
     for (const provider of this.profile.providers) {
       try {
         found.push(...(await provider.sources()));
       } catch (error) {
-        this.error = `${provider.kind}: ${message(error)}`;
+        // The label, not the kind: a person knows they run a Komga, not a `komga` provider. And not
+        // twice, when the provider's own sentence already starts with its name.
+        const label = providerLabel(provider.kind);
+        const said = message(error);
+        const text = said.startsWith(label) ? said : `${label}: ${said}`;
+        this.error = text;
+        notes.push(text);
       }
     }
     this.sources = found;
+    this.sourceNotes = notes;
   }
 
   async refreshLibrary(): Promise<void> {

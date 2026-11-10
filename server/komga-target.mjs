@@ -57,9 +57,12 @@ export function komgaTarget(pathname, search = "") {
   if (!privateHost(parsed.hostname)) {
     return { status: 403, error: "only a Komga on your own network is proxied — the installed apps talk to the others directly" };
   }
-  // The path is appended to the origin, never to a user-supplied path: `new URL(tail, parsed)` would
-  // let `//evil.example/x` replace the host, which is the whole request going somewhere else.
-  return { url: `${parsed.origin}${tail}${search}` };
+  // The path is appended to the base, never resolved against it: `new URL(tail, parsed)` would let
+  // `//evil.example/x` replace the host, which is the whole request going somewhere else. The base's
+  // own path *is* kept — a Komga behind a reverse proxy at `https://host/komga` is ordinary, and
+  // dropping the path sent every request to the host root, which answers 404.
+  const basePath = parsed.pathname.replace(/\/+$/, "");
+  return { url: `${parsed.origin}${basePath}${tail}${search}` };
 }
 
 /** The inverse, for the client and for tests: an absolute Komga URL -> the path this route serves. */

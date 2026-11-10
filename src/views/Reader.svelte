@@ -22,6 +22,7 @@
   import type { Chapter, Page } from "../api/source";
   import { tick, untrack } from "svelte";
   import { go, pathTo } from "../lib/nav";
+  import { leaveReader, readerOriginLabel } from "../lib/reader-origin";
   import { pageSrc } from "../lib/pages";
   import { RUNTIME_DEADLINE_MS, withDeadline } from "../lib/deadline";
   import { INACTIVITY_TIMEOUT_MS, sessionEndAt, shouldEndForBackground, type SessionClose } from "../lib/history";
@@ -39,6 +40,8 @@
   let { seriesId, chapterId }: Props = $props();
 
   let pages = $state<Page[]>([]);
+  /** Where the exit door goes, read once: the router recorded it before this screen mounted. */
+  const backLabel = readerOriginLabel();
 
 
   const ahead = $derived(readAheadOf(settings.readerAhead));
@@ -229,7 +232,7 @@
   const stuck = $derived(busy || error !== null || pages.length === 0);
 
   /** Autoscroll only makes sense where the page scrolls vertically as one column. */
-  const canAutoscroll = $derived(settings.readerMode === "vertical" || settings.readerMode === "webtoon");
+  const canAutoscroll = $derived(settings.readerMode === "vertical");
 
   // A mode change or a new chapter ends the run: the page it was scrolling no longer exists.
   $effect(() => {
@@ -333,7 +336,6 @@
 
   const MODES = [
     { id: "vertical", label: "Vertical" },
-    { id: "webtoon", label: "Webtoon" },
     { id: "paged", label: "Paged" },
     { id: "ltr", label: "Left → right" },
     { id: "rtl", label: "Right → left" },
@@ -343,6 +345,7 @@
     { id: "width", label: "Width" },
     { id: "height", label: "Height" },
     { id: "contain", label: "Whole page" },
+    { id: "fill", label: "Fill the screen" },
   ] as const;
 
   /** Plugin reader entries. Empty unless a plugin declared one and the user granted ui.reader. */
@@ -720,7 +723,7 @@
     } else if (key === "r" || key === "R") {
       void toggleRead();
     } else if (key === "Escape") {
-      if (chrome) go(pathTo("series", owner));
+      if (chrome) leaveReader(owner);
       else showChrome();
     }
   }
@@ -741,7 +744,12 @@
 
 <section class="reader" class:hide={!chrome}>
   <header class="chrome top" class:shown={chrome || stuck}>
-    <button class="btn ghost icon" aria-label="Back to series" onclick={() => go(pathTo("series", owner))}>
+    <!--
+      One exit, to the screen this reader was opened from. A ▶ on a library card resumes a chapter
+      without ever showing the series page, so "Back to series" used to land on a page the reader had
+      not asked for and lose the shelf they left; the label names where this door actually goes.
+    -->
+    <button class="btn ghost icon" aria-label={backLabel === "the series" ? "Back to the series" : `Back to ${backLabel}`} title={backLabel === "the series" ? "Back to the series" : `Back to ${backLabel}`} onclick={() => leaveReader(owner)}>
       <svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7" /></svg>
     </button>
     <div class="titles">
@@ -791,7 +799,6 @@
       class="scroller"
       class:horizontal
       class:rtl
-      class:webtoon={settings.readerMode === 'webtoon'}
       class:scaled
       data-fit={settings.readerFit}
       bind:this={scroller}
@@ -1065,7 +1072,6 @@
     overflow-anchor: none;
   }
   .scroller::-webkit-scrollbar { display: none; }
-  .scroller.webtoon { gap: 0; }
   .scroller.horizontal {
     flex-direction: row;
     align-items: flex-start;
@@ -1101,18 +1107,49 @@
   img:not([src]) { visibility: hidden; }
   /* object-fit cannot resize an auto-sized image, and width/height are not valid values.
      Give each fit actual dimensions. Height may pan horizontally; Whole page never clips. */
-  .scroller[data-fit='height'] .page { min-height: calc(var(--reader-height) * var(--page-scale)); }
+  /* Height fit: a tall page is wider than the screen, so the slot must start at the left edge and
+     pan. `min-width: 100%` plus `justify-content: safe center` centred that overflow and clipped both
+     sides, which is the "weird cropping" this fit had. */
+  .scroller[data-fit='height'] .page {
+    min-width: 0;
+    width: max-content;
+    min-height: calc(var(--reader-height) * var(--page-scale));
+    justify-content: flex-start;
+  }
   .scroller[data-fit='height'] img { width: auto; height: calc(var(--reader-height) * var(--page-scale)); }
+  /* Whole page: the slot is the image. Forcing a full-viewport min-height made every page that was
+     limited by *width* (a portrait page on a landscape screen) sit in a band of empty surface above
+     and below — which is what "excessive top and bottom margin" was. The image's max-width and
+     max-height still fit it to the screen; nothing else is stretching the box. */
   .scroller[data-fit='contain'] .page {
     width: 100%;
-    min-height: var(--reader-height);
+    min-height: 0;
     align-items: center;
+  }
+  /* Measured on a 1320x2868 screenshot: the page filled the width (no side bands) and its own aspect
+     left 14 % of the height unused — but split 75 px above and 323 px below, i.e. the page sat at the
+     top with all the slack under it. In whole-page mode the page is centred in the reading surface
+     instead, so what cannot be filled is evenly around it rather than dumped at the bottom. */
+  .scroller[data-fit='contain'] {
+    justify-content: center;
   }
   .scroller[data-fit='contain'] img {
     width: auto;
     height: auto;
     max-width: calc(var(--reader-width) * var(--page-scale));
     max-height: calc(var(--reader-height) * var(--page-scale));
+  }
+  /* Fill the screen: the page covers the surface and what does not fit is cropped — the opposite trade
+     to Whole page. `object-fit: cover` on a fixed box is the only way to crop an <img> without JS. */
+  .scroller[data-fit='fill'] .page {
+    width: 100%;
+    min-height: var(--reader-height);
+    align-items: stretch;
+  }
+  .scroller[data-fit='fill'] img {
+    width: 100%;
+    height: var(--reader-height);
+    object-fit: cover;
   }
   /* Paged slots stay surface-wide/high even for a small image. */
   .scroller.horizontal .page { min-height: var(--reader-height); }

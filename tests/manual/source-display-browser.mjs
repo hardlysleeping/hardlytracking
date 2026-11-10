@@ -17,14 +17,18 @@ try {
   await page.goto(`${BASE}/tests/manual/source-display.html`);
   await page.waitForSelector(".set .tile");
 
-  // 1. The layout chips work on this page too, in every direction, including out of Card.
-  for (const name of ["Card", "Grid", "Card", "Row", "Card", "Grid"]) {
-    await chip(name).click();
+  // 1. The layout menu works on this page too, in every direction, including out of Cards.
+  const MODE = { Cards: "card", Grid: "grid", Rows: "row" };
+  const door = page.getByRole("button", { name: /^Layout:/ });
+  for (const name of ["Cards", "Grid", "Cards", "Rows", "Cards", "Grid"]) {
+    if ((await page.locator(".menu").count()) === 0) await door.click();
+    await page.getByRole("menuitemradio", { name: new RegExp(`^${name}`) }).click();
+    await page.keyboard.press("Escape");
     await page.waitForTimeout(120);
     const cls = (await setClass()) ?? "";
-    if (!cls.includes(name.toLowerCase())) throw new Error(`tapping ${name} left the grid as "${cls}"`);
+    if (!new RegExp(`\\b${MODE[name]}\\b`).test(cls)) throw new Error(`picking ${name} left the grid as "${cls}"`);
   }
-  evidence.push({ check: "layout chips switch on the Discover page, out of Card included" });
+  evidence.push({ check: "the layout menu switches on the Discover page, out of Cards included" });
 
   // 2. Grid with the title below: the title is its own row, under the artwork.
   await page.evaluate(() => window.sourceFixture.settings.set("browseTitle", "below"));
@@ -63,7 +67,9 @@ try {
   evidence.push({ check: "the overlay saves the whole title row", overlayTile: taller, belowTile: shorter });
 
   // 4. Card is compact: smaller cover, tighter padding, two lines of description.
-  await chip("Card").click();
+  if ((await page.locator(".menu").count()) === 0) await page.getByRole("button", { name: /^Layout:/ }).click();
+  await page.getByRole("menuitemradio", { name: /^Cards/ }).click();
+  await page.keyboard.press("Escape");
   await page.waitForTimeout(150);
   const card = await page.locator(".set.card .tile").first().evaluate((el) => {
     const style = getComputedStyle(el);

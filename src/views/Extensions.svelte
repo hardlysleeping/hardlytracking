@@ -16,7 +16,8 @@
   import { settings } from "../state/settings.svelte";
   import { REPORT_REASONS, sourceReport, type ReportReason } from "../lib/report/source";
   import { extensionLabel, extensionLanguages, sourcesOfExtension } from "../lib/extensions/installed";
-  import { ALL_LANGUAGES, filterEntries, keepLanguage, languagesOf } from "../lib/extensions/browse-filter";
+  import { filterEntries, keepLanguages, languageCounts, languagesOf } from "../lib/extensions/browse-filter";
+  import ExtensionLanguageSheet from "../components/ExtensionLanguageSheet.svelte";
   import { softwareHref } from "../lib/software";
   import { proxiedImage } from "../lib/pages";
   import { go, pathTo } from "../lib/nav";
@@ -71,8 +72,9 @@ import { probeWebdav } from "../api/webdav";
   let activeRepo = $state<string | null>(null);
   /** A repository name is a toggle: a second tap folds its list away instead of refetching it. */
   let collapsed = $state(false);
-  /** `all` or one source language code. Kept per repository, never a hidden filter. */
-  let language = $state(ALL_LANGUAGES);
+  /** The chosen source languages. Empty means every language — never "none". */
+  let languageFilter = $state<string[]>([]);
+  let languageSheet = $state(false);
   let installing = $state<string | null>(null);
   /** Two-step uninstall: removing an extension is destructive and one stray tap should not do it. */
   let removing = $state<string | null>(null);
@@ -283,10 +285,17 @@ import { probeWebdav } from "../api/webdav";
   );
   const levelNotice = $derived(hiddenNotice(entries.length - allowed.length, settings.contentLevel));
 
-  /** The languages this index actually publishes in — the chips are derived, never hardcoded. */
+  /** The languages this index actually publishes in — the sheet is derived, never hardcoded. */
   const languageCodes = $derived(languagesOf(allowed));
+  const languageTotals = $derived(languageCounts(allowed));
 
-  const matched = $derived(filterEntries(allowed, search, language));
+  /**
+   * The rows: filtered, then alphabetical.
+   *
+   * Alphabetical because this is a catalogue, not a feed — the index's own order is the publisher's,
+   * and a reader opening a repository should be able to scan from A without typing anything.
+   */
+  const matched = $derived(filterEntries(allowed, search, languageFilter));
 
   /** A live repository publishes over a thousand entries; drawing them all is a stall. */
   const shown = $derived(matched.slice(0, 120));
@@ -305,6 +314,20 @@ import { probeWebdav } from "../api/webdav";
     repoUrl = repo;
     section = "repositories";
     void inspect(repo);
+  });
+
+  /**
+   * Opening Available reads a repository without being asked.
+   *
+   * The section used to arrive empty with "Pick a repository above to read its index", which put a
+   * whole extra tap in front of the one thing the screen is for. The first repository is the one the
+   * reader added (or the official one seeded with the app), so it opens itself; the chips still switch.
+   * Only while nothing is open, so this never fights a repository the reader chose or folded.
+   */
+  $effect(() => {
+    const first = library.repos[0];
+    if (section !== "available" || first === undefined || activeRepo !== null || loading) return;
+    void openRepository(first.url);
   });
 
   /** Read a repository index without storing anything, and show what it is. */
@@ -365,10 +388,10 @@ import { probeWebdav } from "../api/webdav";
     collapsed = false;
     loading = true;
     error = null;
-    language = ALL_LANGUAGES;
+    languageFilter = [];
     try {
       entries = await library.repoEntries(url);
-      language = keepLanguage(language, entries);
+      languageFilter = keepLanguages(languageFilter, entries);
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
       entries = [];
@@ -491,18 +514,38 @@ import { probeWebdav } from "../api/webdav";
     <button class="chip" class:on={section === "repositories"} role="tab" aria-selected={section === "repositories"} onclick={() => (section = "repositories")}>Repositories</button>
   </div>
 
+  <!--
+    Search, and one button for languages. The languages used to be a wrapping row of chips in this
+    header; with twenty-odd languages published by a live index that row became four lines and pushed
+    the catalogue below the fold, so the filter read as the content and the list read as empty. The
+    languages now live in their own scrollable sheet, behind one button that says how many are on.
+  -->
   {#if section === "available" && library.repos.length > 0 && !collapsed}
-    <input class="field search" type="search" placeholder="Search extensions, packages or languages" bind:value={search} aria-label="Search extensions" />
-    {#if languageCodes.length > 1}
-      <div class="langs" role="group" aria-label="Filter by language">
-        <button class="chip" class:on={language === ALL_LANGUAGES} aria-pressed={language === ALL_LANGUAGES} onclick={() => (language = ALL_LANGUAGES)}>All</button>
-        {#each languageCodes as code (code)}
-          <button class="chip" class:on={language === code} aria-pressed={language === code} onclick={() => (language = code)}>{code.toUpperCase()}</button>
-        {/each}
-      </div>
-    {/if}
+    <div class="searchbar">
+      <input class="field search" type="search" placeholder="Search extensions, packages or languages" bind:value={search} aria-label="Search extensions" />
+      {#if languageCodes.length > 1}
+        <button
+          class="chip langbtn"
+          class:on={languageFilter.length > 0}
+          aria-haspopup="dialog"
+          aria-expanded={languageSheet}
+          onclick={() => (languageSheet = true)}
+        >
+          {languageFilter.length === 0 ? "Languages" : languageFilter.length === 1 ? `Language: ${languageFilter[0].toUpperCase()}` : `Languages (${languageFilter.length})`}
+        </button>
+      {/if}
+    </div>
   {/if}
   </div>
+
+  <ExtensionLanguageSheet
+    open={languageSheet}
+    codes={languageCodes}
+    counts={languageTotals}
+    selected={languageFilter}
+    onclose={() => (languageSheet = false)}
+    onchange={(next) => (languageFilter = next)}
+  />
 
   <!-- The line this app has to be clear about: the app is ours, the extensions are not. Same words
        as README.md, "Third-party sources". -->
@@ -968,10 +1011,17 @@ import { probeWebdav } from "../api/webdav";
             <div class="info">
               <span class="name">{repo.name}</span>
               <span class="sub">{repo.url}</span>
+              {#if repo.pinned === true}
+                <span class="sub">Ships with HardlyTracking — its extensions update from here, so the repository itself cannot be removed.</span>
+              {/if}
             </div>
             <div class="rowacts">
               <button class="btn ghost" onclick={() => { section = "available"; void openRepository(repo.url); }}>Browse</button>
-              <button class="btn danger" onclick={() => void remove(repo.url)}>Remove</button>
+              {#if repo.pinned === true}
+                <span class="badge">Official</span>
+              {:else}
+                <button class="btn danger" onclick={() => void remove(repo.url)}>Remove</button>
+              {/if}
             </div>
           </li>
         {/each}
@@ -1280,8 +1330,20 @@ import { probeWebdav } from "../api/webdav";
 
   /* The shared .view > .pin owns sticky positioning and the status-bar inset once. */
   .pin { padding-bottom: var(--s3); display: grid; gap: var(--s2); min-width: 0; }
-  /* Language chips wrap: the band never becomes a sideways scroller on a phone. */
-  .langs { display: flex; flex-wrap: wrap; gap: var(--s1); min-width: 0; }
+  /* Search takes the row; the language button keeps its own width beside it. */
+  .searchbar {
+    display: flex;
+    align-items: center;
+    gap: var(--s2);
+    min-width: 0;
+  }
+
+  .langbtn {
+    flex: none;
+    min-height: 40px;
+    white-space: nowrap;
+  }
+
   .search {
     width: 100%;
     min-width: 0;

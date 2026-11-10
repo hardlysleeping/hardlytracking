@@ -39,7 +39,9 @@
     aria-label={privacy.bandCollapsed ? "Show visibility controls" : "Hide visibility controls"}
     title={privacy.bandCollapsed ? "Show" : "Hide"}
   >
-    <svg class="caret" class:up={!privacy.bandCollapsed} viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6" /></svg>
+    <span class="grip">
+      <svg class="caret" class:up={!privacy.bandCollapsed} viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6" /></svg>
+    </span>
   </button>
 
   {#if !privacy.bandCollapsed}
@@ -100,27 +102,43 @@
   .bandbox { display: grid; gap: 2px; margin-bottom: var(--s2); }
 
   /* The tab is the band's handle, so it is the band's width — a caret in the corner read as a
-     dropdown belonging to the row underneath rather than the control for it. 18px tall: a strip
-     you can hit with a thumb without giving up a row of the list. */
+     dropdown belonging to the row underneath rather than the control for it. The width stays; the
+     ink does not: the caret is a muted 12 px chevron on a bare strip, and only a folded band gives
+     the thumb a small grip to aim at (a folded band is nothing but this handle, an open one has the
+     seats right under it). A quiet control above loud ones is the point — it folds, it is not a
+     fourth seat. */
   .tab {
     display: flex;
     align-items: center;
     justify-content: center;
     width: 100%;
-    min-height: 18px;
+    min-height: 20px;
     padding: 0;
     border: 0;
-    border-radius: var(--r2);
     background: transparent;
     color: var(--text-3);
     cursor: pointer;
   }
-  .bandbox.collapsed .tab { min-height: 22px; color: var(--text-2); }
-  .tab:hover, .tab:focus-visible { color: var(--text-1); background: var(--hover, color-mix(in srgb, var(--text-1) 8%, transparent)); }
+  .grip {
+    display: grid;
+    place-items: center;
+    width: 30px;
+    height: 18px;
+    border-radius: var(--r-pill);
+    transition: background 120ms ease;
+  }
+  .bandbox.collapsed .tab { min-height: 26px; color: var(--text-2); }
+  /* Folded, the band is nothing but this handle, so it gets the faintest pill to tell the thumb
+     where to land — a soft fill, no ring. A bordered pill read as a button from another design
+     sitting alone above the shelf. */
+  .bandbox.collapsed .grip { background: color-mix(in srgb, var(--surface-2) 55%, transparent); }
+  .tab:hover, .tab:focus-visible { color: var(--text-1); }
+  .tab:hover .grip { background: color-mix(in srgb, var(--text-1) 7%, transparent); }
   .tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-  .caret { width: 14px; height: 14px; transition: transform 140ms ease; }
+  .caret { width: 12px; height: 12px; opacity: 0.7; transition: transform 140ms ease, opacity 120ms ease; }
+  .tab:hover .caret, .tab:focus-visible .caret { opacity: 1; }
   .caret.up { transform: rotate(180deg); }
-  @media (prefers-reduced-motion: reduce) { .caret { transition: none; } }
+  @media (prefers-reduced-motion: reduce) { .caret, .grip { transition: none; } }
 
   /* Eye, lock, pin: the lock keeps the middle so the two labelled seats give up their ends evenly.
      One frame around all three, in the accent — the seats colour their glyphs, the band colours the

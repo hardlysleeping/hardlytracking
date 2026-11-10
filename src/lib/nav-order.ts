@@ -12,7 +12,7 @@
 import { DESTINATIONS } from "./destinations";
 
 /** The bar a phone has always drawn, in the order it has always drawn it. */
-export const DEFAULT_BOTTOM_NAV: string[] = ["library", "browse", "search", "history", "more"];
+export const DEFAULT_BOTTOM_NAV: string[] = ["library", "history", "search", "browse", "more"];
 
 export const DEFAULT_LIBRARY_TABS: string[] = ["titles", "updates", "downloads"];
 

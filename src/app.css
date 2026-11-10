@@ -82,9 +82,8 @@
   --t-xl: 22px;
   --t-2xl: 28px;
 
-  /* The phone bar's real height: 48px of icon, 4px of padding top and bottom, and the hairline.
-   * It is what `main` reserves at the bottom and what a view's floating button clears. */
-  --nav-h: 57px;
+  /* The phone menu is 56px tall with a 12px floating gap; reserve both plus the home-indicator inset. */
+  --nav-h: 68px;
   --rail-w: 76px;
   --sidebar-w: 224px;
   --safe-b: env(safe-area-inset-bottom, 0px);
@@ -221,6 +220,23 @@ select,
   -webkit-touch-callout: default;
 }
 
+/*
+ * Error text is the exception to the shell's `user-select: none`: an error line is exactly the text
+ * a reader wants to copy into a bug report, and selecting it failed silently everywhere.
+ */
+.banner,
+.why,
+.failure,
+[role="alert"],
+/* The notice that floats over the top of the app is a `status`, and its words are the ones a reader
+   wants to paste — the same reason the error lines above are exempt. */
+[role="status"],
+#boot-error {
+  -webkit-user-select: text;
+  user-select: text;
+  -webkit-touch-callout: default;
+}
+
 img {
   -webkit-user-drag: none;
   user-drag: none;
@@ -311,6 +327,13 @@ button {
   padding: 0;
   width: 36px;
   min-width: 36px;
+  justify-content: center;
+}
+
+/* An icon toggle that is on: the tone says so, because a glyph has no words to change. */
+.btn.icon.on {
+  color: var(--accent);
+  border-color: var(--accent);
 }
 
 .chip {

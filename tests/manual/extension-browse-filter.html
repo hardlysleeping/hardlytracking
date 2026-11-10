@@ -5,16 +5,22 @@ import { library } from '../../src/state/library.svelte';
 import { settings } from '../../src/state/settings.svelte';
 import { memoryDatabase } from '../../src/lib/db/open';
 import { LibraryStore } from '../../src/lib/db/store';
+import { parseIndex } from '../../src/lib/extensions/index';
 import '../../src/app.css';
 const store=new LibraryStore(memoryDatabase());await settings.load(store);
 library.profile={store,providers:[]};library.ready=true;library.extensions=[];
-// Two repositories, several languages: the language chips must come from whichever index is open,
+// Two repositories, several languages: the language filter must come from whichever index is open,
 // and the name must fold its own list without losing what it already read.
-const lands=['en','ja','es','fr'];
+// `?langs=40` builds an index as language-heavy as a live one, for the sheet's own scrolling.
+const many=Number(new URLSearchParams(location.search).get('langs')??0);
+const lands=many>0?Array.from({length:many},(_,i)=>`l${String(i).padStart(2,'0')}`):['en','ja','es','fr'];
 const rows=(slug,count)=>Array.from({length:count},(_,i)=>{const lang=lands[i%lands.length];return{name:`${slug} extension ${String(i).padStart(3,'0')}`,pkg:`${slug}.extension.${i}`,version:'1.0',versionCode:1,lang,sources:[{id:String(i),name:`${slug} ${lang} source`,lang}],contentWarning:'SAFE'};});
 const indexes={'https://fixture.example/keiyoushi.json':rows('keiyoushi',120),'https://fixture.example/other.json':rows('other',30).map(r=>({...r,sources:r.sources.map(s=>({...s,lang:'fr'}))}))};
-library.repos=[{name:'Keiyoushi',url:'https://fixture.example/keiyoushi.json'},{name:'Other repo',url:'https://fixture.example/other.json'}];
+// `?real=<index url>` reads a live index instead: the only way to see the screen with the language
+// count a real repository ships, which is the shape that made the chips a wall.
+const real=new URLSearchParams(location.search).get('real');
+library.repos=real?[{name:'Keiyoushi',url:real}]:[{name:'Keiyoushi',url:'https://fixture.example/keiyoushi.json'},{name:'Other repo',url:'https://fixture.example/other.json'}];
 window.__repoFetches=0;
-library.repoEntries=async(url)=>{window.__repoFetches++;return indexes[url]??[];};
+library.repoEntries=async(url)=>{window.__repoFetches++;if(real)return parseIndex(await (await fetch(url)).json(),url).extensions;return indexes[url]??[];};
 mount(Extensions,{target:document.querySelector('#fixture')});
 </script></body></html>

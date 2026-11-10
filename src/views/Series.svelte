@@ -15,6 +15,7 @@
   import { providerFor } from "../api/registry";
   import type { Chapter, Series } from "../api/source";
   import Cover from "../components/Cover.svelte";
+  import SourceLink from "../components/SourceLink.svelte";
   import Sheet from "../components/Sheet.svelte";
   import MigrateSheet from "../components/MigrateSheet.svelte";
   import { go, pathTo } from "../lib/nav";
@@ -82,8 +83,10 @@
       // which is not the one its id was born on.
       const fresh = await library.details(id);
       if (!current()) return;
-      series = fresh;
-      void library.rememberSeriesMeta(fresh);
+      // A details call cannot rebuild the source page (it has no source site to join the path to),
+      // so the url recorded when the row was saved is the one kept.
+      series = fresh.url === undefined && stored?.url !== undefined ? { ...fresh, url: stored.url } : fresh;
+      void library.rememberSeriesMeta(series);
       const freshSaved = await library.isSaved(id);
       const freshPosition = await profile.store.getPosition(id);
       const freshChapters = await library.chapters(id);
@@ -294,6 +297,7 @@
               <button class="btn" disabled={downloads.inQueue(chapters[0].id)} onclick={() => downloads.enqueue(seriesId, chapters[0])}>Download</button>
             {/if}
           </div>
+          <SourceLink url={series.url} />
         </div>
         {#if saved && categories.items.length > 0}
           <div class="cats">

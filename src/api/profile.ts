@@ -27,6 +27,9 @@ import { activeKomgaServers } from "../lib/komga";
 import { createKomgaProvider, isKomgaAggregateSource } from "./komga";
 import { createWebdavProvider } from "./webdav";
 import { webdavEnabled, webdavSettings } from "../lib/webdav";
+import { ensurePinnedRepo } from "../lib/extensions/pinned-repo";
+import { portableRow, startPortable, type PortableInstallInput } from "../lib/extensions/portable-install";
+import { createPortableProvider } from "../lib/extensions/portable-provider";
 
 export interface LibraryProfile {
   readonly kind: "device";
@@ -88,6 +91,13 @@ export interface LibraryProfile {
    * later call names. The row lands in our database because the runtime keeps no list.
    */
   installApk(apk: Uint8Array, packageId: string, meta?: InstallMeta): Promise<InstalledExtension>;
+  /**
+   * Install a portable package: its `provider.js` is the install, kept on the row.
+   *
+   * It is started before the row is written, so a package that cannot answer `sources()` leaves the
+   * working version in place rather than replacing it with one that draws nothing.
+   */
+  installPortable(input: PortableInstallInput & { repoUrl?: string }): Promise<InstalledExtension>;
   /** Turn an installed extension on or off. Its row and its APK stay; its sources stop appearing. */
   setExtensionEnabled(extensionId: string, enabled: boolean): Promise<void>;
   /** Forget an extension: its row, and its sources with it. The APK is the host's to drop. */
@@ -147,6 +157,10 @@ export async function openLibraryProfile(options: OpenProfileOptions = {}): Prom
   // Built-ins are installed before the providers are built, because a provider's switch is its row:
   // the first launch of a fresh install must already know that archive.org is on.
   const builtins = await ensureBuiltinExtensions(store);
+  // The official repository is seeded here, beside the built-ins and before anything reads the list,
+  // for the same reason: the first launch of a fresh install must already know where its own
+  // extensions come from.
+  await ensurePinnedRepo(store);
   const switches = {
     archive: builtins.find((row) => row.extensionId === BUILTIN_ARCHIVE_ID)?.enabled !== false,
     htServer: htServerEnabled(),
@@ -178,7 +192,9 @@ export async function openLibraryProfile(options: OpenProfileOptions = {}): Prom
    * come from a host registry, which holds APKs only. */
   async function listExtensions(): Promise<InstalledExtension[]> {
     if (hostRegistry === null) return (await store.listExtensions()).map(row => row.extensionId === BUILTIN_SUWAYOMI_ID ? { ...row, enabled: suwayomiEnabled() } : row);
-    const own = (await store.listExtensions()).filter((row) => row.builtin === true);
+    // A portable package is this device's own code, never the PC's, so it belongs on this side of the
+    // split even when the APK rows come from a host registry.
+    const own = (await store.listExtensions()).filter((row) => row.builtin === true || row.portable !== undefined);
     return [...own.map(row => row.extensionId === BUILTIN_SUWAYOMI_ID ? { ...row, enabled: suwayomiEnabled() } : row), ...(await hostRegistry.list())];
   }
 
@@ -238,9 +254,11 @@ export async function openLibraryProfile(options: OpenProfileOptions = {}): Prom
           ...(server.libraryId === undefined ? {} : { libraryId: server.libraryId }),
           ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
         });
+        // Kept even when the probe fails: an unreachable server is a note, not a missing provider.
+        // The next `sources()` — Browse's own reload — tries again instead of needing a relaunch.
+        providers.push(provider);
         try {
           const sources = await provider.sources();
-          providers.push(provider);
           const libraries = sources.filter((source) => !isKomgaAggregateSource(server.id, source.id));
           if (libraries.length === 0) warnings.push(`Komga ${server.label}: signed in, but no libraries are visible to that user`);
         } catch (error) {
@@ -328,7 +346,71 @@ export async function openLibraryProfile(options: OpenProfileOptions = {}): Prom
       else dalvik.extensions.push(row);
       return row;
     },
+    async installPortable(input): Promise<InstalledExtension> {
+      // Start first: a package that throws on load or answers no sources must not overwrite a working
+      // install with a row that can never produce one.
+      const started = await startPortable(input.manifest, input.source);
+      const row = await portableRow(
+        {
+          manifest: input.manifest,
+          source: input.source,
+          ...(input.repoUrl === undefined ? {} : { repoUrl: input.repoUrl }),
+          ...(input.enabled === undefined ? {} : { enabled: input.enabled }),
+        },
+        started.sources,
+      );
+      await store.putExtension(row);
+      // The old provider (this was an update) is swapped, not shadowed: two providers of one kind
+      // would answer the same id, and `providerFor` keeps whichever came first.
+      const previous = registry.portable.get(input.manifest.id);
+      if (previous !== undefined) {
+        const at = providers.indexOf(previous.provider);
+        if (at >= 0) providers.splice(at, 1);
+        previous.runtime.close?.();
+        registry.portable.delete(input.manifest.id);
+      }
+      if (row.enabled === false) {
+        started.runtime.close?.();
+        return row;
+      }
+      const provider = createPortableProvider({
+        kind: input.manifest.kind,
+        packageId: input.manifest.id,
+        ownsProgress: input.manifest.kind !== "komga" && input.manifest.kind !== "mihon",
+        runtime: started.runtime,
+      });
+      providers.push(provider);
+      registry.portable.set(input.manifest.id, { provider, runtime: started.runtime });
+      return row;
+    },
     async setExtensionEnabled(extensionId: string, enabled: boolean): Promise<void> {
+      // A portable package has no host to tell and no APK to keep: its provider is a worker this
+      // profile owns, so the switch either starts one or stops one.
+      const portableRow = (await store.listExtensions()).find((row) => row.extensionId === extensionId && row.portable !== undefined);
+      if (portableRow?.portable !== undefined) {
+        await store.putExtension({ ...portableRow, enabled });
+        const live = registry.portable.get(portableRow.packageId);
+        if (!enabled) {
+          if (live !== undefined) {
+            const at = providers.indexOf(live.provider);
+            if (at >= 0) providers.splice(at, 1);
+            live.runtime.close?.();
+            registry.portable.delete(portableRow.packageId);
+          }
+          return;
+        }
+        if (live !== undefined) return;
+        const started = await startPortable({ id: portableRow.packageId, kind: portableRow.portable.kind }, portableRow.portable.source);
+        const provider = createPortableProvider({
+          kind: portableRow.portable.kind,
+          packageId: portableRow.packageId,
+          ownsProgress: portableRow.portable.kind !== "komga" && portableRow.portable.kind !== "mihon",
+          runtime: started.runtime,
+        });
+        providers.push(provider);
+        registry.portable.set(portableRow.packageId, { provider, runtime: started.runtime });
+        return;
+      }
       // A built-in has no host to tell: its provider reads this flag on the next call.
       if (isBuiltin(extensionId)) {
         const row = await store.getExtension(extensionId);
@@ -378,6 +460,21 @@ export async function openLibraryProfile(options: OpenProfileOptions = {}): Prom
       // There is nothing to uninstall: the code is in the app. Refusing keeps a stray call from
       // deleting a row that would be re-seeded on the next launch and look like a bug.
       if (isBuiltin(extensionId)) throw new Error(`${extensionId} is built in; disable it instead`);
+      // A portable package is a row and a worker of ours: forgetting it is deleting the code, which
+      // is exactly what "uninstall" means for a source that never had an APK.
+      const portableLeaving = await store.getExtension(extensionId);
+      if (portableLeaving?.portable !== undefined) {
+        const live = registry.portable.get(portableLeaving.packageId);
+        if (live !== undefined) {
+          const at = providers.indexOf(live.provider);
+          if (at >= 0) providers.splice(at, 1);
+          live.runtime.close?.();
+          registry.portable.delete(portableLeaving.packageId);
+        }
+        for (const source of portableLeaving.sources) await consent.revoke(source.id);
+        await store.removeExtension(extensionId);
+        return;
+      }
       // Its sources' permissions go with it: a reinstall is a new question, and a grant for a source
       // that no longer exists is a permission nobody can see or take back.
       const leaving = (dalvik?.extensions.find((row) => row.extensionId === extensionId)?.sources ?? (await store.getExtension(extensionId))?.sources ?? []).map((source) => source.id);

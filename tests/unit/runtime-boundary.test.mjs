@@ -266,6 +266,24 @@ test("extension-supplied text is never evaluated as script", () => {
   }
 });
 
+/**
+ * The one place downloaded code becomes runnable, and what guards it.
+ *
+ * A portable extension *is* text from a repository, so "never run extension text" and "portable
+ * extensions" cannot both hold. The line this test now draws is the narrower, still-checkable one:
+ * no string-to-code call anywhere, the text becomes an ES module in exactly one file, and that file
+ * is the worker core — inside the worker, with no DOM, no plugins and no network of its own.
+ */
+test("downloaded provider code runs as a module, in one place, inside the worker", () => {
+  const moduleLoaders = walk("src").filter((path) => /data:text\/javascript/.test(read(path)));
+  assert.deepEqual(moduleLoaders, ["src/lib/extensions/worker/core.ts"], "a second place that turns text into runnable code needs a boundary review");
+
+  // The bootstrap is a Worker and nothing else: no window, no document, no shell access.
+  const bootstrap = read("src/lib/extensions/worker/provider-worker.ts");
+  assert.match(bootstrap, /addEventListener\("message"/);
+  assert.doesNotMatch(bootstrap, /window\.|document\.|Capacitor/);
+});
+
 /** Every .ts/.svelte/.mjs file under a directory, repo-relative. */
 function walk(dir) {
   const out = [];

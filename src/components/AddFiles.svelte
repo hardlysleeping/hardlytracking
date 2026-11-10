@@ -18,6 +18,7 @@
   import { library } from "../state/library.svelte";
   import { describeProgress, importComicFiles, type ImportProgress } from "../lib/files/import";
   import { kindOf } from "../lib/files/index";
+  import { detectPlatform } from "../lib/webview/index";
 
   interface Props {
     /** `primary` where it is the only thing to do (an empty library), `ghost` in a toolbar. */
@@ -52,10 +53,74 @@
     input?.click();
   }
 
-  /** Open the folder picker the same way. */
-  export function pickFolder(): void {
+  /**
+   * Open the folder picker the same way.
+   *
+   * On Android a `<input webkitdirectory>` is a file picker with no folder option at all: the
+   * attribute is a desktop Chrome feature. So the phone asks the system instead
+   * (`ACTION_OPEN_DOCUMENT_TREE`, `FolderPickerPlugin`), which walks the tree and copies each comic
+   * where the app can read it. Every other platform keeps the input.
+   */
+  export async function pickFolder(): Promise<void> {
     if (busy) return;
+    if (detectPlatform() === "capacitor" && (await capacitorPlatform()) === "android") {
+      await folderFromSystem();
+      return;
+    }
     folderInput?.click();
+  }
+
+  /** Which Capacitor platform this shell is, or "" when there is no shell. */
+  async function capacitorPlatform(): Promise<string> {
+    try {
+      const { Capacitor } = await import("@capacitor/core");
+      return Capacitor.getPlatform();
+    } catch {
+      return "";
+    }
+  }
+
+  /**
+   * The Android folder picker: the system tree dialog, then the bytes.
+   *
+   * The native side copies each comic into the app's cache and answers with its path, so this only
+   * has to read those bytes back and hand them to the same importer the file input feeds. Names are
+   * the path inside the chosen tree, which keeps two `vol 1.cbz` files in two subfolders distinct:
+   * the same rule the folder input applies through `webkitRelativePath`.
+   */
+  async function folderFromSystem(): Promise<void> {
+    if (library.profile === null) return;
+    note = null;
+    const pickedFiles: File[] = [];
+    try {
+      const { registerPlugin } = await import("@capacitor/core");
+      const { Filesystem } = await import("@capacitor/filesystem");
+      const picker = registerPlugin<{ pick(): Promise<{ files: { name: string; path: string }[] }> }>("FolderPicker");
+      const answer = await picker.pick();
+      for (const row of answer.files) {
+        const read = await Filesystem.readFile({ path: row.path });
+        pickedFiles.push(new File([bytesOf(read.data as string)], row.name));
+      }
+    } catch (error) {
+      // A cancelled pick is not a failure worth a red line.
+      const message = error instanceof Error ? error.message : String(error);
+      if (!/no folder|can[cs]el/i.test(message)) note = message;
+      return;
+    }
+    if (pickedFiles.length === 0) {
+      note = "No comics in that folder — looking for .cbz, .cbr, .zip or .pdf";
+      return;
+    }
+    await run(pickedFiles, true);
+  }
+
+  /** A base64 payload from the Filesystem plugin, as bytes (an ArrayBuffer, which a Blob takes). */
+  function bytesOf(base64: string): ArrayBuffer {
+    const binary = atob(base64);
+    const buffer = new ArrayBuffer(binary.length);
+    const bytes = new Uint8Array(buffer);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return buffer;
   }
 
   /**

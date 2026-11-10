@@ -52,9 +52,26 @@ function json(res, body, status = 200) {
   res.end(bytes);
 }
 
+/**
+ * Serve under a path, the way a reverse proxy publishes Komga at `https://host/komga`.
+ *
+ *   KOMGA_PATH=/komga node tests/manual/stub-komga.mjs
+ *
+ * Anything outside that path answers 404 — which is exactly what a base URL whose path was dropped
+ * gets, so the browser build's `/api/komga` hop can be proven to keep it.
+ */
+const PREFIX = (process.env.KOMGA_PATH ?? "").replace(/\/+$/, "");
+
 const server = createServer((req, res) => {
-  const url = new URL(req.url ?? "/", `http://127.0.0.1:${PORT}`);
-  log.push(`${req.method} ${url.pathname}${url.search} auth=${req.headers.authorization ?? "none"} ua=${(req.headers["user-agent"] ?? "").slice(0, 12)}`);
+  const asked = new URL(req.url ?? "/", `http://127.0.0.1:${PORT}`);
+  log.push(`${req.method} ${asked.pathname}${asked.search} auth=${req.headers.authorization ?? "none"} ua=${(req.headers["user-agent"] ?? "").slice(0, 12)}`);
+  if (PREFIX !== "" && !asked.pathname.startsWith(`${PREFIX}/`) && asked.pathname !== "/__log") {
+    const body = '{"error":"no route here"}';
+    res.writeHead(404, { "content-type": "application/json", "content-length": String(Buffer.byteLength(body)) });
+    return res.end(body);
+  }
+  const rest = PREFIX === "" ? asked.pathname : asked.pathname.slice(PREFIX.length) || "/";
+  const url = new URL(`${rest}${asked.search}`, `http://127.0.0.1:${PORT}`);
 
   if (url.pathname === "/__log") return json(res, log);
   if (url.pathname === "/api/v1/users/me") {

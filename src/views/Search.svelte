@@ -23,6 +23,11 @@
   import { downloads } from "../state/downloads.svelte";
   import SeriesActions from "../components/SeriesActions.svelte";
   import Cover from "../components/Cover.svelte";
+
+  /** A box, empty and ticked: the selection toggle is one control in two states. */
+  const EMPTY_BOX = "M4 4h16v16H4z";
+  const CHECKED_BOX = "M4 4h16v16H4zM8 12.2l2.6 2.6L16.4 9";
+  import SourceLink from "../components/SourceLink.svelte";
   import { settings } from "../state/settings.svelte";
   import {
     detailsCacheKey,
@@ -40,7 +45,6 @@
   import { chapterTitle } from "../lib/titles";
   import { mergeReadMarks, stillWanted } from "../lib/issues";
   import { orderChapters } from "../lib/chapter-order";
-  import { hostOf, openExternal } from "../lib/external";
 
   interface Props {
     initial?: string | null;
@@ -370,8 +374,17 @@
     notice = bits.join(" · ") || "Nothing to add";
   }
 
-  /** The pane's record: the fuller one when it has arrived, the search row until then. */
-  const record = $derived(shown && visibility.allows(shown) ? detailed ?? shown : null);
+  /**
+   * The pane's record: the fuller one when it has arrived, the search row until then.
+   *
+   * The fuller row is a different call, and details never carry the source page (the runtime cannot
+   * rebuild it without the source's own site), so the search row's url is carried over.
+   */
+  const record = $derived.by(() => {
+    if (shown === null || !visibility.allows(shown)) return null;
+    if (detailed === null) return shown;
+    return detailed.url === undefined && shown.url !== undefined ? { ...detailed, url: shown.url } : detailed;
+  });
 
   // Opening a result must not scroll; the grid expands at the tapped row.
   const inLibrary = $derived(shown !== null && saved.has(shown.id));
@@ -587,20 +600,8 @@
             <button class="btn ghost" onclick={() => go(pathTo("series", record.id))}>Open chapters</button>
           {/if}
         </div>
-        {#if record.url !== undefined}
-          <!-- Where it actually lives. A source that has a web page gets one link to it; an extension
-               or a folder has none, so the line is simply absent rather than a dead button. -->
-          <a
-            class="dsrc"
-            href={record.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            onclick={(event) => {
-              event.preventDefault();
-              void openExternal(record.url!);
-            }}>Open on {hostOf(record.url)} ↗</a
-          >
-        {/if}
+        <!-- Where it actually lives; absent for a source with no web page rather than a dead button. -->
+        <SourceLink url={record.url} />
         {#if record.description !== undefined && record.description !== ""}
           <p class="ddesc" class:open={descOpen}>{record.description}</p>
           {#if record.description.length > 320}
@@ -630,14 +631,17 @@
   <header class="bar">
     <!-- Wrapped so the title keeps the `margin-right: auto` that keeps the bar left-aligned. -->
     <span class="titlewrap"><PageMenu title="Search" current="search" size="xl" /></span>
+    <!-- One glyph in two states: a ticked box means "you are ticking results". The word took the
+         space a second control could use. -->
     <button
-      class="chip"
+      class="btn ghost icon"
       class:on={selectMode}
       aria-pressed={selectMode}
+      aria-label={selectMode ? "Done ticking results" : "Tick several results and save them together"}
       title={selectMode ? "Done ticking results" : "Tick several results and save them together"}
       onclick={() => setSelectMode(!selectMode)}
     >
-      {selectMode ? "Done" : "Select"}
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d={selectMode ? CHECKED_BOX : EMPTY_BOX} /></svg>
     </button>
     <button
       class="chip pinnedonly"
@@ -727,7 +731,7 @@
               view={settings.libraryView}
               columns={settings.browseColumns}
     titlePlacement={settings.browseTitle}
-              density={settings.browseDensity}
+    rowStyle={settings.rowStyle}
               horizontal={settings.browseHorizontal}
               sizes={fileSizes}
               empty=""
@@ -1165,18 +1169,6 @@
     -webkit-line-clamp: unset;
     line-clamp: unset;
     overflow: visible;
-  }
-
-  .dsrc {
-    display: inline-block;
-    margin-top: var(--s2);
-    font-size: var(--t-xs);
-    color: var(--text-3);
-    text-decoration: none;
-  }
-
-  .dsrc:hover {
-    color: var(--text);
   }
 
   .moredesc {

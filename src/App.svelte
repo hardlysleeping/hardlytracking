@@ -41,11 +41,28 @@ import { sourceMarks } from "./state/source-marks.svelte";
   import { viewport } from "./lib/layout.svelte";
   import { destinationOf } from "./lib/destinations";
   import { parseRoute, go } from "./lib/nav";
+  import { noteRoute } from "./lib/reader-origin";
   import { isFetchableRepo, registerProtocolHandler, repoFromLocation } from "./lib/deep-link";
   import { softwareHref, softwareRefFromLocation, watchSoftwareLinks } from "./lib/software";
   import { pairFromLocation, setHostToken, setRemoteHost } from "./lib/host";
 
   let route = $state(parseRoute(location.hash));
+
+  /**
+   * The one place a route changes.
+   *
+   * The reader's exit needs to know which screen it was opened from, and it must know *before* the
+   * reader mounts — a screen that asked later would race its own render. So the note is taken here,
+   * synchronously with the route, rather than in an effect over `route`.
+   */
+  function readRoute(): void {
+    const next = parseRoute(location.hash);
+    route = next;
+    noteRoute(location.hash, next.name === "read");
+  }
+  // The cold-start route counts too: a reader opened by a link has no origin, and must not inherit
+  // one from a chapter change later in the session.
+  noteRoute(location.hash, route.name === "read");
 
   const active = $derived(destinationOf(route));
 
@@ -115,7 +132,7 @@ import { sourceMarks } from "./state/source-marks.svelte";
     const software = softwareRefFromLocation(location.href);
     if (software !== null) {
       history.replaceState(null, "", `${location.pathname}#${softwareHref(software)}`);
-      route = parseRoute(location.hash);
+      readRoute();
     } else if (requested !== null && isFetchableRepo(requested)) {
       pendingRepo = requested;
       go("/extensions");
@@ -143,7 +160,7 @@ import { sourceMarks } from "./state/source-marks.svelte";
         go("/extensions");
         return;
       }
-      route = parseRoute(location.hash);
+      readRoute();
     };
     addEventListener("hashchange", onHash);
     // Categories and preferences are read once, with the library: a series deep link and the

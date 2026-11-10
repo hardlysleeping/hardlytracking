@@ -12,7 +12,8 @@
   import { library } from "../state/library.svelte";
   import { providerFor } from "../api/registry";
   import { needsLogin } from "../api/mihon-bridge";
-  import type { Series, SourceFilter, SourceFilterSelection } from "../api/source";
+  import type { BrowseTab, Paged, Series, SourceFilter, SourceFilterSelection, SourceProvider } from "../api/source";
+  import { browseTabLabel, browseTabsOf } from "../lib/source-tabs";
   import SeriesGrid from "../components/SeriesGrid.svelte";
   import SeriesDetail from "./Series.svelte";
   let expandedId = $state<string | null>(null);
@@ -74,7 +75,7 @@
     });
   });
 
-  let mode = $state<"popular" | "latest" | "search">("popular");
+  let mode = $state<BrowseTab | "search">("popular");
   /** The title whose quick actions are open, or null. */
   let actions = $state<Series | null>(null);
   let query = $state("");
@@ -97,6 +98,23 @@
   let askConsent = $state<{ host: string; question: string } | null>(null);
 
   const source = $derived(library.sources.find((row) => row.id === sourceId) ?? null);
+  /** The provider behind this source, or null when it is gone (extension removed mid-visit). */
+  function providerOrNull(): SourceProvider | null {
+    if (library.profile === null) return null;
+    try {
+      return providerFor(library.profile.providers, sourceId);
+    } catch {
+      return null;
+    }
+  }
+  /**
+   * The listings this source actually has.
+   *
+   * Read from the source's own declaration, so a source that cannot answer a listing does not get a
+   * chip for it — archive.org answers three (Trending, Popular, Latest), everything else keeps the
+   * Popular/Latest pair it has always had.
+   */
+  const tabs = $derived(browseTabsOf(source, providerOrNull()));
   /**
    * Only a source from the extension runtime has a settings screen of its own. Showing a gear on
    * archive.org or the device library would promise a page that does not exist.
@@ -151,13 +169,35 @@
     untrack(() => {
       items = [];
       page = 1;
-      mode = "popular";
+      // The source's own first listing, so Archive opens on Trending rather than on the all-time
+      // list that reads the same for months.
+      mode = tabs[0] ?? "popular";
       query = "";
       filterSheetOpen = false;
       void loadFilters();
       void run(1);
     });
   });
+
+  /**
+   * One page of whichever listing `mode` names.
+   *
+   * Trending falls back to Popular when a provider declares the tab but has no method — the tab row
+   * already drops it in that case, so this is only reachable mid-flight.
+   */
+  function listing(provider: SourceProvider, next: number): Promise<Paged<Series>> {
+    if (mode === "trending") return (provider.trending ?? provider.popular).call(provider, sourceId, next);
+    if (mode === "popular") return provider.popular(sourceId, next);
+    if (mode === "latest") return provider.latest(sourceId, next);
+    // The source's own form travels with the search, and only with the search: a Mihon extension
+    // applies filters in `getSearchManga` and ignores them for popular/latest.
+    return provider.search(
+      sourceId,
+      query.trim(),
+      next,
+      Object.keys(filterSelection).length > 0 ? filterSelection : undefined,
+    );
+  }
 
   async function run(next = 1): Promise<void> {
     if (!visibility.sourceAllowed(sourceId)) return;
@@ -169,14 +209,7 @@
     loginUrl = null;
     try {
       const provider = providerFor(library.profile.providers, sourceId);
-      const result =
-        mode === "popular"
-          ? await provider.popular(sourceId, next)
-          : mode === "latest"
-            ? await provider.latest(sourceId, next)
-            : // The source's own form travels with the search, and only with the search: a Mihon
-              // extension applies filters in `getSearchManga` and ignores them for popular/latest.
-              await provider.search(sourceId, query.trim(), next, Object.keys(filterSelection).length > 0 ? filterSelection : undefined);
+      const result = await listing(provider, next);
       if (revision !== privacy.revision || !visibility.sourceAllowed(sourceId)) return;
       items = next === 1 ? result.items : [...items, ...result.items];
       hasNext = result.hasNext;
@@ -250,7 +283,7 @@
     await login();
   }
 
-  function setMode(next: "popular" | "latest"): void {
+  function setMode(next: BrowseTab): void {
     mode = next;
     void run(1);
   }
@@ -290,8 +323,15 @@
   </form>
 
   <div class="modes" role="tablist" aria-label="Listing">
-    <button class="chip" class:on={mode === "popular"} role="tab" aria-selected={mode === "popular"} onclick={() => setMode("popular")}>Popular</button>
-    <button class="chip" class:on={mode === "latest"} role="tab" aria-selected={mode === "latest"} onclick={() => setMode("latest")}>Latest</button>
+    {#each tabs as tab (tab)}
+      <button
+        class="chip"
+        class:on={mode === tab}
+        role="tab"
+        aria-selected={mode === tab}
+        onclick={() => setMode(tab)}
+      >{browseTabLabel(tab)}</button>
+    {/each}
     {#if filters.length > 0}
       <button
         class="chip filters"
@@ -361,7 +401,7 @@
     view={settings.libraryView}
     columns={settings.browseColumns}
     titlePlacement={settings.browseTitle}
-    density={settings.browseDensity}
+    rowStyle={settings.rowStyle}
     horizontal={settings.browseHorizontal}
     empty={mode === "search" ? "This source found nothing." : "This source returned nothing."}
     expandAfter={visibleExpanded}

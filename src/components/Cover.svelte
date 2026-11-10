@@ -3,7 +3,8 @@
   import { imageCache } from "../lib/cache/images";
   import { isCoverKey } from "../lib/files/cover";
   /**
-   * A cover, with an honest fallback: the title, not a broken-image icon.
+   * A cover, with two honest failures instead of a broken-image icon: no cover URL at all draws the
+   * title, and a URL that will not load keeps its frame with a warning glyph on it.
    *
    * `loading="lazy"` plus `decoding="async"` is what keeps a 5 000-title library from opening
    * every image at once; the fixed aspect ratio means nothing reflows when they arrive.
@@ -77,6 +78,16 @@
   // Set by the effect below, never captured at construction: `series` is a prop and may change.
   let src = $state<string | undefined>(undefined);
   let tile = $state<HTMLElement | null>(null);
+  /**
+   * Whether this tile is worth asking the network for.
+   *
+   * The native `loading="lazy"` attribute is not the gate: measured in Chrome, an image that was
+   * fully inside the viewport with `loading="lazy"` never issued a request at all (no resource
+   * entry, `complete === false` forever), while the same URL with `loading="eager"` loaded in
+   * 108 ms. The observer below is the gate — the `<img>` is not even mounted until it fires — so
+   * a 5 000-title shelf still starts only the handful of covers on screen.
+   */
+  let nearby = $state(false);
 
   /**
    * A failed draw is about one URL, not about the title.
@@ -99,6 +110,7 @@
       return;
     }
     let live = true;
+    nearby = false;
     const needsLogin = series.coverHeaders !== undefined;
     const initial = loadable(url, needsLogin);
     src = initial;
@@ -117,6 +129,7 @@
       (entries) => {
         if (!entries.some((entry) => entry.isIntersecting)) return;
         observer.disconnect();
+        nearby = true;
         void imageCache.resolve(url, headers === undefined ? {} : { headers }).then((resolved) => {
           if (live && resolved !== url) {
             src = resolved;
@@ -135,8 +148,13 @@
 </script>
 
 <div class="cover {size}" bind:this={tile}>
-  {#if series.cover && !broken && src !== undefined}
-    <img src={src} alt="" loading="lazy" decoding="async" onerror={failed} />
+  {#if series.cover && !broken && src !== undefined && nearby}
+    <img src={src} alt="" loading="eager" decoding="async" onerror={failed} />
+  {:else if series.cover && broken}
+    <span class="missing" role="img" aria-label="Cover could not be loaded" title="Cover could not be loaded">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v14H4zM4 15l4.5-4.5L14 16M15 5.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zM9.5 9.2h5.5" /></svg>
+      <em>!</em>
+    </span>
   {:else}
     <span class="fallback">{series.title}</span>
   {/if}
@@ -169,6 +187,32 @@
     object-fit: cover;
     display: block;
   }
+  /* A cover that will not load: the frame stays, with a warning glyph on it. */
+  .missing {
+    position: relative;
+    display: grid;
+    place-items: center;
+    width: 100%;
+    height: 100%;
+    color: var(--text-3);
+  }
+  .missing svg {
+    width: 40%;
+    max-width: 34px;
+    min-width: 18px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.6;
+  }
+  .missing em {
+    position: absolute;
+    right: 4px;
+    bottom: 2px;
+    font-size: var(--t-xs);
+    font-style: normal;
+    color: var(--danger);
+  }
+
   .fallback {
     padding: var(--s2);
     font-size: var(--t-xs);

@@ -69,11 +69,15 @@ export interface RawSource {
   lang: string;
   isNsfw?: boolean;
   supportsLatest?: boolean;
+  /** The site this source reads. A manga's own `url` is a path on it, not a full address. */
+  homeUrl?: string | null;
 }
 
 export interface RawManga {
   id: number;
   title: string;
+  /** The source's own path for this title — `/comics/foo` — as the extension minted it. */
+  url?: string | null;
   thumbnailUrl?: string | null;
   author?: string | null;
   description?: string | null;
@@ -103,11 +107,32 @@ export function mapSource(raw: RawSource): Source {
     lang: raw.lang,
     nsfw: raw.isNsfw === true,
     supportsLatest: raw.supportsLatest === true,
+    ...(typeof raw.homeUrl === "string" && raw.homeUrl !== "" ? { baseUrl: raw.homeUrl } : {}),
   };
 }
 
-export function mapSeries(raw: RawManga, asset: (p: string) => string): Series {
+/**
+ * The source's own page for a title, from the two halves the runtime hands out separately.
+ *
+ * A Mihon extension knows its own site (`homeUrl`) and answers a manga's `url` as a path on it, so
+ * neither half is a link by itself. A full URL passes through; anything else needs both, and an
+ * absent half means no link rather than a link to the wrong page.
+ */
+export function mangaPage(raw: string | null | undefined, baseUrl: string | null | undefined): string | undefined {
+  if (typeof raw !== "string" || raw === "") return undefined;
+  if (/^https?:\/\//i.test(raw)) return raw;
+  if (typeof baseUrl !== "string" || baseUrl === "") return undefined;
+  try {
+    return new URL(raw.replace(/^\/+/, ""), baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`).toString();
+  } catch {
+    return undefined;
+  }
+}
+
+export function mapSeries(raw: RawManga, asset: (p: string) => string, baseUrl?: string): Series {
   const series: Series = { id: joinId("mihon", raw.id), provider: "mihon", title: raw.title };
+  const page = mangaPage(raw.url, baseUrl);
+  if (page !== undefined) series.url = page;
   if (raw.thumbnailUrl) series.cover = asset(raw.thumbnailUrl);
   if (raw.author) series.author = raw.author;
   if (raw.description) series.description = raw.description;
@@ -133,17 +158,17 @@ export function mapPages(paths: string[], asset: (p: string) => string): Page[] 
 
 // ---- the provider -----------------------------------------------------------
 
-const Q_SOURCES = `query Sources { sources { nodes { id displayName name lang isNsfw supportsLatest } } }`;
+const Q_SOURCES = `query Sources { sources { nodes { id displayName name lang isNsfw supportsLatest homeUrl } } }`;
 
 const M_FETCH_SOURCE = `mutation FetchSource($source: LongString!, $page: Int!, $type: FetchSourceMangaType!, $query: String, $filters: [FilterChangeInput!]) {
   fetchSourceManga(input: { source: $source, page: $page, type: $type, query: $query, filters: $filters }) {
-    mangas { id title thumbnailUrl author description status }
+    mangas { id title url thumbnailUrl author description status }
     hasNextPage
   }
 }`;
 
 const Q_MANGA = `query Manga($id: Int!) {
-  manga(id: $id) { id title thumbnailUrl author description status }
+  manga(id: $id) { id title url thumbnailUrl author description status }
 }`;
 
 /**
@@ -198,6 +223,14 @@ export function createMihonProvider(t: MihonTransport): SourceProvider {
    * survive a refresh of the series it belongs to.
    */
   const lastRows = new Map<string, RawChapter[]>();
+  /**
+   * Each source's site, as listed this session.
+   *
+   * The runtime splits a title's address in two — the source's `homeUrl` and the manga's own path —
+   * so the page can only be rebuilt while both are known. `sources()` fills this; a provider that
+   * never listed its sources (a saved title after a restart) falls back to the stored url.
+   */
+  const homes = new Map<string, string>();
   const STASH = 8;
 
   const remember = (seriesId: string, rows: RawChapter[]): void => {
@@ -218,6 +251,7 @@ export function createMihonProvider(t: MihonTransport): SourceProvider {
     filters?: SourceFilterSelection,
   ): Promise<Paged<Series>> => {
     const native = nativeId(sourceId, "mihon").replace(/^src:/, "");
+    const home = homes.get(native);
     // A form the user left alone is sent as null — the source's own defaults. An empty list would be
     // a claim about a form this call never read.
     const changes = wireChanges(filters);
@@ -228,7 +262,7 @@ export function createMihonProvider(t: MihonTransport): SourceProvider {
       query: query ?? null,
       filters: changes.length === 0 ? null : changes,
     });
-    return paged(data.fetchSourceManga.mangas.map((m) => mapSeries(m, t.asset)), data.fetchSourceManga.hasNextPage);
+    return paged(data.fetchSourceManga.mangas.map((m) => mapSeries(m, t.asset, home)), data.fetchSourceManga.hasNextPage);
   };
 
   return {
@@ -238,6 +272,9 @@ export function createMihonProvider(t: MihonTransport): SourceProvider {
 
     async sources() {
       const data = await t.gql<{ sources: { nodes: RawSource[] } }>(Q_SOURCES);
+      for (const raw of data.sources.nodes) {
+        if (typeof raw.homeUrl === "string" && raw.homeUrl !== "") homes.set(raw.id, raw.homeUrl);
+      }
       return data.sources.nodes.map(mapSource);
     },
 

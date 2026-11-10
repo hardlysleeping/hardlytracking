@@ -3,12 +3,18 @@
    * History: where you were, grouped the way a person remembers it.
    *
    * It is a shortcut back into a book, not an audit log — so each row is a cover, the chapter, how
-   * long ago, and a Continue button. The groups are Today / Yesterday / This week / Earlier.
+   * long ago, and the row itself is the way back in: a Continue button beside it repeated what a tap
+   * already does and cost the width the chapter name needed.
    */
   import Sheet from "../components/Sheet.svelte";
   import HistorySettingsPanel from "../components/HistorySettingsPanel.svelte";
   import { tick } from "svelte";
   import { incognito } from "../state/incognito.svelte";
+  import { INCOGNITO_PATH } from "../lib/marks";
+
+  /** A box, empty and ticked: the selection toggle is one control in two states. */
+  const EMPTY_BOX = "M4 4h16v16H4z";
+  const CHECKED_BOX = "M4 4h16v16H4zM8 12.2l2.6 2.6L16.4 9";
   import { historyGroups, historySwipe, selectedHistoryIds, toggleHistoryPin } from "../lib/history-controls";
   import { privacy } from "../state/privacy.svelte";
   import { library } from "../state/library.svelte";
@@ -264,8 +270,27 @@
       gear being stranded on the left under the heading.
     -->
     <div class="tools">
-    <button class="btn" aria-pressed={incognito.active} onclick={() => incognito.toggle()}>Incognito{incognito.active ? " on" : " off"}</button>
-    <button class="btn" aria-pressed={selecting} onclick={() => { selecting = !selecting; selected = new Set(); revealed = null; }}>{selecting ? "Done" : "Select"}</button>
+    <!-- Two toggles, two glyphs: a ghost for incognito and a ticked box for selection. The words took 190 px of a 390 px bar and pushed everything else onto a second line. -->
+    <button
+      class="btn ghost icon"
+      class:on={incognito.active}
+      aria-pressed={incognito.active}
+      aria-label={incognito.active ? "Turn incognito off" : "Turn incognito on"}
+      title={incognito.active ? "Incognito is on — history and sessions are paused" : "Incognito: read without leaving history"}
+      onclick={() => incognito.toggle()}
+    >
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d={INCOGNITO_PATH} /></svg>
+    </button>
+    <button
+      class="btn ghost icon"
+      class:on={selecting}
+      aria-pressed={selecting}
+      aria-label={selecting ? "Done selecting" : "Select rows"}
+      title={selecting ? "Done selecting" : "Select rows"}
+      onclick={() => { selecting = !selecting; selected = new Set(); revealed = null; }}
+    >
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d={selecting ? CHECKED_BOX : EMPTY_BOX} /></svg>
+    </button>
     <button
       class="btn ghost icon gear"
       bind:this={gear}
@@ -333,7 +358,6 @@
                   <span class="s">{row.chapterName} · page {row.page + 1} · {ago(row.at)}</span>
                 </div>
                 {#if !selecting}
-                  {#if mode !== "split"}<button class="btn ghost action" onclick={() => open(row)}>Continue</button>{/if}
                   <button class="btn ghost action" aria-label={`Actions for ${row.title} — ${row.chapterName}`} aria-expanded={revealed === row.chapterId}
                     onclick={() => { swiped = false; revealed = revealed === row.chapterId ? null : row.chapterId; }}>⋯</button>
                 {/if}

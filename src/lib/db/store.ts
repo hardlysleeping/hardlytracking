@@ -106,6 +106,14 @@ export interface RepoRow {
   indexUrl: string;
   name: string;
   at: number;
+  /**
+   * The repository the app ships with.
+   *
+   * Pinned rows are seeded on every boot and cannot be removed, because what they list is the app's
+   * own provider code: a repository that can be deleted is a source that disappears when the switch
+   * beside it still says "on". Its extensions stay removable — only the list is unmovable.
+   */
+  pinned?: boolean;
 }
 
 /** Where a download stands. `downloading` is written when a run starts, so a kill is visible. */
@@ -372,10 +380,15 @@ export class LibraryStore {
     const existing = await this.db.get<KnownSeriesRow>("knownSeries", row.id);
     // Keep the first name, refresh the cover: a source that renames a title should not rewrite
     // history, but a better cover is worth taking.
+    // `a ?? b === c ? x : y` binds as `(a ?? (b === c)) ? x : y`, so the old line kept a cover only
+    // when the new row had none — every freshly seen title was stored without one, which is why a
+    // title read from History but never saved had no thumbnail. The cover is the new one, or the
+    // remembered one.
+    const cover = row.cover ?? existing?.cover;
     const merged: KnownSeriesRow = {
       id: row.id,
       title: existing?.title ?? row.title,
-      ...(row.cover ?? existing?.cover === undefined ? {} : { cover: row.cover ?? existing?.cover }),
+      ...(cover === undefined || cover === "" ? {} : { cover }),
       at: row.at,
     };
     await this.db.put("knownSeries", merged as unknown as Record<string, unknown>);
@@ -567,6 +580,10 @@ export class LibraryStore {
   }
 
   async removeRepo(url: string): Promise<void> {
+    const row = await this.db.get<RepoRow>("repos", url);
+    if (row?.pinned === true) {
+      throw new Error(`${row.name} is the app's own repository and cannot be removed`);
+    }
     await this.db.remove("repos", url);
   }
 

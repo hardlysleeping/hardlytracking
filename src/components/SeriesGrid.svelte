@@ -10,9 +10,10 @@
   import type { Series } from "../api/source";
   import type { Badge } from "../lib/library/badges";
   import Cover from "./Cover.svelte";
-  import { browseMode, columnsFor, knownSize } from "../lib/browse-display";
+  import { browseMode, columnsFor, knownSize, rowStyleOf, type RowStyle } from "../lib/browse-display";
   import { viewport } from "../lib/layout.svelte";
   import { go, pathTo } from "../lib/nav";
+  import { clampText } from "../lib/clamp-text";
 
   /** A screenful and a bit; the rest arrives while the reader is still looking at the first row. */
   const FIRST_DRAW = 120;
@@ -36,7 +37,6 @@
     series: Series[];
     view?: "grid" | "compact" | "list" | "row" | "card";
     columns?: number;
-    density?: "compact" | "larger";
     horizontal?: boolean;
     sizes?: Map<string, number>;
     totals?: Map<string, number>;
@@ -84,12 +84,16 @@
      * or below the cover — moving a title onto a 42 px list thumbnail would make it unreadable.
      */
     titlePlacement?: "below" | "overlay";
+    /**
+     * The shape of a `row`. Three candidates are shipped so the owner can use each of them and keep
+     * one; `lib/browse-display` holds the list, the menu is in `BrowseDisplay`.
+     */
+    rowStyle?: RowStyle;
   }
   let {
     series,
     view = "grid",
     columns,
-    density = "larger",
     horizontal = false,
     sizes = new Map(),
     totals = new Map(),
@@ -109,7 +113,11 @@
     expandAfter = null,
     expanded = null,
     titlePlacement = "below",
+    rowStyle = "line",
   }: Props = $props();
+
+  /** Normalised once, so a stored value this build does not know cannot draw half a layout. */
+  const row = $derived(rowStyleOf(rowStyle));
 
   /**
    * How many tiles are in the DOM right now.
@@ -243,7 +251,7 @@
   <p class="empty">{empty}</p>
 {:else}
   <div class="browse-rail" class:horizontal tabindex={horizontal ? 0 : undefined} role="region" aria-label={horizontal ? "Horizontally browsable titles" : undefined}>
-  <div class="set {mode}" class:overtitle={overlaid} class:compact={density === "compact" || view === "compact"} class:explicit={columns !== undefined} style:--columns={columnCount} style:--cover="{cover}px">
+  <div class="set {mode}" class:overtitle={overlaid} class:compact={view === "compact"} class:explicit={columns !== undefined} class:row-line={mode === "row" && row === "line"} class:row-preview={mode === "row" && row === "preview"} class:row-table={mode === "row" && row === "table"} style:--columns={columnCount} style:--cover="{cover}px">
     {#each drawn as item (item.id)}
       {#if expanded !== null && expandAfter !== null && item.id === (expansionAnchor ?? expandAfter)}
         <div class="expand" data-expanded="true">
@@ -274,7 +282,9 @@
       >
           <div class="art">
             <Cover series={item} />
-            {#if pillsFor(item).length > 0}
+            <!-- A row states its unread count at the trailing edge, where it lines up down the
+                 column; a pill over a 42 px thumbnail covered the artwork to say the same thing. -->
+            {#if mode !== "row" && pillsFor(item).length > 0}
               <span class="pills">
                 {#each pillsFor(item) as pill (pill.kind)}
                   <span class="pill {pill.kind}">{pill.label}</span>
@@ -295,11 +305,22 @@
               <span class="tick" aria-hidden="true">{selection.has(item.id) ? "✓" : ""}</span>
             {/if}
             {#if overlaid}
-              <span class="over-title">{item.title}</span>
+              <!--
+                The title is cut to two lines here, with an ellipsis, rather than left to
+                `-webkit-line-clamp`: Chromium resolves `display: -webkit-box` to `flow-root`, so the
+                clamp does nothing there and the box simply chops the second line in half.
+              -->
+              <span class="over-title" use:clampText={{ lines: 2, text: item.title }}></span>
             {/if}
           </div>
         <span class="meta">
-          {#if !overlaid}<span class="title">{item.title}</span>{/if}
+          <!--
+            Same reason as the cover title above: the CSS clamp is dead under Chromium, so the line
+            count is enforced here — two lines in a grid or a card, one in a row.
+          -->
+          {#if !overlaid}
+            <span class="title" use:clampText={{ lines: mode === "row" ? 1 : 2, text: item.title }}></span>
+          {/if}
           {#if mode === "row"}
             <!--
               A row says four things and no more: who made it, what it is, how much of it is here,
@@ -307,10 +328,21 @@
               the one line that varies in length, and a column of rows reads as a column only when
               the varying line is not the one at the bottom.
             -->
-            {#if item.description}<span class="sub preview">{item.description}</span>{/if}
-            <span class="sub">
-              {[item.author, item.status, item.provider].filter(Boolean).join(" · ")}
-            </span>
+            {#if row === "preview"}
+              <!-- HardlyReader's row: the sentence is the second line whether or not this title has
+                   one, so a column of rows keeps one rhythm instead of shrinking to a header. -->
+              <span class="sub preview">{item.description || [item.author, item.status].filter(Boolean).join(" · ")}</span>
+              <span class="sub">{[item.provider, item.status].filter(Boolean).join(" · ")}</span>
+            {:else if row === "table"}
+              <!-- A table line is one line: the title, then who made it. Everything else is a
+                   column with its own edge to line up against. -->
+              <span class="sub">{[item.author, item.provider].filter(Boolean).join(" · ")}</span>
+            {:else}
+              {#if item.description}<span class="sub preview">{item.description}</span>{/if}
+              <span class="sub">
+                {[item.author, item.status, item.provider].filter(Boolean).join(" · ")}
+              </span>
+            {/if}
           {:else if mode === "card"}
             <span class="sub">
               {[item.author, item.provider, item.status].filter(Boolean).join(" · ")}
@@ -326,6 +358,19 @@
             <span class="sub">{badgeFor(item.id) > 0 ? `${badgeFor(item.id)} unread` : "\u00a0"}</span>
           {/if}
         </span>
+        {#if mode === "row" && row !== "table"}
+          <!-- The numbers come out to the trailing edge, where a list puts its duration: they line
+               up down the column instead of ragging with the length of each blurb. -->
+          <span class="end">
+            {#if badgeFor(item.id) > 0}<span class="count">{badgeFor(item.id)}</span>{/if}
+            {#if row === "preview" && totals.has(item.id)}<span class="ch">{totals.get(item.id)}</span>{/if}
+          </span>
+        {:else if mode === "row" && row === "table"}
+          <span class="cell author">{[item.author].filter(Boolean).join("")}</span>
+          <span class="cell status">{item.status ?? ""}</span>
+          <span class="cell unread">{badgeFor(item.id) > 0 ? badgeFor(item.id) : ""}</span>
+          <span class="cell size">{knownSize(sizes.get(item.id)) ?? ""}</span>
+        {/if}
       </button>
       {/if}
     {/each}
@@ -343,21 +388,25 @@
   .set.explicit.grid { grid-template-columns:repeat(var(--columns), minmax(0, 1fr)); }
   /* A card is the "tell me about it" layout, not a page: tight padding, a smaller cover and two
      lines of description leave the information and drop the air around it. */
-  .set.card { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,200px),1fr)); gap:10px; }
+  /* The card view follows the slider, like the grid: `auto-fit minmax(200px,1fr)` invented its
+     own column count, and a 132 px centred cover left a band of empty surface on both sides. */
+  .set.card { display:grid; grid-template-columns:repeat(var(--columns), minmax(0, 1fr)); gap:8px; }
   .set.card .tile { padding:8px; border:1px solid var(--line); background:var(--surface); align-content:start; }
-  .set.card .art { width:min(100%,132px); justify-self:center; }
+  .set.card .art { width:100%; justify-self:stretch; }
   .set.card .meta { gap:0; }
   .set.card .description { -webkit-line-clamp:2; line-clamp:2; font-size:var(--t-xs); }
   .set.row .art { width:clamp(68px,18vw,calc(var(--cover) * 0.76)); flex:none; }
   .set.row .meta { flex:1; }
   .set.row .sub, .set.card .sub { white-space:normal; overflow-wrap:anywhere; }
   .description { font-size:var(--t-sm); color:var(--text-2); display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
-  .set.grid.compact .title { font-size:var(--t-xs); }
+  /* One grid density. There used to be a Compact/Larger pair; both were the same grid with a
+     different gap, so the chips read as dead controls. The tighter one is the only one that was
+     ever chosen, so it is the grid, and the chips are gone. */
+  .set.grid .title { font-size:var(--t-xs); }
   /* Without a title row the reserved height is the cover plus a hair, so rows stop leaving a gap
      where the title used to be. */
   .set.overtitle .tile { contain-intrinsic-size: auto calc(var(--cover) * 1.5 + 6px); }
-  .set.explicit.grid.compact { gap: var(--s2) var(--s1); }
-  .set.explicit.grid:not(.compact) { gap: var(--s3) var(--s2); }
+  .set.explicit.grid { gap: var(--s2) var(--s1); }
   .set {
     /* Replacing the tapped row must not make the browser anchor to a later tile and jump. */
     overflow-anchor: none;
@@ -468,18 +517,128 @@
     flex: 1;
   }
 
+  /* ---- the three row shapes ----------------------------------------------------------------
+   *
+   * `line` is the row above and needs nothing extra. The other two are the candidates the owner is
+   * comparing, so each keeps the same anatomy — artwork, words, numbers — and changes only its
+   * proportions and where the numbers sit.
+   */
+
+  /* Preview (HardlyReader's row): a wider thumbnail and a real sentence, with the counts pulled out
+     to a fixed trailing column so they line up down the list. */
+  .set.row-preview .tile {
+    gap: var(--s3);
+    padding: 9px var(--s2);
+    align-items: flex-start;
+  }
+  .set.row-preview .art {
+    width: clamp(38px, 11vw, 46px);
+  }
+  .set.row-preview .title {
+    font-size: var(--t-md);
+  }
+  .set.row-preview .preview {
+    color: var(--text-2);
+  }
+  .set.row-preview .end,
+  .set.row-line .end {
+    flex: none;
+    display: grid;
+    justify-items: end;
+    gap: 1px;
+    padding-top: 1px;
+    line-height: 1.2;
+  }
+  .end .count {
+    font-size: var(--t-sm);
+    font-weight: 600;
+    color: var(--accent);
+    font-variant-numeric: tabular-nums;
+  }
+  .end .ch {
+    font-size: var(--t-xs);
+    color: var(--text-3);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Table (HardlyListening's list): one line per title in columns, zebra rows between the
+     hairlines, and every column with its own edge. Narrow screens drop the secondary columns into
+     the title block rather than shrinking each cell to an ellipsis. */
+  .set.row-table .tile {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) minmax(0, 0.8fr) 74px 54px 68px;
+    align-items: center;
+    gap: var(--s3);
+    padding: 7px var(--s2);
+  }
+  .set.row-table .tile:nth-child(even) {
+    background: color-mix(in srgb, var(--surface-2) 50%, transparent);
+  }
+  .set.row-table .art {
+    width: 38px;
+  }
+  .set.row-table .meta {
+    gap: 0;
+  }
+  .set.row-table .cell {
+    min-width: 0;
+    overflow: hidden;
+    font-size: var(--t-xs);
+    color: var(--text-3);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .set.row-table .cell.unread {
+    color: var(--accent);
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+  }
+  .set.row-table .cell.size {
+    color: var(--text-3);
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+  }
+
+  @media (max-width: 700px) {
+    /* A phone cannot hold six columns: the numbers keep the edge and the prose moves under the
+       title, which is where it was in the plain row. */
+    .set.row-table .tile {
+      grid-template-columns: auto minmax(0, 1fr) 54px;
+    }
+    .set.row-table .cell.author,
+    .set.row-table .cell.status,
+    .set.row-table .cell.size {
+      display: none;
+    }
+  }
+
   .art {
     position: relative;
   }
+  /* Rings are drawn *inside* what they mark. An outline outside the artwork lands on the tile beside
+     it in a tight grid — two selected neighbours read as one bordered box, and a row's ring is cut by
+     its own hairline — so every state ring uses a negative offset and the row draws its ring on the
+     row, not on the thumbnail inside it. */
   .tile:hover :global(.cover) {
     outline: 1px solid var(--line-strong);
+    outline-offset: -1px;
   }
   .tile.current :global(.cover) {
     outline: 2px solid var(--accent);
-    outline-offset: 1px;
+    outline-offset: -2px;
   }
   .tile.marked :global(.cover) {
     outline: 2px solid var(--accent);
+    outline-offset: -2px;
+  }
+  /* A row is the unit that gets selected, so the row carries the mark and the thumbnail goes quiet. */
+  .set.row .tile.current :global(.cover),
+  .set.row .tile.marked :global(.cover) {
+    outline: none;
+  }
+  .set.row .tile.current,
+  .set.row .tile.marked {
+    box-shadow: inset 0 0 0 2px var(--accent);
   }
   /* A held tile says so, because a hold now waits to learn whether it is a drag or a selection. */
   .tile.held {

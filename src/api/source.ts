@@ -39,7 +39,19 @@ export interface Source {
    * website (a local folder, a server the user runs).
    */
   baseUrl?: string;
+  /**
+   * The listings this source has, in the order its page shows them.
+   *
+   * Absent means the pair every source has had all along: Popular, then Latest. A source that can
+   * offer something else — archive.org's Trending, which is downloads *this week* rather than of all
+   * time — declares the whole row here, so the page draws what the source actually has instead of
+   * two buttons one of which never moves.
+   */
+  browseTabs?: readonly BrowseTab[];
 }
+
+/** A source's own listing, in the order its page offers them. */
+export type BrowseTab = "trending" | "popular" | "latest";
 
 export interface Series {
   /** Namespaced: `mihon:12`. */
@@ -192,6 +204,14 @@ export interface SourceProvider {
 
   sources(): Promise<Source[]>;
   popular(sourceId: string, page: number): Promise<Paged<Series>>;
+  /**
+   * What is being read *now*, when the source can tell.
+   *
+   * Absent for every source that only knows its own catalogue order. archive.org answers it by
+   * downloads this week, which is why it differs from `popular` — that one is sorted by all-time
+   * downloads and reads the same for months.
+   */
+  trending?(sourceId: string, page: number): Promise<Paged<Series>>;
   latest(sourceId: string, page: number): Promise<Paged<Series>>;
   /**
    * A title search, carrying the source's own filter choices when the user made any.
@@ -238,7 +258,17 @@ export interface SourceProvider {
   owns?(id: string): boolean;
 }
 
-const KINDS: ProviderKind[] = ["mihon", "dalvik", "htserver", "komga", "local", "archive", "webdav"];
+/**
+ * Every kind this app can run, in one exported list.
+ *
+ * Exported because a portable extension *declares* the kind it presents, and the parser that reads
+ * that declaration must refuse an unknown one by name. A second copy of this list in the extension
+ * layer would drift the first time a kind is added, and the drift would show up as an extension that
+ * installs and then never appears in Browse.
+ */
+export const PROVIDER_KINDS: readonly ProviderKind[] = ["mihon", "dalvik", "htserver", "komga", "local", "archive", "webdav"];
+
+const KINDS: ProviderKind[] = [...PROVIDER_KINDS];
 
 /**
  * What to call a provider on screen.

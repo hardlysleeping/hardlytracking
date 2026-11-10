@@ -41,6 +41,8 @@
   let password = $state("");
   let busy = $state(false);
   let formError = $state<string | null>(null);
+  /** The saved server a new entry's fields were copied from, named in the dialog. */
+  let seededFrom = $state<string | null>(null);
   let dialog: HTMLDialogElement;
   /** Closing or cancelling bumps this, so an abandoned probe can never save afterwards. */
   let generation = 0;
@@ -98,11 +100,16 @@
       error = `HardlyTracking supports ${KOMGA_MAX_SERVERS} Komga servers. Remove one before adding another.`;
       return;
     }
+    // A second entry is nearly always the same box and the same login, read for one more library
+    // (which is the only reason to have two: the address cannot separate them, only the id can). So
+    // the fields start filled in from the last server, and the name is the one thing to change.
+    const seed = servers.find(komgaServerConfigured) ?? null;
     editing = null;
     label = `Komga ${servers.length + 1}`;
-    address = "";
-    username = "";
-    password = "";
+    address = seed?.baseUrl ?? "";
+    username = seed?.username ?? "";
+    password = seed?.password ?? "";
+    seededFrom = seed?.label ?? null;
     formError = null;
     await showDialog();
   }
@@ -116,6 +123,7 @@
     username = server.username;
     // Blank means "keep the saved password": it is never rendered back into the field.
     password = "";
+    seededFrom = null;
     formError = null;
     await showDialog();
   }
@@ -290,6 +298,12 @@
         Use your normal Komga login; it stays on this device and is not in backups. Two servers may
         share an address.
       </p>
+      {#if seededFrom !== null}
+        <p class="hint seeded" role="status">
+          Filled in from {seededFrom} — the same address and login. Change the name to tell the two
+          apart, and pick the library on the row after saving.
+        </p>
+      {/if}
       <label>
         <span>Name</span>
         <input class="field" type="text" bind:value={label} placeholder="Komga" maxlength="40" disabled={busy} />

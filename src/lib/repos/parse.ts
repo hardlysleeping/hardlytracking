@@ -14,6 +14,7 @@ import type { RepoIndex, RepoKind } from "./index";
 import { parseAidokuRepo } from "./aidoku";
 import { parseMihonRepo } from "./mihon";
 import { parsePaperbackRepo } from "./paperback";
+import { parsePortableRepo } from "../extensions/portable";
 
 export class RepoFormatError extends Error {
   readonly kind: RepoKind | null;
@@ -32,6 +33,8 @@ export function parseRepoIndex(kind: RepoKind, raw: unknown, base: string): Repo
       return parseAidokuRepo(raw, base);
     case "paperback":
       return parsePaperbackRepo(raw, base);
+    case "portable":
+      return parsePortableRepo(raw, base);
     case "suwatte":
       throw new RepoFormatError("Suwatte runner lists are not read yet", "suwatte");
   }

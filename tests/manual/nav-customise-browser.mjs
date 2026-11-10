@@ -39,7 +39,15 @@ try {
   assert.deepEqual(await barLabels(),['More','History','Search','Browse','Library'],'the bar is the pref order');
   const bar=await page.locator('nav.bar button').evaluateAll(ns=>ns.map(n=>{const r=n.getBoundingClientRect();return {label:n.getAttribute('aria-label'),text:n.innerText.trim(),height:r.height,width:r.width,current:n.getAttribute('aria-current'),color:getComputedStyle(n).color};}));
   assert.equal(bar.length,5);
-  for(const item of bar){assert.equal(item.text,'','the bar stays icon-only');assert.ok(item.height>=44,`${item.label} keeps its tap target`);}
+  for(const item of bar){assert.equal(item.text,item.label,'the floating menu labels each destination');assert.ok(item.height>=44,`${item.label} keeps its tap target`);}
+  const menuBox=await page.locator('nav.bar').evaluate(n=>{const r=n.getBoundingClientRect(),s=getComputedStyle(n);return {left:r.left,right:r.right,top:r.top,bottom:r.bottom,height:r.height,position:s.position,borderRadius:s.borderRadius,borderTop:s.borderTopWidth,borderLeft:s.borderLeftWidth,shadow:s.boxShadow};});
+  assert.equal(menuBox.position,'fixed');
+  assert.equal(menuBox.height,56,'the floating menu keeps its compact height');
+  assert.ok(menuBox.left>0 && menuBox.right<440,'the menu floats inset from both screen edges');
+  assert.ok(menuBox.bottom<956,'the menu floats above the bottom edge');
+  assert.notEqual(menuBox.borderTop,'0px');
+  assert.notEqual(menuBox.borderLeft,'0px');
+  assert.notEqual(menuBox.shadow,'none');
   assert.equal(bar.find(item=>item.label==='Library').current,'page','active state still comes from destinationOf');
   const type=await title().evaluate(n=>({text:n.innerText.trim(),size:getComputedStyle(n).fontSize,weight:getComputedStyle(n).fontWeight,height:n.getBoundingClientRect().height}));
   const token2xl=await page.evaluate(()=>getComputedStyle(document.documentElement).getPropertyValue('--t-2xl').trim());
@@ -48,7 +56,7 @@ try {
   assert.equal(type.weight,'650');
   assert.ok(type.height>=44,'the title is a 44 px tap target');
   await noOverflow();
-  evidence.push({check:'(a) bottom bar = pref order, icon-only, 48 px targets, title keeps h1 type',bar,type,token2xl});
+  evidence.push({check:'(a) floating bottom menu = pref order, labelled 48 px targets, inset glass pill, title keeps h1 type',bar,type,menuBox,token2xl});
   await shot('a-bar-order');
 
   // ---- (f) the title menu lists every destination and navigates --------------------------------

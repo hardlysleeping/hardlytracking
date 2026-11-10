@@ -50,6 +50,15 @@ export const STORED_IMAGE_SCHEME = "book:";
 
 export class ImageCache {
   private db: Database | null = null;
+  /**
+   * How bytes are fetched.
+   *
+   * A plain `fetch` is right on an http(s) origin (the browser, the self-hosted build) and useless
+   * inside Tauri, where the webview is its own origin and a cover on archive.org has no CORS header:
+   * the fetch failed, so the cover was never stored and every launch re-downloaded it. `transport`
+   * (`api/transport.ts`) is the same seam the providers use — Rust does the request there.
+   */
+  private fetcher: (input: string, init?: RequestInit) => Promise<Response> = (input, init) => fetch(input, init);
   private urls = new Map<string, string>();
   private inflight = new Map<string, Promise<string>>();
   /**
@@ -64,9 +73,10 @@ export class ImageCache {
   private retiring: string[] = [];
   policy: CachePolicy = { ...CACHE_POLICY_DEFAULT };
 
-  attach(db: Database, policy?: Partial<CachePolicy>): void {
+  attach(db: Database, policy?: Partial<CachePolicy>, fetcher?: (input: string, init?: RequestInit) => Promise<Response>): void {
     this.db = db;
     if (policy !== undefined) this.policy = { ...this.policy, ...policy };
+    if (fetcher !== undefined) this.fetcher = fetcher;
   }
 
   setPolicy(policy: Partial<CachePolicy>): void {
@@ -140,7 +150,7 @@ export class ImageCache {
         }
         // A source that will not serve an image to an anonymous request (Komga) hands its URL with
         // the header it needs; this is the only place those bytes are fetched.
-        const response = await fetch(url, options.headers === undefined ? {} : { headers: options.headers });
+        const response = await this.fetcher(url, options.headers === undefined ? {} : { headers: options.headers });
         if (!response.ok) return url;
         const type = response.headers.get("content-type") ?? "";
         if (!ALLOWED.test(type)) return url;

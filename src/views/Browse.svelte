@@ -74,6 +74,21 @@
     <p class="note warn">No extension host answered, so there is nothing to browse yet. Check the runtime, then reload.</p>
   {/if}
 
+  <!--
+    A configured source that did not answer, in its own words: a Komga that is asleep or on another
+    network is the difference between "you own nothing here" and "your server is not reachable", and
+    only the list can say which. Retying is the same load the screen does at launch, so a server that
+    came back heals without a relaunch.
+  -->
+  {#if library.sourceNotes.length > 0}
+    <div class="note warn sourcenote">
+      {#each library.sourceNotes as note (note)}
+        <p>{note}</p>
+      {/each}
+      <button class="chip small" onclick={() => void library.loadSources()}>Try again</button>
+    </div>
+  {/if}
+
   {#if library.sources.length === 0}
     <div class="blank">
       <p class="blankline">No sources yet.</p>
@@ -470,5 +485,23 @@
 
   .blankacts {
     margin-top: var(--s2);
+  }
+
+  /* A source that did not answer: the list's own warning, not a toast that times out. */
+  .sourcenote {
+    display: grid;
+    gap: var(--s1);
+    justify-items: start;
+    margin: 0 0 var(--s4);
+    padding: var(--s2);
+    border: 1px solid var(--line);
+    border-radius: var(--r2);
+    color: var(--danger);
+  }
+
+  .sourcenote p {
+    margin: 0;
+    font-size: var(--t-sm);
+    overflow-wrap: anywhere;
   }
 </style>

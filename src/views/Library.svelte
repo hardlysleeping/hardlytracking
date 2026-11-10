@@ -876,12 +876,33 @@
           <ContinueRail rows={continueRows} size={settings.continueSize} />
         {/if}
 
-        <div class="tools">
-          <button class="btn ghost" onclick={() => (filterOpen = true)}>
-            Filter{filterCount > 0 ? ` (${filterCount})` : ""}
+        <div class="tools" class:collapsed={settings.toolsCollapsed}>
+          <!--
+            One fold for the three doors. The row is three buttons of different widths for questions
+            a reader asks in bursts — "filter this, sort it, change the covers" — and then does not
+            ask again for ten minutes, so it gives the pixels back. Folded is remembered, like every
+            other display choice; the handle keeps saying what is inside it, so a filter that is on
+            is still visible with the row away.
+          -->
+          <button
+            class="fold"
+            aria-expanded={!settings.toolsCollapsed}
+            aria-label={settings.toolsCollapsed ? "Show filter, sort and display" : "Hide filter, sort and display"}
+            title={settings.toolsCollapsed ? "Show filter, sort and display" : "Hide filter, sort and display"}
+            onclick={() => settings.set("toolsCollapsed", !settings.toolsCollapsed)}
+          >
+            <svg class="caret" class:up={!settings.toolsCollapsed} viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6" /></svg>
+            {#if settings.toolsCollapsed}
+              <span class="summary">Filter{filterCount > 0 ? ` (${filterCount})` : ""} · Sort · {sortLabel}</span>
+            {/if}
           </button>
-          <button class="btn ghost" onclick={() => (sortOpen = true)}>Sort · {sortLabel}</button>
-          <button class="btn ghost" onclick={() => (displayOpen = true)}>Display</button>
+          {#if !settings.toolsCollapsed}
+            <button class="btn ghost" onclick={() => (filterOpen = true)}>
+              Filter{filterCount > 0 ? ` (${filterCount})` : ""}
+            </button>
+            <button class="btn ghost" onclick={() => (sortOpen = true)}>Sort · {sortLabel}</button>
+            <button class="btn ghost" onclick={() => (displayOpen = true)}>Display</button>
+          {/if}
         </div>
 
         <ChipRow chips={filterChips} onremove={removeChip} />
@@ -930,7 +951,7 @@
             cover={cover}
             columns={settings.browseColumns}
     titlePlacement={settings.browseTitle}
-            density={settings.browseDensity}
+    rowStyle={settings.rowStyle}
             horizontal={settings.browseHorizontal}
             sizes={fileSizes}
             totals={counts.total}
@@ -1282,6 +1303,27 @@
     gap: var(--s2);
     margin-bottom: var(--s4);
   }
+  /* The handle is bare: the row it folds is the loud thing, so the caret is the only furniture.
+     Folded, it carries the summary instead of three buttons, which keeps the state of the shelf
+     (a filter is on, the sort is not Title) readable without opening anything. */
+  .tools .fold {
+    display: flex;
+    align-items: center;
+    gap: var(--s1);
+    min-height: 24px;
+    padding: 0 2px;
+    border: 0;
+    background: transparent;
+    color: var(--text-3);
+    font: inherit;
+    cursor: pointer;
+  }
+  .tools .fold:hover, .tools .fold:focus-visible { color: var(--text-1); }
+  .tools .fold .caret { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; transition: transform 140ms ease; }
+  .tools .fold .caret.up { transform: rotate(180deg); }
+  .tools .fold .summary { font-size: var(--t-sm); }
+  .tools.collapsed { margin-bottom: var(--s3); }
+  @media (prefers-reduced-motion: reduce) { .tools .fold .caret { transition: none; } }
 
     .blank {
     display: grid;

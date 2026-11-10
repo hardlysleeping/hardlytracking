@@ -6,9 +6,35 @@ Board: `hermes kanban --board hardlytracking` · Backlog: `BACKLOG.md` · Plan (
 **Priority order: standalone iPhone first** (owner, 2026-10-29). **WIP limit: 2** — one card per file
 area; `src/api/` + `src-tauri/` are the bottlenecks.
 
-Repo: `~/apps/hardlytracking` · branch `master` · remote `github.com/hardlysleeping/hardlytracking` (private).
+Repo: `~/apps/hardlytracking` · branch `master` · remote `github.com/hardlysleeping/hardlytracking` (public).
 
-## Now (in dispatch order)
+## Current work: reader usability (2026-11-03)
+
+Plan: `~/.hermes/plans/2026-11-03_024548-hardlytracking-reader-usability.md`. WIP: four isolated implementation worktrees (reader, Library/Search views/controls, Stats, theme parity) plus parent integration; no automatic board dispatch. Owner: current parent session. Cards are held blocked while executed by this session to prevent duplicate gateway workers.
+
+| Card | Backlog | Priority | Work / gate |
+|---|---|---|---|
+| T66 `t_6ce9d03c` | 68 | P0 | DONE f905de0 + integration: shared BrowseDisplay for Library/Search/Series, 5 unit tests and 96 geometry cases (Row/Grid/Card, 2–8 columns, density, horizontal rail off by default); today 8 live cases at 320–1440 with zero document overflow while a card is open. |
+| T67 `t_5637a6ea` | 69 | P0 | DONE bf404ce+b2a547a: direct eye/pin, tuck/restore session-local privacy and Reader route guard; 15 browser checks, clean 1,018 tests/type/Svelte/build, Pro Max emulation. Awaiting next IPA. |
+| T64 `t_51a23c55` | 66 | P0 | DONE: expanded-card action row measured at 320/390/440/844/1024/1440 in tests/manual/search-glass.mjs — pairwise overlap false in all 8 cases, three actions present, zero page/card overflow. |
+| T51 `t_eacc901e` | 53 | P0 | DONE 8015b16/1fe86e3: drag with the overlay closed moved the page 0 → 195 px; taps, edge tap, centre toggle and horizontal turns still work; 60 geometry cases with zero page errors on the current tree. |
+| T52 `t_8462b0f1` | 54 | P0 | DONE: fit width 390×780, fit height 422×844 and whole page 390×780 measured at 390×844, plus landscape pairs; no inaccessible edges in the 60-case run. |
+| T53 `t_3393aa57` | 55 | P0 | DONE: resumed page 4 starts at 47 ms before page 5 at 181 ms; cancellation and bounded prefetch pass; read-ahead later made the budget configurable (None/2/3/5/10, default 3) with the current page still first. |
+| T54 `t_2c9c129c` | 56 | P0 | DONE b2bde7a: expansion replaces the tapped row and opening a card leaves scrollY at 0; re-verified in tests/manual/search-glass.mjs at 440×956 and at six widths. |
+| T68 `t_0d94b8de` | 70 | P1 | DONE: ThemePanel with 10 colour keys, background image/blur/dim/glass, validated persistence, reset and four-mode compatibility; 8 unit tests plus live input-event, reload and 320/390/844 layout checks. |
+| T69 `t_84da96af` | 71 | P1 | DONE c5646f9: the opened search card carries its own cover as a blurred, aria-hidden, untappable backdrop with a readability veil; resets between titles, drops under prefers-reduced-transparency. 6 unit tests, 8 live cases at 320–1440 (zero overflow, zero button overlap, no scroll on open), screenshot reviewed. |
+| T65 `t_f1939433` | 67 | P1 | Dedicated Stats tab backed by history/read marks/progress/sessions; isolated implementation underway |
+| T55 `t_be2108a2` | 57 | P1 | DONE: webtoon seam measured 0 px at 390×844; vertical mode keeps its 12 px page gap by design. |
+| T56 `t_86e5ac0c` | 58 | P1 | DONE 60a2445: four regressions, eleven browser cases at Pro Max portrait/landscape; validated persistence and immediate current-first queue updates; clean 1,013 tests/type/Svelte/build. Awaiting next IPA. |
+| T57 `t_4f278979` | 59 | P1 | Seen thumbnails remain cached across revisits: Seen covers survive remount/reload/offline; stable keys; respect cache quota; object URL cleanup preserves bytes. |
+| T58 `t_ca2518ca` | 60 | P1 | Cache and index search results item metadata and issues: Reuse stored results and chapters; explicit refresh; offline read; keys include source/query/filter identity. |
+| T59 `t_fc34fbd2` | 61 | P1 | Long-hold issue range read and download actions: Hold without opening reader; above/below mark read in displayed order with clear anchor semantics; download and read/unread actions. |
+| T60 `t_ff6df231` | 62 | P2 | Autoscroll speed slider and linear or bottom-speed curves: Off until started; speed, linear/slower-bottom/faster-bottom; pause/stop; background/exit teardown. |
+| T61 `t_c2ce4135` | 63 | P2 | Default-off automatic download on library add: Separate opt-in; use existing queue; dedupe and surface failures; no real bulk tests. |
+| T62 `t_d65253fd` | 64 | P2 | Default-off keep existing library offline policy: Reconcile missing issues only; never repeat completed downloads; disabling never deletes. |
+| T63 `t_85dc29b7` | 65 | P2 | Per-category keep offline policy: Independent category opt-ins; shared reconciliation; overlapping categories dedupe; disabling never deletes. |
+
+## Earlier roadmap snapshot (not current dispatch order)
 
 | Card | Backlog | Work | Gate |
 |---|---|---|---|

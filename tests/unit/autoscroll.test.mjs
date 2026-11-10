@@ -104,7 +104,7 @@ test("the reader starts it only on request, and stops it on every exit", () => {
 });
 
 test("the control is a button with a pressed state, offered only where it can work", () => {
-  assert.match(flat(reader), /const canAutoscroll = \$derived\(settings\.readerMode === "vertical" \|\| settings\.readerMode === "webtoon"\)/);
+  assert.match(flat(reader), /const canAutoscroll = \$derived\(settings\.readerMode === "vertical"\)/);
   assert.match(flat(reader), /\{#if canAutoscroll\} <div class="autoline"> <button class="btn" class:on=\{autoRunning\} aria-pressed=\{autoRunning\} onclick=\{toggleAuto\}>/);
   assert.match(flat(reader), /autoRunning \? "Pause autoscroll" : "Autoscroll"/);
   // Speed and curve live in the reader's own sheet, next to the other reading preferences.

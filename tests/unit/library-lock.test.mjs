@@ -13,7 +13,15 @@ import * as pins from '../../src/lib/pin.ts';
 // locks and unlocks starts from a real hash of a test code.
 const PIN = '2468';
 const PIN_RECORD = await makePinRecord(PIN);
-const prefs = () => ({ privacyPin: PIN_RECORD });
+// A pref store the way `Settings` behaves for the fields the curtain writes: the assignment lands
+// first and the save is fire-and-forget. The band's fold is a preference now, so the fixture has to
+// keep one instead of only holding the PIN.
+const prefs = (stored = {}) => ({
+  privacyPin: PIN_RECORD,
+  privacyBandCollapsed: false,
+  ...stored,
+  set(key, value) { this[key] = value; },
+});
 
 // Exercise the actual state methods with identity runes; browser fixture covers Svelte reactivity.
 function state(file, name, privacy, settings) {
@@ -41,29 +49,25 @@ test('lock refuses without a PIN, counts wrong tries, and only a right PIN raise
   assert.equal(privacy.lock(), 'already');
   assert.equal(await privacy.attemptUnlock('0000'), 'wrong');
   assert.equal(privacy.locked, true, 'a wrong PIN keeps the curtain up');
-  assert.equal(privacy.notice, 'That PIN is not right — 4 tries left.');
+  assert.equal(privacy.notice, 'That PIN is not right — try again.');
   assert.equal(await privacy.attemptUnlock('2469'), 'wrong');
-  assert.equal(privacy.notice, 'That PIN is not right — 3 tries left.');
+  assert.equal(privacy.notice, 'That PIN is not right — try again.');
   assert.equal(await privacy.attemptUnlock('2468'), 'unlocked');
   assert.equal(privacy.locked, false);
   assert.equal(privacy.bandCollapsed, true, 'the fold chosen before locking comes back');
-  assert.equal(privacy.triesLeft, 5);
 });
 
-test('five wrong tries pause the keypad instead of leaving it unbounded', async () => {
+test('wrong tries are unlimited: no count, no pause, and the right PIN still opens it', async () => {
   const privacy = state('privacy', 'privacy');
   privacy.lock();
-  for (let left = 4; left >= 1; left--) {
+  // Twenty wrong tries in a row, on one clock tick: none of them is refused for being the last.
+  for (let i = 0; i < 20; i++) {
     assert.equal(await privacy.attemptUnlock('1111', 1_000), 'wrong');
-    assert.equal(privacy.triesLeft, left);
+    assert.equal(privacy.locked, true);
   }
-  assert.equal(await privacy.attemptUnlock('1111', 1_000), 'wrong');
-  assert.equal(privacy.notice, 'That PIN is not right — no tries left. Wait a minute.');
-  assert.equal(privacy.locked, true);
-  // Even the right PIN is refused while the pause runs, and it lifts on its own clock.
-  assert.equal(await privacy.attemptUnlock(PIN, 2_000), 'wait');
-  assert.equal(privacy.locked, true);
-  assert.equal(await privacy.attemptUnlock(PIN, 62_000), 'unlocked');
+  assert.equal(privacy.notice, 'That PIN is not right — try again.');
+  assert.equal(await privacy.attemptUnlock(PIN, 1_000), 'unlocked');
+  assert.equal(privacy.locked, false);
 });
 
 test('a foreign or corrupt stored record reads as no PIN, never a lock nobody can open', () => {
@@ -96,6 +100,43 @@ test('lock folds the band at once, the tab still works while locked, and unlocki
   assert.equal(privacy.bandCollapsed, false);
   await privacy.attemptUnlock(PIN);
   assert.equal(privacy.bandCollapsed, false);
+});
+
+test('the fold is a preference: it survives a relaunch, and the curtain never rewrites it', async () => {
+  const settings = prefs();
+  const privacy = state('privacy', 'privacy', undefined, settings);
+  assert.equal(privacy.bandCollapsed, false);
+  privacy.toggleBand();
+  assert.equal(privacy.bandCollapsed, true);
+  assert.equal(settings.privacyBandCollapsed, true, 'the fold is written, not only drawn');
+
+  // A relaunch: a new state object over the same stored preferences reads the fold back.
+  const reopened = state('privacy', 'privacy', undefined, settings);
+  assert.equal(reopened.bandCollapsed, true, 'the band comes back folded, the way it was left');
+
+  // Locking folds the band without touching the stored choice, so unlocking hands it back as-is.
+  assert.equal(reopened.lock(), 'locked');
+  assert.equal(reopened.bandCollapsed, true);
+  assert.equal(settings.privacyBandCollapsed, true, 'a lock is not the reader changing their mind');
+  await reopened.attemptUnlock(PIN);
+  assert.equal(reopened.bandCollapsed, true);
+  assert.equal(settings.privacyBandCollapsed, true);
+
+  // An open band is remembered the same way.
+  reopened.toggleBand();
+  assert.equal(settings.privacyBandCollapsed, false);
+  assert.equal(state('privacy', 'privacy', undefined, settings).bandCollapsed, false);
+});
+
+test('the fold is a declared preference, so `set` persists it and `load` reads it back', () => {
+  // `Settings.set` writes `settings.<key>` for any declared `Prefs` key and nothing else, so the
+  // declaration plus the read in `load` *is* the persistence path — a key that is only a `$state`
+  // field would survive the session and be lost on the next launch.
+  const source = readFileSync(new URL('../../src/state/settings.svelte.ts', import.meta.url), 'utf8');
+  const prefs = source.slice(source.indexOf('export interface Prefs'), source.indexOf('class Settings'));
+  assert.match(prefs, /privacyBandCollapsed: boolean;/, 'the fold is part of the stored preference shape');
+  assert.match(source, /privacyBandCollapsed = \$state\(false\)/, 'and it has a default of open');
+  assert.match(source, /read<boolean>\("privacyBandCollapsed", false\)/, 'load reads it, so a relaunch restores it');
 });
 
 test('a delayed preference load while locked remembers intent without revealing it', async () => {

@@ -449,6 +449,23 @@ function sourceRelative(sourceBaseUrl: string | undefined, raw: string | null | 
   }
 }
 
+/**
+ * The manga's own page on the source's site.
+ *
+ * Unlike an image, a page path keeps its leading slash (`/manga/one-piece`), so this is
+ * `sourceRelative` without that exclusion — and a full URL still passes through untouched.
+ */
+function sourcePage(sourceBaseUrl: string | undefined, raw: string | null | undefined): string | undefined {
+  if (raw === null || raw === undefined || raw === "") return undefined;
+  if (/^https?:\/\//i.test(raw)) return raw;
+  if (sourceBaseUrl === undefined || sourceBaseUrl === "") return undefined;
+  try {
+    return new URL(raw.replace(/^\/+/, ""), sourceBaseUrl.endsWith("/") ? sourceBaseUrl : `${sourceBaseUrl}/`).toString();
+  } catch {
+    return undefined;
+  }
+}
+
 function base64(bytes: Uint8Array): string {
   // Node and the browser disagree about how to feed btoa, so go through Buffer where it exists.
   if (typeof Buffer !== "undefined") return Buffer.from(bytes).toString("base64");
@@ -486,6 +503,21 @@ export interface InstalledExtension {
    * user has to reinstall after every restart of a container they never touched.
    */
   apk?: ArrayBuffer;
+  /**
+   * A portable extension's own code, kept on the row the way an APK is.
+   *
+   * There is no runtime to ask: the package *is* `provider.js`, and this device is its only store.
+   * Keeping the text here is also what lets the app start a source with no network — the repository
+   * is for updates, not for making a fresh install work.
+   */
+  portable?: {
+    /** The text of `provider.js`, as the repository served it. */
+    source: string;
+    /** The provider kind it declared; ids are emitted under it. */
+    kind: ProviderKind;
+    /** The host API it was built against. */
+    hostApi: number;
+  };
 }
 
 /**
@@ -713,6 +745,7 @@ export function createDalvikProvider(options: DalvikProviderOptions): SourceProv
 
   function toSeries(sourceId: string, manga: DalvikManga, sourceBaseUrl?: string): Series {
     const id = joinId(kind, `${sourceId}:${manga.url}`);
+    const page = sourcePage(sourceBaseUrl, manga.url);
     if (typeof manga.title === "string" && manga.title !== "") titles.set(id, manga.title);
     return {
       id,
@@ -723,6 +756,7 @@ export function createDalvikProvider(options: DalvikProviderOptions): SourceProv
         : { cover: imageAddress(sourceBaseUrl, manga.thumbnail_url) }),
       ...(typeof manga.author === "string" ? { author: manga.author } : {}),
       ...(typeof manga.description === "string" ? { description: manga.description } : {}),
+      ...(page === undefined ? {} : { url: page }),
     };
   }
 

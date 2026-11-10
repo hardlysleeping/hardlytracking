@@ -41,19 +41,25 @@ function cornerOr(value: unknown): NavCorner {
 
 import { DEFAULT_READ_AHEAD, readAheadOf, type ReadAhead } from "../lib/reader-ahead";
 import { scaleMapOf } from "../lib/reader-scale";
-import { browseMode, columnsFor } from "../lib/browse-display";
+import { browseMode, columnsFor, rowStyleOf, type RowStyle } from "../lib/browse-display";
 export type LibraryView = "grid" | "compact" | "list" | "row" | "card";
 export type Sort = "title" | "recent" | "source";
-export type ReaderMode = "vertical" | "webtoon" | "paged" | "ltr" | "rtl";
-export type Fit = "width" | "height" | "contain";
+export type ReaderMode = "vertical" | "paged" | "ltr" | "rtl";
+export type Fit = "width" | "height" | "contain" | "fill";
 
 const KEY = "settings.";
 
 /** The fields a caller may write through `set`, so a typo is a compile error. */
 export interface Prefs {
   libraryView: LibraryView;
+  /**
+   * The shape of a `row` in the shelf: line, preview or table.
+   *
+   * A preference, not component state: which list shape the owner keeps is a decision about his
+   * library, so it travels in an export and survives a relaunch like every other display choice.
+   */
+  rowStyle: RowStyle;
   browseColumns: number;
-  browseDensity: "compact" | "larger";
   browseHorizontal: boolean;
   /**
    * Where a grid tile's title goes: under the artwork, or on it.
@@ -195,6 +201,13 @@ export interface Prefs {
   bottomNav: string[];
   /** The Library's section tabs, in tab order. Every section is in it; only the order changes. */
   libraryTabs: string[];
+  /**
+   * The Library's filter · sort · display row, folded away.
+   *
+   * Folded is a real answer — the shelf gets the pixels back and the row is one tap from returning —
+   * so it is remembered rather than reset on every launch.
+   */
+  toolsCollapsed: boolean;
   /** Cover/page image cache ceiling, MB. */
   imageCacheLimitMb: number;
   /** Cache images at all. */
@@ -208,6 +221,14 @@ export interface Prefs {
    * recognises — a corrupt row means "no PIN", never a lock nobody can open.
    */
   privacyPin: string;
+  /**
+   * The visibility band's fold.
+   *
+   * The reader's own choice, not the curtain's: locking folds the band on top of it, so raising the
+   * curtain gives back the fold they left behind. A preference, so a relaunch — and an export —
+   * keeps it, the same promise Continue's fold makes.
+   */
+  privacyBandCollapsed: boolean;
   /** The first-run screen has been seen; it never shows again. */
   welcomed: boolean;
 }
@@ -216,8 +237,8 @@ class Settings {
   ready = $state(false);
 
   libraryView = $state<LibraryView>("grid");
+  rowStyle = $state<RowStyle>("line");
   browseColumns = $state(3);
-  browseDensity = $state<"compact" | "larger">("larger");
   browseHorizontal = $state(false);
   browseTitle = $state<"below" | "overlay">("below");
   coverSize = $state(132);
@@ -248,7 +269,7 @@ class Settings {
   /** Off by default: nothing is downloaded unless the reader asked. */
   keepOnAdd = $state(false);
   keepCategories = $state<string[]>([]);
-  /** Space between pages in vertical/webtoon mode, px. */
+  /** Space between pages in vertical mode, px. */
   pageGap = $state(0);
   keepAwake = $state(true);
   /** Tap zones: left/right thirds turn pages, the middle shows the controls. */
@@ -271,10 +292,13 @@ class Settings {
   historyNavCorner = $state<NavCorner>("bottom-right");
   bottomNav = $state<string[]>([...DEFAULT_BOTTOM_NAV]);
   libraryTabs = $state<string[]>([...DEFAULT_LIBRARY_TABS]);
+  toolsCollapsed = $state(false);
   imageCacheLimitMb = $state(256);
   cacheImages = $state(true);
   /** Salted hash only — see `lib/pin`. Empty means the curtain has no PIN and refuses to lock. */
   privacyPin = $state("");
+  /** Folded by the reader; the curtain adds its own fold on top without rewriting this. */
+  privacyBandCollapsed = $state(false);
   /**
    * The first-run screen has been shown and dismissed.
    *
@@ -294,9 +318,9 @@ class Settings {
     const legacyView = await read("libraryView", this.libraryView);
     this.libraryView = browseMode(legacyView);
     this.browseColumns = columnsFor(await read("browseColumns", this.browseColumns), 1280);
-    const density = await read("browseDensity", legacyView === "compact" ? "compact" : this.browseDensity);
-    this.browseDensity = density === "compact" ? "compact" : "larger";
     this.browseHorizontal = (await read("browseHorizontal", false)) === true;
+    this.rowStyle = rowStyleOf(await read<unknown>("rowStyle", this.rowStyle));
+    this.toolsCollapsed = (await read<boolean>("toolsCollapsed", false)) === true;
     const title = await read("browseTitle", this.browseTitle);
     this.browseTitle = title === "overlay" ? "overlay" : "below";
     this.coverSize = await read("coverSize", this.coverSize);
@@ -322,7 +346,9 @@ class Settings {
     this.continueCollapsed = continueCollapsedOf(await read<unknown>("continueCollapsed", DEFAULT_CONTINUE_COLLAPSED));
     this.continueAfterFinish = await read("continueAfterFinish", this.continueAfterFinish);
     this.continueDismissed = await read("continueDismissed", this.continueDismissed);
-    this.readerMode = await read("readerMode", this.readerMode);
+    // "webtoon" was a second name for vertical with no gap: one mode, so an old value lands on it.
+    const storedMode = await read<string>("readerMode", this.readerMode);
+    this.readerMode = storedMode === "webtoon" ? "vertical" : (storedMode as ReaderMode);
     this.readerFit = await read("readerFit", this.readerFit);
     this.readerScale = scaleMapOf(await read<unknown>("readerScale", {}));
     this.readerAhead = readAheadOf(await read<unknown>("readerAhead", DEFAULT_READ_AHEAD));
@@ -358,6 +384,7 @@ class Settings {
     this.cacheImages = await read("cacheImages", this.cacheImages);
     // Defensive read: a corrupt or foreign record is "no PIN", not a lock that refuses every entry.
     this.privacyPin = pinRecordOf(await read<unknown>("privacyPin", ""));
+    this.privacyBandCollapsed = (await read<boolean>("privacyBandCollapsed", false)) === true;
     this.welcomed = await read("welcomed", this.welcomed);
     this.ready = true;
   }
@@ -381,7 +408,9 @@ class Settings {
             ? autoscrollCurveOf(value)
             : key === "keepCategories"
               ? keepCategoriesOf(value)
-              : key === "readerScale"
+              : key === "rowStyle"
+                ? rowStyleOf(value)
+                : key === "readerScale"
                 ? scaleMapOf(value)
                 : key === "privacyPin"
                 ? pinRecordOf(value)

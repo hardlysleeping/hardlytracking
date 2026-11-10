@@ -32,11 +32,14 @@ import {
 import { listHtServerExtensions } from "./htserver";
 import { createKomgaProvider, isKomgaAggregateSource } from "./komga";
 import { createWebdavProvider } from "./webdav";
+import type { Transport } from "./transport";
 import { webdavEnabled, webdavSettings } from "../lib/webdav";
 import { splitId, type SourceProvider } from "./source";
 import type { LibraryStore } from "../lib/db/store";
 import type { CookieJar } from "../lib/webview/store";
 import { wirePreferences } from "../lib/extensions/prefs";
+import { createPortableProvider, type PortableRuntime } from "../lib/extensions/portable-provider";
+import { openPortableWorker, type WorkerLike } from "../lib/extensions/worker/portable-worker";
 
 export interface RegistryConfig {
   store: LibraryStore;
@@ -88,6 +91,13 @@ export interface RegistryConfig {
    * the moment either side installs something.
    */
   extensionList?: () => Promise<InstalledExtension[]>;
+  /**
+   * How a portable package's worker is spawned.
+   *
+   * Default: a real `Worker`. Overridable so the boot path can be tested off-device — the rest of
+   * the wiring is the same either way, and the alternative is a boot nobody can test.
+   */
+  portableSpawn?: () => WorkerLike;
 }
 
 /** A live host: the client to install through, and the list it reads. */
@@ -126,6 +136,14 @@ export async function withinDeadline<T>(work: Promise<T>, ms: number, what: stri
 
 export interface ProviderSet {
   providers: SourceProvider[];
+  /**
+   * Portable extensions that are live this session, keyed by package id.
+   *
+   * The runtime is here because the provider cannot close itself: disabling or uninstalling a
+   * package has to terminate the worker it was running in, or a disabled source keeps a thread and
+   * an installed-then-updated package keeps the old code alive beside the new one.
+   */
+  portable: Map<string, { provider: SourceProvider; runtime: PortableRuntime }>;
   /** `null` when no host answered `/capabilities`. */
   dalvik: DalvikHost | null;
   /** The paired HT-Server, when one answered. Its own kind, its own ids. */
@@ -223,6 +241,7 @@ export async function createProviders(config: RegistryConfig): Promise<ProviderS
   const providers: SourceProvider[] = [];
   const warnings: string[] = [];
   const extensionList = config.extensionList ?? (() => config.store.listExtensions());
+  const portable = new Map<string, { provider: SourceProvider; runtime: PortableRuntime }>();
 
   const mihon = configuredMihonProvider(config);
   if (mihon !== null) providers.push(mihon);
@@ -279,10 +298,13 @@ export async function createProviders(config: RegistryConfig): Promise<ProviderS
         providers.push(provider);
         continue;
       }
+      // Registered before it is asked anything: a server that is asleep at launch must still be a
+      // row someone can retry, not a provider that never existed. `sources()` is asked again on the
+      // next source load, so a boot-time blip heals without a relaunch.
+      providers.push(provider);
       try {
         // Explicit connection checks remain available outside local-first startup.
         const sources = await provider.sources();
-        providers.push(provider);
         // `sources()` always answers the aggregate card, so "no libraries" is its absence, not an
         // empty array. A signed-in login that sees no libraries must still say so.
         const libraries = sources.filter((source) => !isKomgaAggregateSource(server.id, source.id));
@@ -310,6 +332,37 @@ export async function createProviders(config: RegistryConfig): Promise<ProviderS
     providers.push(provider);
   }
 
+  /**
+   * Portable extensions. No network, no handshake: the code is on the row, so this is the same kind
+   * of work as reading a saved setting.
+   *
+   * A package that fails to start is a warning naming it and nothing else — one broken extension must
+   * not cost the user the other sources on the same boot.
+   */
+  for (const row of await config.store.listExtensions()) {
+    if (row.portable === undefined) continue;
+    if (row.enabled === false) continue;
+    try {
+      const runtime = await openPortableWorker({
+        packageId: row.packageId,
+        source: row.portable.source,
+        ...(config.fetchImpl === undefined ? {} : { request: config.fetchImpl as unknown as Transport }),
+        ...(config.portableSpawn === undefined ? {} : { spawn: config.portableSpawn }),
+      });
+      const provider = createPortableProvider({
+        kind: row.portable.kind,
+        packageId: row.packageId,
+        // A server-owned source keeps its own progress; a catalogue has none to keep.
+        ownsProgress: row.portable.kind !== "komga" && row.portable.kind !== "mihon",
+        runtime,
+      });
+      providers.push(provider);
+      portable.set(row.packageId, { provider, runtime });
+    } catch (error) {
+      warnings.push(`${row.name ?? row.packageId}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
   let dalvik: DalvikHost | null = null;
   const dalvikBase = config.dalvikBase === undefined ? apiUrl("/api/dalvik") : config.dalvikBase;
   if (dalvikBase !== null && !config.localFirst) {
@@ -325,7 +378,7 @@ export async function createProviders(config: RegistryConfig): Promise<ProviderS
   if (htServer.provider !== null) providers.push(htServer.provider);
   if (htServer.warning !== null) warnings.push(htServer.warning);
 
-  return { providers, dalvik, htServer: htServer.host, warnings };
+  return { providers, portable, dalvik, htServer: htServer.host, warnings };
 }
 
 /**

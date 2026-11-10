@@ -17,7 +17,7 @@
  * job (`dalvik`, the Aidoku WASM host, the JS host), and the app never bundles a source itself.
  */
 
-export type RepoKind = "mihon" | "aidoku" | "suwatte" | "paperback";
+export type RepoKind = "mihon" | "aidoku" | "suwatte" | "paperback" | "portable";
 
 /** Normalised across ecosystems: Mihon's `contentWarning`, Aidoku's `contentRating`, Paperback's string. */
 export type ContentWarning = "SAFE" | "MIXED" | "NSFW" | "UNKNOWN";
@@ -61,6 +61,16 @@ export interface RepoEntry {
   minHostVersion?: string;
   /** Suwatte runner environment (`jsc` / `wk`); decides which host may run it. */
   host?: string;
+  /**
+   * `portable-js` when the package is one JavaScript file this app runs itself, absent for every
+   * ecosystem that publishes a package for someone else's host. The install path branches on this
+   * one field instead of on the repository URL.
+   */
+  runtime?: "portable-js";
+  /** The provider kind a portable package presents, so ids keep their spelling. */
+  providerKind?: string;
+  /** Host API the package was written against (`hostApi`). */
+  hostApi?: number;
 }
 
 export interface RepoIndex {
@@ -131,6 +141,13 @@ export function detectRepoIndex(input: unknown): RepoKind | null {
   // Legacy Mihon indexes are a bare array of entries.
   if (Array.isArray(input)) return "mihon";
   if (!isRecord(input)) return null;
+  // Ours, checked before the Mihon branches: the wrapper is the same `extensionList` shape, and
+  // only the entry's runtime tells them apart.
+  const portableList = isRecord(input.extensionList) ? input.extensionList.extensions : undefined;
+  if (Array.isArray(portableList)) {
+    const first = portableList[0];
+    if (isRecord(first) && first.runtime === "portable-js") return "portable";
+  }
   if (isRecord(input.extensionList) || Array.isArray(input.extensions)) return "mihon";
   if (Array.isArray(input.runners)) return "suwatte";
   if (Array.isArray(input.sources)) {

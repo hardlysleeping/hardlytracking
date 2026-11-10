@@ -444,9 +444,9 @@ export async function probeKomga(
     if (me.status === 401 || me.status === 403) {
       return { ok: false, error: `Komga refused that login (${me.status})` };
     }
-    if (!me.ok) return { ok: false, error: `Komga answered ${me.status}` };
+    if (!me.ok) return { ok: false, error: `Komga answered ${me.status} for ${base}/api/v1/users/me` };
     const libraries = await fetchImpl(komgaUrl(base, "/api/v1/libraries"), { headers });
-    if (!libraries.ok) return { ok: false, error: `signed in, but the library list answered ${libraries.status}` };
+    if (!libraries.ok) return { ok: false, error: `signed in, but ${base}/api/v1/libraries answered ${libraries.status}` };
     const rows = (await libraries.json()) as Array<{ name?: string }>;
     return { ok: true, libraries: rows.map((row) => row.name ?? "Untitled library") };
   } catch (error) {
@@ -490,7 +490,7 @@ export async function fetchKomgaLibraries(
     if (response.status === 401 || response.status === 403) {
       return { ok: false, error: `Komga refused that login (${response.status})` };
     }
-    if (!response.ok) return { ok: false, error: `Komga answered ${response.status}` };
+    if (!response.ok) return { ok: false, error: `Komga answered ${response.status} for ${base}/api/v1/libraries` };
     const rows = (await response.json()) as Array<{ id?: unknown; name?: unknown }>;
     if (!Array.isArray(rows)) return { ok: false, error: "Komga answered with something other than a library list" };
     return {

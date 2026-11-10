@@ -22,6 +22,7 @@
   import { MARGIN_CHOICES, NAV_CORNER_CHOICES } from "../lib/view-options";
   import { DESTINATIONS } from "../lib/destinations";
   import { DEFAULT_BOTTOM_NAV, moveItem, toggleItem } from "../lib/nav-order";
+  import BottomBar from "../components/BottomBar.svelte";
   import { CPU_LEVELS, describeLevel } from "../lib/performance";
 import { CONTENT_LEVELS, type ContentLevel } from "../lib/content/levels";
 import KeepOfflinePanel from "../components/KeepOfflinePanel.svelte";
@@ -61,6 +62,19 @@ import PrivacyPanel from "../components/PrivacyPanel.svelte";
     if (index < 0) return;
     settings.set("bottomNav", moveItem(settings.bottomNav, index, delta));
   }
+
+  /**
+   * What the bar looks like right now, drawn by the bar itself.
+   *
+   * This is the whole reason the editor has a picture: an arrow moves a row in a list, and a list of
+   * five names in a column does not tell anyone what the phone will show them. Same ids, same
+   * mapping and same component as the shell — the picture is the real bar, made inert.
+   */
+  const previewItems = $derived(
+    settings.bottomNav
+      .map((id) => DESTINATIONS.find((destination) => destination.id === id))
+      .filter((destination) => destination !== undefined),
+  );
 
   const bytes = $derived(
     downloads.bytes < 1024 * 1024
@@ -316,6 +330,16 @@ import PrivacyPanel from "../components/PrivacyPanel.svelte";
         Navigation
         <em class="sub">The pages in the bar, the rail and the sidebar — one order for every layout.</em>
       </p>
+      <!--
+        The picture comes first: it is the answer to "what did I just do", and it changes under the
+        same tap that changed the list, so an arrow reads as a move rather than as a setting.
+      -->
+      <div class="navpreview">
+        <span class="pvlabel">Preview — the phone's bottom menu</span>
+        <div class="pvscreen">
+          <BottomBar items={previewItems} />
+        </div>
+      </div>
       {#each navRows as id (id)}
         {@const onBar = settings.bottomNav.includes(id)}
         {@const at = settings.bottomNav.indexOf(id)}
@@ -355,7 +379,6 @@ import PrivacyPanel from "../components/PrivacyPanel.svelte";
       <span>Reading mode</span>
       <select class="field" value={settings.readerMode} onchange={(event) => settings.set("readerMode", event.currentTarget.value as typeof settings.readerMode)}>
         <option value="vertical">Vertical</option>
-        <option value="webtoon">Webtoon</option>
         <option value="paged">Paged</option>
         <option value="ltr">Left → right</option>
         <option value="rtl">Right → left</option>
@@ -367,6 +390,7 @@ import PrivacyPanel from "../components/PrivacyPanel.svelte";
         <option value="width">Width</option>
         <option value="height">Height</option>
         <option value="contain">Whole page</option>
+        <option value="fill">Fill the screen (crops)</option>
       </select>
     </label>
     <label class="row">
@@ -686,6 +710,31 @@ import PrivacyPanel from "../components/PrivacyPanel.svelte";
   .navrow {
     gap: var(--s2);
     min-height: 44px;
+  }
+
+  /*
+   * The preview is a strip of "phone" the bar sits in: the surface the bar is designed against, its
+   * own rounded frame, and enough room under the pill that it reads as floating over a page rather
+   * than as a row of chips in a form.
+   */
+  .navpreview {
+    display: grid;
+    gap: var(--s1);
+    margin-bottom: var(--s2);
+  }
+
+  .pvlabel {
+    font-size: var(--t-xs);
+    color: var(--text-3);
+  }
+
+  .pvscreen {
+    padding: var(--s3) var(--s3) var(--s4);
+    border: 1px solid var(--line);
+    border-radius: var(--r3);
+    background:
+      radial-gradient(120% 90% at 50% 0%, color-mix(in srgb, var(--accent) 8%, transparent), transparent 70%),
+      var(--bg-2, var(--surface));
   }
 
   .navlabel {

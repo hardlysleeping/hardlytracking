@@ -116,6 +116,20 @@ async function run(): Promise<void> {
   check(komgaServers()[0]?.label === 'Renamed', 'Edit renames the server');
   check(komgaServers()[0]?.password === testSecret, 'a blank password keeps the saved one');
 
+  // A second server is nearly always the same box and login, read for another library. The dialog
+  // copies the saved one so the only thing to type is the name.
+  button('Add server').click(); await settle();
+  check(
+    [...target.querySelectorAll<HTMLInputElement>('dialog input')].slice(1).map(input => input.value).join('|') === [base, user, testSecret].join('|'),
+    'a new server starts with the saved address and login',
+  );
+  check(
+    target.querySelector<HTMLInputElement>('dialog input')?.value === 'Komga 2',
+    'the name counts up so two entries on one box stay apart',
+  );
+  check(!!target.querySelector('.seeded')?.textContent?.includes('Renamed'), 'the dialog names the server it copied');
+  button('Cancel').click(); await tick();
+
   await unmount(component);
   component = mount(KomgaLogin, { target, props: { onchange: async () => { refreshes++; } } });
   await tick();

@@ -225,6 +225,22 @@ test("hasNext follows numFound, not the page size", async () => {
   assert.equal(page.hasNext, true);
 });
 
+test("trending asks for the week's downloads, popular for all time", async () => {
+  // This is the whole difference between the two listings: `week` moves, `downloads` does not. If
+  // trending ever shipped on `-downloads` the first tab would just be the old static row.
+  const { impl, calls } = stubFetch([["advancedsearch.php", SEARCH_BODY]]);
+  const provider = createArchiveProvider({ fetchImpl: impl });
+
+  await provider.trending("archive:src:texts", 1);
+  const trendingUrl = new URL(calls.at(-1));
+  assert.equal(trendingUrl.searchParams.get("sort[]"), "-week");
+  // The scope query is unchanged: trending is the same corpus, ordered differently.
+  assert.match(trendingUrl.searchParams.get("q"), /mediatype:texts AND \(collection:comicbooks/);
+
+  await provider.popular("archive:src:texts", 1);
+  assert.equal(new URL(calls.at(-1)).searchParams.get("sort[]"), "-downloads");
+});
+
 test("a foreign id is refused, and read state is never faked", async () => {
   const provider = createArchiveProvider({ fetchImpl: async () => ({ ok: false, status: 404 }) });
   await assert.rejects(() => provider.details("mihon:12"), /not a archive id/);

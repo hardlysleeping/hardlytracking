@@ -77,7 +77,7 @@
         {#each notices.log as entry (entry.at + entry.text)}
           <li>
             <span class="when">{noticeTime(entry.at)}</span>
-            <span class="what">{entry.text}</span>
+            <span class="what selectable">{entry.text}</span>
           </li>
         {/each}
       </ol>

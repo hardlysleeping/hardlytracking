@@ -26,8 +26,10 @@ await page.waitForSelector(".tools");
 await page.waitForFunction(() => document.querySelectorAll(".continue .cont").length === 3);
 
 // 1. The tools row is exactly the three shelf controls; no local-file door survives there.
+// The row starts with its own fold handle (a bare caret, no words), then the three doors.
 const toolLabels = await tools.locator("button").allInnerTexts();
-assert.deepEqual(toolLabels.map((text) => text.replace(/\s+/g, " ").trim()), ["Filter", "Sort · Title", "Display"]);
+assert.deepEqual(toolLabels.map((text) => text.replace(/\s+/g, " ").trim()), ["", "Filter", "Sort · Title", "Display"]);
+assert.equal(await tools.getByRole("button", { name: /^Hide filter, sort and display$/ }).count(), 1, "the row can be folded away");
 for (const gone of ["Add files", "Add folder", "From Drive"]) assert.ok(!toolLabels.join(" ").includes(gone), `${gone} still in the tools row`);
 evidence.push({ check: "tools row holds only Filter, Sort, Display", toolLabels });
 
@@ -115,10 +117,25 @@ const above = await gap("above");
 const below = await gap("below");
 evidence.push({ check: "collapsed strip leaves no gap above or below", above, below });
 
+// 8b. The tools row folds, keeps saying what is in it, and remembers the fold across a relaunch.
+const toolsFirst = tools.locator("button").first();
+await tools.getByRole("button", { name: /^Hide filter, sort and display$/ }).click();
+await page.waitForTimeout(120);
+assert.equal(await tools.getByRole("button", { name: "Filter", exact: true }).count(), 0, "folded, the doors are away");
+assert.match((await tools.locator(".summary").innerText()).trim(), /^Filter · Sort · Title$/, "the handle still names what it holds");
+await page.evaluate(() => window.libraryMenuFixture.reload());
+await page.waitForTimeout(200);
+assert.equal(await tools.getByRole("button", { name: "Filter", exact: true }).count(), 0, "the fold survives a relaunch");
+assert.equal(await tools.getByRole("button", { name: /^Show filter, sort and display$/ }).count(), 1);
+await toolsFirst.click();
+await page.waitForTimeout(120);
+assert.equal(await tools.getByRole("button", { name: "Filter", exact: true }).count(), 1, "and opens again on one press");
+evidence.push({ check: "the tools row folds and remembers the fold" });
+
 // 9. Wide layout: same single home — the ⋯ sheet, never a second row.
 await page.setViewportSize({ width: 1280, height: 900 });
 await page.waitForTimeout(250);
-assert.deepEqual((await tools.locator("button").allInnerTexts()).map((text) => text.replace(/\s+/g, " ").trim()), ["Filter", "Sort · Title", "Display"]);
+assert.deepEqual((await tools.locator("button").allInnerTexts()).map((text) => text.replace(/\s+/g, " ").trim()), ["", "Filter", "Sort · Title", "Display"]);
 assert.equal(await page.getByRole("button", { name: "Add files", exact: true }).count(), 0);
 assert.equal(await page.getByRole("button", { name: "From Drive", exact: true }).count(), 0);
 await page.getByRole("button", { name: "More library actions" }).click();

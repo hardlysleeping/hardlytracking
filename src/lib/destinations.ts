@@ -23,10 +23,10 @@ export const DESTINATIONS: Destination[] = [
     icon: "M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z",
   },
   {
-    id: "browse",
-    label: "Browse",
-    href: "/browse",
-    icon: "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM15.5 8.5l-2 5-5 2 2-5z",
+    id: "history",
+    label: "History",
+    href: "/history",
+    icon: "M12 8v5l3 2M3.5 12a8.5 8.5 0 1 0 2.6-6.1M3 3v4h4",
   },
   {
     id: "search",
@@ -35,10 +35,10 @@ export const DESTINATIONS: Destination[] = [
     icon: "M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14zM16.2 16.2 21 21",
   },
   {
-    id: "history",
-    label: "History",
-    href: "/history",
-    icon: "M12 8v5l3 2M3.5 12a8.5 8.5 0 1 0 2.6-6.1M3 3v4h4",
+    id: "browse",
+    label: "Browse",
+    href: "/browse",
+    icon: "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM15.5 8.5l-2 5-5 2 2-5z",
   },
   {
     id: "more",

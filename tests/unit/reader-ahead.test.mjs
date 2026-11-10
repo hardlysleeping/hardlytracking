@@ -50,7 +50,7 @@ function freshSettings(){
   if(id.includes('library/badges'))return{DEFAULT_BADGES:{}};
   if(id.includes('performance'))return{DEFAULT_CPU_LEVEL:'balanced'};
   if(id.includes('content/levels'))return{levelOr:value=>value};
-  if(id.includes('browse-display'))return{browseMode:value=>value,columnsFor:value=>value};
+  if(id.includes('browse-display'))return{browseMode:value=>value,columnsFor:value=>value,rowStyleOf:value=>value==='preview'||value==='table'?value:'line'};
   // Settings also normalises the autoscroll choices; the real validators are cheap and pure.
   if(id.includes('lib/autoscroll'))return{autoscrollCurveOf:value=>value,autoscrollSpeedOf:value=>value,DEFAULT_AUTOSCROLL_CURVE:'linear',DEFAULT_AUTOSCROLL_SPEED:'steady'};
   if(id.includes('offline/policy'))return{keepCategoriesOf:value=>Array.isArray(value)?value.filter(v=>typeof v==='string'):[]};
