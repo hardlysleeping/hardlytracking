@@ -46,3 +46,9 @@ test("the nav seat answers a press in all three renderers", () => {
     assert.match(read(f), /class="item"/, `${f} no longer draws the shared seat`);
   }
 });
+
+test("chips and the view switcher answer a press", () => {
+  const css = read("src/app.css");
+  assert.match(block(css, ".chip:active"), /transform: scale\(0\.985\)/);
+  assert.match(block(css, ":root .opt:active"), /transform: scale\(0\.985\)/);
+});

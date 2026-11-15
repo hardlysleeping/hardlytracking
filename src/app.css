@@ -386,6 +386,18 @@ button {
   color: var(--text-1);
 }
 
+/* A chip is a seat with words in it: the text number, not the glyph one. One rule, because every
+   chip in the app is this class (Settings, Search, Appearance, Sync). */
+.chip:active {
+  transform: scale(0.985);
+}
+
+/* The view switcher (Rows / Grid / Cards / Below) is the same kind of seat — icon plus word — so it
+   takes the same number, and it lives here so the rule outlives the component's own restyle. */
+:root .opt:active {
+  transform: scale(0.985);
+}
+
 .chip.on {
   background: var(--surface-2);
   border-color: var(--line-strong);
