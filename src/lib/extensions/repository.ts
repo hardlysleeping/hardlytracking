@@ -135,6 +135,23 @@ export interface LoadOptions {
   fetchImpl?: typeof fetch;
 }
 
+/**
+ * Was the index simply never published?
+ *
+ * A repository that has not been published yet and one that broke look the same in a stack trace and
+ * should not look the same on screen. "Every candidate answered 404" means the host is fine and there
+ * is nothing at that address — for the app's own pinned repository that is a state, not a fault, and
+ * printing "could not read a repository index … tried … → 404" asks the reader to fix something they
+ * cannot fix. A mixed result (one 404, one not-JSON) is not this: something is there and it is wrong.
+ */
+export function isMissingIndex(error: unknown): boolean {
+  return (
+    error instanceof RepositoryError &&
+    error.tried.length > 0 &&
+    error.tried.every((line) => / → 404$/.test(line))
+  );
+}
+
 /** Read a repository's index, trying the candidate URLs and reporting what was tried. */
 export async function loadRepository(input: string, options: LoadOptions = {}): Promise<Repository> {
   // A repository whose host has gone away answers nothing at all, which a bare `fetch` waits on for

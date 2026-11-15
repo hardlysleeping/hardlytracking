@@ -9,7 +9,8 @@
    */
   import { library } from "../state/library.svelte";
   import { planUpdates, updateState, type ExtensionEntry } from "../lib/extensions/index";
-  import { RepositoryError, loadRepository, type Repository } from "../lib/extensions/repository";
+  import { RepositoryError, isMissingIndex, loadRepository, type Repository } from "../lib/extensions/repository";
+  import { OFFICIAL_REPO_URL } from "../lib/extensions/pinned-repo";
   import { packagesLabel, proposalOf, type RepoProposal } from "../lib/extensions/proposal";
   import { THIRD_PARTY_DECISION, THIRD_PARTY_DISCLOSURE } from "../lib/extensions/disclosure";
   import { filterByLevel, hiddenNotice, levelOfWarning } from "../lib/content/levels";
@@ -66,6 +67,15 @@ import { probeWebdav } from "../api/webdav";
   let loaded = $state<Repository | null>(null);
   let error = $state<string | null>(null);
   let notice = $state<string | null>(null);
+  /**
+   * The app's own repository has no published index yet.
+   *
+   * Its row is seeded on every boot, and the screen opens the first repository without being asked —
+   * so an index that has never been published met the reader as "could not read a repository index …
+   * tried … → 404" on a screen where there was nothing they could do about it. The row stays (that is
+   * where the app's packages will arrive); it just says what it is instead of what failed.
+   */
+  let officialPending = $state(false);
 
   let entries = $state<ExtensionEntry[]>([]);
   let loading = $state(false);
@@ -389,12 +399,19 @@ import { probeWebdav } from "../api/webdav";
     collapsed = false;
     loading = true;
     error = null;
+    officialPending = false;
     languageFilter = [];
     try {
       entries = await library.repoEntries(url);
       languageFilter = keepLanguages(languageFilter, entries);
     } catch (e) {
-      error = e instanceof Error ? e.message : String(e);
+      // An index that has never been published is a state of the app's own repository, not a fault
+      // the reader can act on. Anything else stays an error with what was tried.
+      if (url === OFFICIAL_REPO_URL && isMissingIndex(e)) {
+        officialPending = true;
+      } else {
+        error = e instanceof Error ? e.message : String(e);
+      }
       entries = [];
     } finally {
       loading = false;
@@ -591,6 +608,12 @@ import { probeWebdav } from "../api/webdav";
   </p>
 
   {#if error}<p class="banner">{error}</p>{/if}
+  {#if officialPending}
+    <p class="note">
+      The official index isn't published yet — the app's own packages will list here when they ship.
+      Another repository added below works exactly the same.
+    </p>
+  {/if}
   {#if notice}<p class="note">{notice}</p>{/if}
 
   {#if section === "installed"}
