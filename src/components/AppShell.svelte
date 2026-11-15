@@ -12,6 +12,7 @@
   import { deviceClass } from "../lib/layout-modes";
   import { go } from "../lib/nav";
   import { navHistory } from "../lib/nav-history.svelte";
+  import { rememberScroll, scrollFor } from "../lib/scroll-memory";
   import { settings } from "../state/settings.svelte";
   import BottomBar from "./BottomBar.svelte";
 
@@ -33,18 +34,75 @@
    * a banner appears and the window is resized.
    */
   /**
-   * A new screen starts at the top.
+   * A screen starts where it was left; the first time it is opened, at the top.
    *
    * The scroller is one element for every destination, so its `scrollTop` used to survive a route
-   * change: leaving a long page half-way down arrived at the next one already partially scrolled, and
-   * on a page that fits it looked stuck — partly down, with no way back up, because the shell had
-   * switched the overflow off. Reset before the first paint of the new screen, not after a timer.
+   * change: leaving a long page half-way down arrived at the next one already partly scrolled, and
+   * on a page that fits it looked stuck — partly down, with no way back up. Zeroing it fixed that,
+   * but it also threw away the reader's own place: the reader is its own route, so opening a chapter
+   * tore the list down, and Back rebuilt it at the top of a page that had been half read.
+   *
+   * The offset now belongs to the route it was read on. A route seen for the first time starts at
+   * the top; a route you come back to starts where you left it. The restore is retried for half a
+   * second, because a list still loading its covers is shorter than the place being restored and
+   * the browser clamps the first attempt.
    */
+  let restoring = false;
+
   $effect(() => {
-    void routeKey;
+    const key = routeKey;
     const el = frame;
     if (el === null) return;
-    el.scrollTop = 0;
+    const wanted = scrollFor(key);
+    if (wanted <= 0) {
+      el.scrollTop = 0;
+      return;
+    }
+    restoring = true;
+    let tries = 0;
+    let live = true;
+    const attempt = () => {
+      if (!live) return;
+      el.scrollTop = wanted;
+      tries += 1;
+      if (Math.abs(el.scrollTop - wanted) < 1 || tries > 40) {
+        restoring = false;
+        return;
+      }
+      requestAnimationFrame(attempt);
+    };
+    attempt();
+    return () => {
+      live = false;
+      restoring = false;
+    };
+  });
+
+  /**
+   * Remember a route's place as it scrolls.
+   *
+   * Written on a frame, not per scroll event: this runs on a cover grid on a phone, and an
+   * IndexedDB-free map write per event is still work done forty times a second for one number.
+   */
+  $effect(() => {
+    const el = frame;
+    const key = routeKey;
+    if (el === null) return;
+    let queued = false;
+    const save = () => {
+      queued = false;
+      if (!restoring) rememberScroll(key, el.scrollTop);
+    };
+    const onScroll = () => {
+      if (queued) return;
+      queued = true;
+      requestAnimationFrame(save);
+    };
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      el.removeEventListener("scroll", onScroll);
+      if (!restoring) rememberScroll(key, el.scrollTop);
+    };
   });
 
   $effect(() => {
