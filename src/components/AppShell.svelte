@@ -331,6 +331,16 @@
     -webkit-backdrop-filter: blur(10px);
     backdrop-filter: blur(10px);
     box-shadow: 0 6px 18px rgb(0 0 0 / 35%);
+    position: relative;
+  }
+
+  /* A 40 px pill with 44 px of reach: 3 px past the padding box, invisible, so the pill keeps the
+     size it was drawn at and the back door is still a full target on a phone. */
+  .hbtn::after {
+    content: "";
+    position: absolute;
+    inset: -3px;
+    border-radius: inherit;
   }
 
   .hbtn:active {

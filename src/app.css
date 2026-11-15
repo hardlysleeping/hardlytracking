@@ -346,6 +346,17 @@ button {
   width: 36px;
   min-width: 36px;
   justify-content: center;
+  position: relative;
+}
+
+/* 38 px of seat, 44 px of reach. The overlay is measured from the padding box, so 4 px past it plus
+   the 1 px border is 44 px of thumb — exactly touching the neighbour an 8 px gutter away and never
+   overlapping it. The drawing is untouched, which is what keeps a bar the owner tuned from moving. */
+.btn.icon::after {
+  content: "";
+  position: absolute;
+  inset: -4px;
+  border-radius: inherit;
 }
 
 /* An icon button's glyph is a stroke, never a fill: an unstyled <path> paints solid black in a
@@ -379,6 +390,17 @@ button {
   color: var(--text-2);
   font-size: var(--t-sm);
   white-space: nowrap;
+}
+
+/* The chip is 30 px of ink; the target is bigger than the ink.
+   A row of chips is 8 px apart, so the invisible overlay reaches 4 px past the padding box — 36 px
+   of thumb, still inside the gutter and never overlapping a neighbour. Nothing on screen moves. */
+.chip { position: relative; }
+.chip::after {
+  content: "";
+  position: absolute;
+  inset: -4px;
+  border-radius: inherit;
 }
 
 .chip:hover {
