@@ -69,3 +69,7 @@ test("a door row and a text link answer a press", () => {
   assert.match(block(read("src/views/Browse.svelte"), ".row:active"), /background: var\(--surface-2\)/);
   assert.match(block(read("src/views/Plugins.svelte"), ".link:active"), /opacity: 0\.7/);
 });
+
+test("the downloads tabs answer a press", () => {
+  assert.match(block(read("src/views/Downloads.svelte"), ".tab:active"), /transform: scale\(0\.985\)/);
+});

@@ -651,6 +651,11 @@
     border-color: var(--line);
   }
 
+  /* A tab is a text seat, so it takes the text number. transform cannot reflow the row. */
+  .tab:active {
+    transform: scale(0.985);
+  }
+
   .tab .n {
     font-size: var(--t-xs);
     color: var(--text-3);
