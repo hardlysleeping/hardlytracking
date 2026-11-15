@@ -292,6 +292,24 @@ button {
   background: var(--surface-2);
 }
 
+/* A press, on the app’s own two numbers: 0.985 for a seat with words in it, 0.94 for a glyph.
+   Both were already here (SeriesActions “.act”, the header and collapse floats) — this row had
+   only a hover, so on a touchscreen it answered nothing at all. `transform` cannot reflow the row. */
+.btn:active {
+  transform: scale(0.985);
+}
+
+.btn.icon:active {
+  transform: scale(0.94);
+}
+
+/* The bar, the tablet rail and the desktop sidebar are one seat drawn three ways, so the press is
+   one rule: `.item` is that seat in all three (BottomBar, AppShell). Split rules here are how the
+   three drifted apart before. */
+:root .item:active {
+  transform: scale(0.94);
+}
+
 .btn:disabled {
   opacity: 0.5;
   cursor: default;
