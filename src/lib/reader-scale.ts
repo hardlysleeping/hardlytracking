@@ -3,19 +3,23 @@
  *
  * `1` is the fit the reader already draws: the image fills the width, the height, or the whole
  * page. Below `1` the same image keeps its proportions but is drawn smaller and centred, so the
- * reader gets margins without changing the fit. The choice belongs to a title, not to a chapter,
- * so it lives in a per-series map in prefs and every chapter of that series is drawn at it.
+ * reader gets margins without changing the fit. Above `1` it is drawn larger than the surface and
+ * the reader pans — that is the zoom a phone otherwise cannot do, because pinching the page zooms
+ * the whole app instead of the comic. The choice belongs to a title, not to a chapter, so it lives
+ * in a per-series map in prefs and every chapter of that series is drawn at it.
  *
  * A stored value is clamped on read, not trusted: an export edited by hand, or a value from a
  * build with a wider range, must not shrink a page to a stamp or blow it past the screen.
  */
 export const SCALE_MIN = 0.5;
-export const SCALE_MAX = 1;
+export const SCALE_MAX = 3;
 export const SCALE_DEFAULT = 1;
 
-/** Percent steps for the slider: 50 % … 100 %. */
+/** Percent steps for the slider: 50 % … 300 %. */
 export const SCALE_MIN_PERCENT = SCALE_MIN * 100;
 export const SCALE_MAX_PERCENT = SCALE_MAX * 100;
+/** Where the slider starts: the fit itself, which is where every title begins. */
+export const SCALE_DEFAULT_PERCENT = SCALE_DEFAULT * 100;
 
 /** A stored or dragged value becomes a scale this reader can draw. */
 export function scaleOf(value: unknown): number {

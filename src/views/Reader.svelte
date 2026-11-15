@@ -29,7 +29,7 @@
   import Sheet from "../components/Sheet.svelte";
   import { plugins } from "../state/plugins.svelte";
   import { READ_AHEAD_CHOICES, readAheadOf } from "../lib/reader-ahead";
-  import { SCALE_MAX, SCALE_MAX_PERCENT, SCALE_MIN_PERCENT, scaleFor, scaleOf, scalePercent, withScale } from "../lib/reader-scale";
+  import { SCALE_DEFAULT, SCALE_MAX_PERCENT, SCALE_MIN_PERCENT, scaleFor, scaleOf, scalePercent, withScale } from "../lib/reader-scale";
   import { advancePx, AUTOSCROLL_CURVES, AUTOSCROLL_SPEEDS, progressOf } from "../lib/autoscroll";
   import { ReaderQueue, ReaderTap, readerOrder, type ReaderJob } from "../lib/reader";
 
@@ -288,7 +288,8 @@
   let pendingScale: number | null = null;
 
   const pageScale = $derived(draftScale ?? scaleFor(settings.readerScale, scaleOwner));
-  const scaled = $derived(pageScale < SCALE_MAX);
+  /** Anything that is not the fit needs the Fit chip and the centred slot; zooming in counts. */
+  const scaled = $derived(pageScale !== SCALE_DEFAULT);
   const scaleValue = $derived(scalePercent(pageScale));
 
   function writeScale(value: number): void {
@@ -913,10 +914,10 @@
       />
       <span class="scaleval">{scaleValue}%</span>
       {#if scaled}
-        <button class="chip" onclick={() => { setPageScale(SCALE_MAX); flushScale(); }}>Fit</button>
+        <button class="chip" onclick={() => { setPageScale(SCALE_DEFAULT); flushScale(); }}>Fit</button>
       {/if}
     </div>
-    <p class="hint">Remembered for this title, in every reading mode. All the way out is the fit: the page fills the screen.</p>
+    <p class="hint">Remembered for this title, in every reading mode. 100 % is the fit; above it the page zooms in and pans, below it the page shrinks and centres.</p>
   </div>
   <div class="group">
     <span class="label">Read ahead</span>
@@ -1117,6 +1118,15 @@
     justify-content: flex-start;
   }
   .scroller[data-fit='height'] img { width: auto; height: calc(var(--reader-height) * var(--page-scale)); }
+  /* Height fit means one page per screen, so a page starts at the top of the surface instead of
+     wherever the swipe happened to stop. Snapping is the difference between "Height" and "Width
+     with taller pages" — without it every page landed half-way and the reader had to trim up. */
+  .scroller[data-fit='height']:not(.horizontal) {
+    scroll-snap-type: y mandatory;
+  }
+  .scroller[data-fit='height'] .page {
+    scroll-snap-align: start;
+  }
   /* Whole page: the slot is the image. Forcing a full-viewport min-height made every page that was
      limited by *width* (a portrait page on a landscape screen) sit in a band of empty surface above
      and below — which is what "excessive top and bottom margin" was. The image's max-width and
@@ -1131,7 +1141,7 @@
      top with all the slack under it. In whole-page mode the page is centred in the reading surface
      instead, so what cannot be filled is evenly around it rather than dumped at the bottom. */
   .scroller[data-fit='contain'] {
-    justify-content: center;
+    justify-content: safe center;
   }
   .scroller[data-fit='contain'] img {
     width: auto;
