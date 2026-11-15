@@ -272,6 +272,26 @@
   let owner = untrack(() => seriesId);
 
   /**
+   * The title's own name, for the top bar's door back to its issue list.
+   *
+   * A chapter id knows the series id but not the title, so this is asked of the library in the
+   * background: a slow metadata answer must never hold up the pages, and the line appears when it
+   * lands. Naming it here means a hidden or locked issue is still reachable — the door is the title
+   * page, not the chapter it happens to be showing.
+   */
+  let seriesTitle = $state("");
+
+  async function loadSeriesTitle(id: string): Promise<void> {
+    if (id === "") return;
+    try {
+      const meta = await library.resolveSeriesMeta(id);
+      if (meta !== null && owner === id) seriesTitle = meta.title;
+    } catch {
+      // A title we cannot name keeps the chapter line alone; the back door still works.
+    }
+  }
+
+  /**
    * Page size, per title (see `lib/reader-scale`).
    *
    * `1` is the fit, which is what every title is drawn at until the reader says otherwise; below it
@@ -579,6 +599,7 @@
       // on the address bar, the back link and the two chapter buttons all use `owner`.
       owner = await guard(ownerOf(seriesId, id, signal));
       scaleOwner = owner;
+      void loadSeriesTitle(owner);
       if (owner !== seriesId) history.replaceState(null, "", `#${pathTo("read", owner, id)}`);
 
       // The chapter list is a nicety for the name and the prev/next buttons; with the host down
@@ -754,8 +775,18 @@
       <svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7" /></svg>
     </button>
     <div class="titles">
-      <span class="t">{chapterName || "Chapter"}</span>
-      <span class="s">{pages.length > 0 ? `${index + 1} / ${pages.length}` : ""}{fromDownload ? " · offline" : ""}</span>
+      <!--
+        The title, then the chapter. A reader who wants the issue list should not have to leave the
+        chapter first: the title is the door to the series page, and it names the title in addition
+        to the issue the way a bookshelf does.
+      -->
+      {#if seriesTitle !== ""}
+        <button class="st" title={`Open ${seriesTitle}`} aria-label={`Open ${seriesTitle}`} onclick={() => go(pathTo("series", owner))}>{seriesTitle}</button>
+      {/if}
+      <span class="line">
+        <span class="t">{chapterName || "Chapter"}</span>
+        <span class="s">{pages.length > 0 ? `${index + 1} / ${pages.length}` : ""}{fromDownload ? " · offline" : ""}</span>
+      </span>
     </div>
     <button class="btn ghost icon" aria-label="Mark as read" aria-pressed={read} onclick={() => void toggleRead()}>
       <svg viewBox="0 0 24 24"><path d={read ? "M5 13l4 4L19 7" : "M5 12h14"} /></svg>
@@ -1034,6 +1065,29 @@
     min-width: 0;
     display: grid;
     gap: 1px;
+  }
+
+  /* The title is a door, not a label: it sits above the issue and opens the series page. Small,
+     quiet, and never taller than the line it replaced — the bar keeps its height. */
+  .st {
+    all: unset;
+    font-size: var(--t-xs);
+    color: var(--text-2);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    cursor: pointer;
+    line-height: 1.3;
+  }
+
+  .st:hover { color: var(--text-1); }
+  .st:active { opacity: 0.7; }
+
+  .line {
+    display: flex;
+    align-items: baseline;
+    gap: var(--s2);
+    min-width: 0;
   }
 
   .t {
