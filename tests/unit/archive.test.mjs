@@ -116,12 +116,19 @@ test("a description that only repeats the title is not a blurb", () => {
   assert.equal(firstOf(undefined), "");
 });
 
-test("queries are scoped to readable texts and cannot smuggle clauses", () => {
+test("queries are scoped to readable formats and cannot smuggle clauses", () => {
   const params = buildQuery({ query: 'berserk" OR mediatype:movies' });
   const q = params.get("q");
   assert.match(q, /mediatype:texts/);
   assert.match(q, /collection:comicbooks/);
-  assert.doesNotMatch(q, /"/);
+  // The format clause is the one place a quote belongs here. The term's own quote is stripped, so
+  // the smuggled `mediatype:movies` stays inside the parentheses it was wrapped in instead of
+  // ending the clause and widening the search.
+  assert.match(q, /format:\(/);
+  assert.match(q, /"Comic Book ZIP"/);
+  assert.match(q, /"Image Container PDF"/);
+  assert.doesNotMatch(q, /berserk"/, "the term cannot close its own clause");
+  assert.doesNotMatch(q.replace(/format:\([^)]*\)/, ""), /"/, "no quote survives outside the format clause");
   assert.equal(params.get("rows"), "30");
   assert.equal(params.get("output"), "json");
   assert.deepEqual(params.getAll("fl[]"), ["identifier", "title", "creator", "year", "description", "downloads", "mediatype"]);

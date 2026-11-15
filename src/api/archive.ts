@@ -74,6 +74,24 @@ export const ARCHIVE_PAGE_WIDTH = 1200;
 /** Collections that actually hold readable comics and magazines, not every text on the site. */
 const COMIC_COLLECTIONS = ["comicbooks", "comics", "magazine_rack", "pulpmagazinearchive"];
 
+/**
+ * A row must carry a file the reader can actually open.
+ *
+ * The collections are a shelf's label, not a promise: `comicbooks` holds scanned newsletters and
+ * text-only uploads beside the comics, and a row with only EPUB/Daisy/TXT derivatives opens onto a
+ * blank page. Requiring one of these formats keeps a comic, a magazine, a CBZ/CBR bundle, a PDF of
+ * scans or a loose-image scan, and drops the text-only uploads — measured against the live corpus:
+ * 737 015 rows with no format rule, 417 430 with this one, and every magazine and comic in the
+ * first page of both survived it.
+ *
+ * `Text PDF` is deliberately absent: it is the one label shared by comics and by plain prose, so
+ * keeping it lets a light novel back in, which is exactly the "random docs" this is for.
+ */
+const READABLE_FORMATS = ["Comic Book ZIP", "Comic Book RAR", "Comic Book", "Image Container PDF", "JPEG", "JPEG 2000"];
+
+/** The format clause, as archive.org's own query syntax spells it. */
+const READABLE_CLAUSE = `format:(${READABLE_FORMATS.map((format) => `"${format}"`).join(" OR ")})`;
+
 /** Fields asked of `advancedsearch.php`. Asking for fewer makes rows poorer, not faster. */
 const SEARCH_FIELDS = ["identifier", "title", "creator", "year", "description", "downloads", "mediatype"];
 
@@ -148,7 +166,10 @@ export function usefulDescription(value: unknown, title: string): string {
 /** The scoped query for a browse/search request. `sort` is archive.org's own `field dir` syntax. */
 export function buildQuery(input: { query?: string; sort?: string; collections?: string[] } = {}): URLSearchParams {
   const collections = input.collections ?? COMIC_COLLECTIONS;
-  const scope = collections.length === 0 ? "mediatype:texts" : `mediatype:texts AND (${collections.map((c) => `collection:${c}`).join(" OR ")})`;
+  const scope =
+    collections.length === 0
+      ? `mediatype:texts AND ${READABLE_CLAUSE}`
+      : `mediatype:texts AND (${collections.map((c) => `collection:${c}`).join(" OR ")}) AND ${READABLE_CLAUSE}`;
   const term = (input.query ?? "").trim();
   // A quote in the term would end the phrase and let the user add clauses; strip it rather than
   // letting a search box become a query builder.
