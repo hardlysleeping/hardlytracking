@@ -33,6 +33,7 @@
  * exactly what `tests/unit/cookies.test.mjs` does.
  */
 import { domainMatches, hostOf, parseSetCookie, type StoredCookie } from "./cookies";
+import { isNativeShell, nativePlugin } from "./native-bridge";
 
 export type WebviewPlatform = "tauri" | "capacitor" | "browser";
 
@@ -87,10 +88,7 @@ export type LoginOutcome =
 export function detectPlatform(): WebviewPlatform {
   const scope = globalThis as Record<string, unknown>;
   if ("__TAURI_INTERNALS__" in scope) return "tauri";
-  const capacitor = scope["Capacitor"] as { isNativePlatform?: () => boolean } | undefined;
-  if (capacitor !== undefined && typeof capacitor.isNativePlatform === "function" && capacitor.isNativePlatform()) {
-    return "capacitor";
-  }
+  if (isNativeShell()) return "capacitor";
   return "browser";
 }
 
@@ -135,11 +133,12 @@ function capacitorDriver(): WebviewDriver {
   return {
     platform: "capacitor",
     async open(page: LoginPage) {
-      const { registerPlugin } = await import("@capacitor/core");
-      const plugin = registerPlugin<{ open(page: { url: string; title?: string }): Promise<NativeLoginAnswer> }>(
-        "WebviewLogin",
-      );
-      const answer = await plugin.open({
+      // The page's own bridge, which needs nothing loaded. There is deliberately no package
+      // fallback: `@capacitor/core` asks the same object, and on a shell where that import hangs it
+      // has no deadline, so the wait would never surface as anything.
+      const login = nativePlugin<{ open(page: { url: string; title?: string }): Promise<NativeLoginAnswer> }>("WebviewLogin");
+      if (login === null) throw new Error("This build has no registered native login page.");
+      const answer = await login.open({
         url: page.url,
         ...(page.title === undefined ? {} : { title: page.title }),
         ...(page.headers === undefined ? {} : { headers: page.headers }),

@@ -24,6 +24,7 @@
  *   shell then shows "Opening the library…" for the whole session while every tab looks broken. A
  *   call that does not answer in time is treated exactly like a refused one, so the library opens.
  */
+import { nativePlugin } from "./webview/native-bridge";
 import { detectPlatform } from "./webview/index";
 
 /** Loopback port the embedded server listens on. Fixed so a stale pairing cannot point elsewhere. */
@@ -125,12 +126,12 @@ async function loadNativePlugin(): Promise<MihonRuntimePlugin | null> {
     }
   }
   if (platform !== "capacitor") return null;
-  try {
-    const { registerPlugin } = await import("@capacitor/core");
-    return registerPlugin<MihonRuntimePlugin>("MihonRuntime");
-  } catch {
-    return null;
-  }
+  // Only the page's own registry. `@capacitor/core` is a wrapper around the same object, so the
+  // package has nothing extra to give — and importing it is what hung on this shell: an install
+  // waited out the ten-second load deadline for a bridge that was in the page all along. A shell
+  // that has a bridge but no `MihonRuntime` in it answers `null`, which the caller reports as
+  // "no registered on-device runtime" instead of waiting for anything.
+  return nativePlugin<MihonRuntimePlugin>("MihonRuntime");
 }
 
 /**
