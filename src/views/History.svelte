@@ -383,7 +383,15 @@
                   <button class="btn pin-action" aria-pressed={isPinned(row.seriesId)}
                     aria-label={`${isPinned(row.seriesId) ? "Unpin" : "Pin"} ${row.title} in History`}
                     onclick={() => togglePin(row.seriesId)}>{isPinned(row.seriesId) ? "Unpin" : "Pin"}</button>
-                  <button class="btn remove" onclick={() => pending = [row.chapterId]}>Remove</button>
+                  <!--
+                    The same toggle the detail pane has, on the gesture a thumb already knows: a
+                    history row is the place a half-read title is met again, so filing it belongs
+                    here and not only on the title page it came from.
+                  -->
+                  <button class="btn save-action" aria-pressed={saved.has(row.seriesId)}
+                    aria-label={`${saved.has(row.seriesId) ? "Remove" : "Add"} ${row.title} ${saved.has(row.seriesId) ? "from" : "to"} the library`}
+                    onclick={() => void toggleSaved(row)}>{saved.has(row.seriesId) ? "Saved" : "Add"}</button>
+                  <button class="btn remove" aria-label={`Remove ${row.title} — ${row.chapterName} from history`} onclick={() => pending = [row.chapterId]}>Remove</button>
                 </div>
               {/if}
               <div class="row" class:on={selecting ? selected.has(row.chapterId) : mode === "split" && pickedRow?.chapterId === row.chapterId}>
@@ -391,7 +399,18 @@
                   onpointerdown={pointerStart} onpointerup={(event) => pointerEnd(event, row.chapterId)} onpointercancel={() => { start = null; swiped = false; }}
                   onclick={() => open(row)}></button>
                 {#if selecting}<span class="check" aria-hidden="true">{selected.has(row.chapterId) ? "☑" : "☐"}</span>{/if}
-                <Cover series={{ title: row.title, cover: row.cover }} size="row" />
+                <!--
+                  The cover is the title's door; the row is the chapter's. Tapping the picture asks
+                  "what else is in this series", which is the question a picture raises — and the
+                  row keeps resuming the chapter it names.
+                -->
+                <button class="coverdoor" aria-label={`Open ${row.title}`} title={`Open ${row.title}`}
+                  onpointerdown={pointerStart}
+                  onpointerup={(event) => pointerEnd(event, row.chapterId)}
+                  onpointercancel={() => { start = null; swiped = false; }}
+                  onclick={() => { if (swiped) { swiped = false; return; } openTitle(row); }}>
+                  <Cover series={{ title: row.title, cover: row.cover }} size="row" />
+                </button>
                 <div class="info">
                   <span class="t">
                     {#if isPinned(row.seriesId)}<svg class="pinned-glyph" viewBox="0 0 24 24" aria-hidden="true"><path d={MARKER_PATH} /></svg>{/if}
@@ -455,9 +474,13 @@
 <style>
   .entry { position: relative; overflow: hidden; border-radius: var(--r2); }
   .entry .row { background: var(--surface); transition: transform 160ms ease; }
-  .entry.revealed .row { transform: translateX(-196px); }
-  .reveal-actions { position: absolute; top: 0; right: 0; bottom: 0; display: flex; width: 196px; }
-  .reveal-actions .btn { flex: 1 1 0; min-width: 0; height: 100%; border-radius: 0; }
+  .entry.revealed .row { transform: translateX(-246px); }
+  /* Three actions, one gesture: pin, file it, forget it. 82 px each is a full thumb target. */
+  .reveal-actions { position: absolute; top: 0; right: 0; bottom: 0; display: flex; width: 246px; }
+  .reveal-actions .btn { flex: 1 1 0; min-width: 0; height: 100%; border-radius: 0; padding-inline: 2px; font-size: var(--t-xs); }
+  /* The picture is a door of its own, above the row's own hit area. */
+  .coverdoor { all: unset; position: relative; z-index: 1; display: block; flex: none; cursor: pointer; border-radius: var(--r1); }
+  .coverdoor:active { opacity: 0.8; }
   .pinned-glyph { width: 12px; height: 12px; margin-right: 4px; vertical-align: -1px; fill: none; stroke: var(--accent); stroke-width: 2; stroke-linejoin: round; }
   .hit { touch-action: pan-y; }
   .action { position: relative; z-index: 1; }
