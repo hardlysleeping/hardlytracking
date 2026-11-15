@@ -536,6 +536,11 @@ button.ghost:disabled {
   padding-left: var(--pad-x) !important;
   padding-right: var(--pad-x) !important;
   padding-top: var(--pad-y) !important;
+  /* A capped view centres in the space it is given. Each screen keeps its own max-width, but on a
+     wide window the cap used to sit at x=0 and leave every spare pixel on the right — 240 px on the
+     library, 340 on a source, 720 on settings at 1440, 500 on a source at 1600. Below the cap the
+     margin is zero, so the phone layout is byte-identical. */
+  margin-inline: auto;
 }
 
 /* -------------------------------------------------------------------------
