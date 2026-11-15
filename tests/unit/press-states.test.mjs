@@ -58,3 +58,9 @@ test("the source row's glyph trio and its filter seats answer a press", () => {
   assert.match(block(view, ".eyebtn:active, .incbtn:active, .pinbtn:active"), /transform: scale\(0\.94\)/);
   assert.match(block(view, ".seat:active"), /transform: scale\(0\.985\)/);
 });
+
+test("the settings seats answer a press, and a door row answers with its surface", () => {
+  const css = read("src/app.css");
+  assert.match(block(css, ":root .orderbtn:active,\n:root .navbtn:active"), /transform: scale\(0\.94\)/);
+  assert.match(block(css, ":root .row.door:active"), /background: var\(--surface-2\)/);
+});

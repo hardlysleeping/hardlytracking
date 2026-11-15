@@ -398,6 +398,20 @@ button {
   transform: scale(0.985);
 }
 
+/* Seats on the settings pages: the reorder arrows and the section pager are glyph buttons at 44 px,
+   so they take the glyph number like every other glyph seat. */
+:root .orderbtn:active,
+:root .navbtn:active {
+  transform: scale(0.94);
+}
+
+/* A door row is a row, not a seat. Scaling a 688 px row is layout motion rather than feedback, so
+   it answers with the surface it already uses for hover — which on a touchscreen is the only
+   feedback it can give, because hover never fires there. */
+:root .row.door:active {
+  background: var(--surface-2);
+}
+
 .chip.on {
   background: var(--surface-2);
   border-color: var(--line-strong);
