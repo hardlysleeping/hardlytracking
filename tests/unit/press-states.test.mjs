@@ -52,3 +52,9 @@ test("chips and the view switcher answer a press", () => {
   assert.match(block(css, ".chip:active"), /transform: scale\(0\.985\)/);
   assert.match(block(css, ":root .opt:active"), /transform: scale\(0\.985\)/);
 });
+
+test("the source row's glyph trio and its filter seats answer a press", () => {
+  const view = read("src/views/Browse.svelte");
+  assert.match(block(view, ".eyebtn:active, .incbtn:active, .pinbtn:active"), /transform: scale\(0\.94\)/);
+  assert.match(block(view, ".seat:active"), /transform: scale\(0\.985\)/);
+});

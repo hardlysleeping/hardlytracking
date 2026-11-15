@@ -290,6 +290,11 @@
     color: #d6d6de;
   }
 
+  /* The two filter seats carry a word beside their glyph, so they take the text number. */
+  .seat:active {
+    transform: scale(0.985);
+  }
+
   .seat svg {
     width: 14px;
     height: 14px;
@@ -329,6 +334,12 @@
 
   .eyebtn.hidden {
     color: var(--accent);
+  }
+
+  /* Eye, ghost, pin: the same 32 px glyph seat three times, so one press rule covers the three
+     rather than three copies that drift. */
+  .eyebtn:active, .incbtn:active, .pinbtn:active {
+    transform: scale(0.94);
   }
 
   .pinbtn {
