@@ -445,6 +445,12 @@
     background: var(--surface-2);
   }
 
+  /* A door row answers with its surface, not by scaling: on a touchscreen the press is the only
+     feedback it can give, because hover never fires there. */
+  .row:active {
+    background: var(--surface-2);
+  }
+
   .row.current {
     background: var(--surface-2);
   }

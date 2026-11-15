@@ -64,3 +64,8 @@ test("the settings seats answer a press, and a door row answers with its surface
   assert.match(block(css, ":root .orderbtn:active,\n:root .navbtn:active"), /transform: scale\(0\.94\)/);
   assert.match(block(css, ":root .row.door:active"), /background: var\(--surface-2\)/);
 });
+
+test("a door row and a text link answer a press", () => {
+  assert.match(block(read("src/views/Browse.svelte"), ".row:active"), /background: var\(--surface-2\)/);
+  assert.match(block(read("src/views/Plugins.svelte"), ".link:active"), /opacity: 0\.7/);
+});

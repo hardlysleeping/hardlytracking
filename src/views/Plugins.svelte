@@ -266,4 +266,9 @@
     text-decoration: underline;
     cursor: pointer;
   }
+
+  /* A text link has no box to scale, so it dips the way PageMenu's title does. */
+  .link:active {
+    opacity: 0.7;
+  }
 </style>
