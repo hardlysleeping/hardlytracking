@@ -539,7 +539,12 @@ function normaliseRow(collection: Collection, raw: unknown, index: number): Reco
     case "progress":
       return {
         chapterId: need("chapterId"),
-        seriesId: need("seriesId"),
+        // `seriesId` is a hint, not the identity — progress is keyed by chapterId everywhere it is
+        // merged, sorted or applied. The writer legitimately cannot supply it for a chapter this
+        // device no longer has (`from-store` sends ""), and requiring it made the app refuse a
+        // document it had just written itself: `serializeSync` validates what it is handed, so
+        // Export died with "progress[0] has no seriesId" and the backup never reached a file.
+        seriesId: str(row.seriesId) ?? "",
         page: num("page"),
         total: num("total"),
         ...stamp,
