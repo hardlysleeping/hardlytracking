@@ -127,7 +127,9 @@
 
   .opt:hover, .opt:focus-visible { color: var(--text-1); background: var(--surface); }
 
-  .opt.on { color: var(--accent, var(--text-1)); background: var(--surface); box-shadow: inset 0 0 0 1px var(--accent, var(--line)); }
+  /* The chosen word is text and takes the readable accent (2.03:1 as a fill colour on dark); the
+     inset ring stays the fill, which is what makes the state readable at a glance. */
+  .opt.on { color: var(--accent-text, var(--accent, var(--text-1))); background: var(--surface); box-shadow: inset 0 0 0 1px var(--accent, var(--line)); }
 
   .columns {
     display: flex;

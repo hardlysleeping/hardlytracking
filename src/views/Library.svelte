@@ -1200,7 +1200,9 @@
     margin-bottom: var(--s1);
   }
   .library-tabs { display: flex; gap: var(--s2); }
-  .library-tabs [aria-current="page"] { color: var(--accent); border-color: var(--accent); }
+  /* The label is text, so it takes the readable accent: the fill colour is #613583, which is
+     2.15:1 on the dark page. The border keeps the fill - a 1px line has no legibility of its own. */
+  .library-tabs [aria-current="page"] { color: var(--accent-text); border-color: var(--accent); }
   /* One line, in place: no dialog, no empty screen, nothing else on this page changes. */
   .offline {
     margin: 0 var(--s3) var(--s2);
