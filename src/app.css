@@ -34,7 +34,11 @@
 
   --text-1: #e8e8f0;
   --text-2: #a8a8b8;
-  --text-3: #6f6f7e;
+  /* Measured on the built app: #6f6f7e was 3.90:1 on the page, 3.68:1 on a surface and 3.46:1 on
+     surface-2 — under AA for every quiet label in the app (65 of them on one screen). #85858f is
+     5.27 / 4.98 / 4.68:1, still a clear tier under --text-2, and clears AA on the lightest dark
+     surface as well as on the OLED palette. */
+  --text-3: #85858f;
 
   --accent: #7aa2ff;
   /* Text that has to read on a surface rather than on an accent fill. Same hue,
