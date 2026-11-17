@@ -399,7 +399,6 @@
     series={visibleItems}
     cover={132}
     view={settings.libraryView}
-    columns={settings.browseColumns}
     titlePlacement={settings.browseTitle}
     rowStyle={settings.rowStyle}
     empty={mode === "search" ? "This source found nothing." : "This source returned nothing."}

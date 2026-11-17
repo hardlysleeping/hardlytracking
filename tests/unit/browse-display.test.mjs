@@ -1,25 +1,22 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { ROW_STYLES, browseMode, columnsFor, maxColumns, knownSize, rowStyleOf } from '../../src/lib/browse-display.ts';
+import { ROW_STYLES, browseMode, knownSize, rowStyleOf } from '../../src/lib/browse-display.ts';
 
 test('legacy display choices migrate to the same three modes', () => {
   for (const [input, result] of [['list','row'], ['row','row'], ['compact','grid'], ['grid','grid'], ['card','card'], [null,'grid'], ['garbage','grid']]) assert.equal(browseMode(input), result);
 });
-test('columns are integers: 1 minimum, 3 on a phone, 6 on a tablet or a desktop', () => {
-  for (const [width, ceiling] of [[390, 3], [900, 6], [1280, 10]]) {
-    assert.equal(columnsFor(-1, width), 1);
-    assert.equal(columnsFor(0, width), 1);
-    assert.equal(columnsFor(99, width), ceiling);
-    assert.equal(columnsFor(2, width), 2);
-    assert.equal(columnsFor(3.7, width), Math.min(4, ceiling));
-    for (const bad of [undefined, null, NaN, Infinity, '6']) assert.equal(columnsFor(bad, width), Math.min(3, ceiling));
-    assert.equal(maxColumns(width), ceiling);
-  }
-});
-test('a phone in landscape keeps the phone ceiling', () => {
-  assert.equal(maxColumns(1280, 390), 3);
-  assert.equal(columnsFor(8, 1280, 390), 3);
+test('the grid counts the window, not a stored column count', () => {
+  // The count is `auto-fill` over the cover width. A fixed count (a slider) put two enormous
+  // covers on a wide screen and cut every title to a stub, so there is no count to store.
+  const grid = readFileSync(new URL('../../src/components/SeriesGrid.svelte', import.meta.url), 'utf8');
+  assert.match(grid, /grid-template-columns: repeat\(auto-fill/);
+  assert.doesNotMatch(grid, /columns\?: number/, 'SeriesGrid takes no column count');
+  assert.doesNotMatch(grid, /--columns|class:explicit/, 'and draws none');
+  const settings = readFileSync(new URL('../../src/state/settings.svelte.ts', import.meta.url), 'utf8');
+  assert.doesNotMatch(settings, /browseColumns/, 'the count is not a preference');
+  const display = readFileSync(new URL('../../src/components/BrowseDisplay.svelte', import.meta.url), 'utf8');
+  assert.doesNotMatch(display, /Columns|browseColumns/, 'and has no slider');
 });
 test('only actual finite known byte counts produce sizes', () => {
   for (const value of [undefined,null,NaN,Infinity,-1,'1024']) assert.equal(knownSize(value),null);
@@ -30,14 +27,13 @@ test('only actual finite known byte counts produce sizes', () => {
 test('collection restore cannot override global display and both screens consume it', () => {
   const library = readFileSync(new URL('../../src/views/Library.svelte',import.meta.url),'utf8');
   const restore = library.slice(library.indexOf('async function restoreView('),library.indexOf('  $effect(() =>',library.indexOf('async function restoreView(')));
-  assert.doesNotMatch(restore,/settings\.set\("(?:libraryView|coverSize|browseColumns)"/);
+  assert.doesNotMatch(restore,/settings\.set\("(?:libraryView|coverSize)"/);
   for (const view of ['Library','Search']) {
     const source = readFileSync(new URL(`../../src/views/${view}.svelte`,import.meta.url),'utf8');
     assert.match(source,/<BrowseDisplay\s*\/>/);
-    for (const key of ['libraryView','browseColumns']) assert.ok(source.includes(`settings.${key}`));
+    assert.ok(source.includes('settings.libraryView'));
   }
   const settings = readFileSync(new URL('../../src/state/settings.svelte.ts',import.meta.url),'utf8');
-  for (const key of ['browseColumns']) assert.ok(settings.includes(`read("${key}"`));
   // Sideways was removed as a feature, not hidden: a stored `true` must have nothing left to read it.
   assert.doesNotMatch(settings,/browseHorizontal/);
   const grid = readFileSync(new URL('../../src/components/SeriesGrid.svelte',import.meta.url),'utf8');

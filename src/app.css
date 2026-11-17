@@ -588,7 +588,8 @@ button.ghost:disabled {
  *   no bar at all.
  * ------------------------------------------------------------------------- */
 :root .view > header,
-:root .view > .pin {
+:root .view > .pin,
+:root .view > .sheet > .pin {
   position: sticky;
   top: 0;
   z-index: 30;

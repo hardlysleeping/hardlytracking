@@ -21,11 +21,13 @@
   import { downloads } from "../state/downloads.svelte";
   import { viewStateKey } from "../lib/history";
   import CategoryRail from "../components/CategoryRail.svelte";
+  import Reader from "./Reader.svelte";
+  import { readerPane } from "../state/reader-pane.svelte";
   import SeriesGrid from "../components/SeriesGrid.svelte";
   import BrowseDisplay from "../components/BrowseDisplay.svelte";
   import { cleanOrder, orderAfterMove } from "../lib/library/order";
   import { applyCollection, collectionState, hiddenBy, selectAll } from "../lib/library/selection";
-  import { BADGE_KINDS, DEFAULT_BADGES, PRESET_BADGES, badgeList, type Badge } from "../lib/library/badges";
+  import { BADGE_KINDS, DEFAULT_BADGES, badgeList, type Badge } from "../lib/library/badges";
   import Sheet from "../components/Sheet.svelte";
   import LibraryHeader from "../components/LibraryHeader.svelte";
   import LibrarySettingsPanel from "../components/LibrarySettingsPanel.svelte";
@@ -44,7 +46,7 @@
   import { visibleCategories } from "../lib/categories";
   import { contextOf, sourceKeyOf, visibleRows } from "../lib/marks";
   import { sourceMarks } from "../state/source-marks.svelte";
-  import { coverWidth, libraryLayout } from "../lib/layout-modes";
+  import { MIN_DETAIL_WIDTH, MIN_READER_WIDTH, MIN_SHELF_WIDTH, coverWidth, libraryLayout } from "../lib/layout-modes";
   import { viewport } from "../lib/layout.svelte";
   import { emptyFacts, runQuery, type QueryFacts } from "../lib/library/query";
   import { EMPTY_FILTER, activeChips, countActive, isEmptyFilter, mergeFilter, withoutChip } from "../lib/library/filter";
@@ -179,6 +181,11 @@
 
   /** The title in the detail pane, on a screen wide enough for one. */
   let picked = $state<string | null>(null);
+  /** The series/chapter share while its seam is being dragged; committed on release. */
+  let dragShare = $state<number | null>(null);
+  /** The shelf's share of the three-pane slack while its seam is being dragged. */
+  let dragRatio3 = $state<number | null>(null);
+
   /** The split ratio while the divider is being dragged; committed to `settings` on release. */
   let dragRatio = $state<number | null>(null);
   /** The `⋯` sheet: refresh, select, categories, settings, statistics. */
@@ -347,8 +354,43 @@
       collectionCount: shownCategories.length,
       pinnedCount: shownCategories.filter((category) => category.pinned).length,
       splitRatio: dragRatio ?? settings.splitRatio,
+      splitRatio3: dragRatio3 ?? settings.splitRatio3,
+      detailShare: dragShare ?? settings.detailShare,
+      pane: settings.libraryPane,
     }),
   );
+
+  /**
+   * A chapter open beside the shelf, and whether it is drawn as a two-page spread.
+   *
+   * The spread is the reader's `Two pages` mode: the gutter belongs in the middle of the reading
+   * surface, which in a pane means the two panes together — so the shelf steps aside and the
+   * divider stops being a handle. The shelf is hidden, never unmounted: coming back to it is a
+   * toggle, not a walk through the library again.
+   */
+  const openChapter = $derived(readerPane.open);
+  const chapterOpen = $derived(openChapter !== null);
+  /**
+   * Two pages with two panes: the shelf steps aside and the gutter falls where the divider was.
+   * With three panes the series column stays, so the spread is drawn inside the reading column.
+   */
+  const spread = $derived(chapterOpen && settings.readerMode === "duo" && layout.thirdWidth === 0);
+  /** One-pane mode has no second column, so reading takes the shelf's place entirely. */
+  const solo = $derived(chapterOpen && layout.mode === "single");
+  /**
+   * Three panes with the reader open: the reading column is drawn outside the page, so the band,
+   * the field and the tab row can only ever occupy the two columns beside it. It is not a column
+   * of the library page; it is the reader, and the reader has always been the whole screen.
+   */
+  const thirds = $derived(layout.thirdWidth > 0 && initialTab !== "updates" && initialTab !== "downloads");
+  /**
+   * The reader is the page here: one pane reading, or a spread that has taken both.
+   *
+   * The library's own chrome belongs to the shelf. Above a reading surface it was only an offset —
+   * a 100dvh reader starting 150 px down the page is a reader with its bottom off screen, and a
+   * sticky panel inside a scrolling document is what scrolls raggedly.
+   */
+  const readingPage = $derived(solo || spread);
 
   /** Auto is the device class's density, Custom is the slider, a preset wins over both. */
   const cover = $derived(coverWidth(settings.libraryDensity, layout.device, settings.coverSize));
@@ -560,21 +602,6 @@
 
   const sortLabel = $derived(SORT_OPTIONS.find((option) => option.key === sortSpec.key)?.label ?? "Title");
 
-  /** Three named presets: a size and the badges that belong with it, written together. */
-  const DENSITY_PRESETS = [
-    { name: "comfortable", label: "Comfortable", cover: 132 },
-    { name: "compact", label: "Compact", cover: 96 },
-    { name: "large", label: "Large", cover: 180 },
-  ] as const;
-
-  function applyPreset(preset: (typeof DENSITY_PRESETS)[number]): void {
-    settings.set("coverSize", preset.cover);
-    // The slider's value is what draws, so a preset has to move it — and "manual" is the setting
-    // that says the slider is in charge.
-    settings.set("libraryDensity", "manual");
-    settings.set("badgeSet", { ...PRESET_BADGES[preset.name] });
-  }
-
   /** Applying a sort writes only the collection it was applied to. */
   function setSort(spec: SortSpec): void {
     settings.set("sortByCollection", { ...settings.sortByCollection, [selected ?? "all"]: spec });
@@ -645,22 +672,80 @@
     go(pathTo("series", row.id));
   }
 
-  /** Drag the divider: the ratio is live while dragging, and remembered when the pointer lifts. */
+  /**
+   * Drag the shelf's seam.
+   *
+   * Two panes drag a share of the window; three drag a share of the *slack* — the room left once
+   * each column has its floor — because that is what the layout divides. The handle follows the
+   * pointer in both, and neither can push a column under its minimum.
+   */
   function startDrag(event: PointerEvent): void {
     if (panes === null) return;
     const handle = event.currentTarget as HTMLElement;
     const box = panes.getBoundingClientRect();
     handle.setPointerCapture(event.pointerId);
+    const minGrid = MIN_SHELF_WIDTH;
+    const three = layout.thirdWidth > 0;
+    /*
+     * The room the layout divides, which is not the box this handle sits in any more: with three
+     * panes the reading column is drawn beside the page, so the handle's box ends where the reader
+     * begins and subtracting three floors from it asked for more room than the box holds. The sum
+     * of the columns is the width the shares are actually a share of.
+     */
+    const space = layout.gridWidth + layout.detailWidth + layout.thirdWidth;
+    const slack = space - minGrid - MIN_DETAIL_WIDTH - MIN_READER_WIDTH;
+    const low = box.width > 0 ? minGrid / box.width : 0.4;
+    const high = box.width > 0 ? (box.width - MIN_DETAIL_WIDTH) / box.width : 0.6;
     const move = (moveEvent: PointerEvent) => {
       if (box.width === 0) return;
-      dragRatio = Math.min(0.75, Math.max(0.45, (moveEvent.clientX - box.left) / box.width));
+      const px = moveEvent.clientX - box.left;
+      if (three) {
+        dragRatio3 = slack > 0 ? Math.min(1, Math.max(0, (px - minGrid) / slack)) : settings.splitRatio3;
+        return;
+      }
+      const raw = px / box.width;
+      dragRatio = Math.min(Math.max(high, low), Math.max(low, raw));
     };
     const done = () => {
       handle.removeEventListener("pointermove", move);
       handle.removeEventListener("pointerup", done);
       handle.removeEventListener("pointercancel", done);
       if (dragRatio !== null) settings.set("splitRatio", dragRatio);
+      if (dragRatio3 !== null) settings.set("splitRatio3", dragRatio3);
       dragRatio = null;
+      dragRatio3 = null;
+    };
+    handle.addEventListener("pointermove", move);
+    handle.addEventListener("pointerup", done);
+    handle.addEventListener("pointercancel", done);
+  }
+
+  /**
+   * The seam between the series and the chapter.
+   *
+   * The same arithmetic as the shelf's handle, measured against the space the two right-hand
+   * columns share: the series' floor at one end, the reading column's at the other.
+   */
+  function startShareDrag(event: PointerEvent): void {
+    if (panes === null) return;
+    const handle = event.currentTarget as HTMLElement;
+    const box = panes.getBoundingClientRect();
+    handle.setPointerCapture(event.pointerId);
+    // Measured against the slack the two columns share, not their total width: their floors are
+    // already spoken for, so a pointer past them must not be able to ask for a sliver.
+    const left = box.left + layout.gridWidth;
+    const space = layout.gridWidth + layout.detailWidth + layout.thirdWidth;
+    const slack = space - layout.gridWidth - MIN_DETAIL_WIDTH - MIN_READER_WIDTH;
+    const move = (moveEvent: PointerEvent) => {
+      const px = moveEvent.clientX - left;
+      dragShare = slack > 0 ? Math.min(1, Math.max(0, (px - MIN_DETAIL_WIDTH) / slack)) : settings.detailShare;
+    };
+    const done = () => {
+      handle.removeEventListener("pointermove", move);
+      handle.removeEventListener("pointerup", done);
+      handle.removeEventListener("pointercancel", done);
+      if (dragShare !== null) settings.set("detailShare", dragShare);
+      dragShare = null;
     };
     handle.addEventListener("pointermove", move);
     handle.addEventListener("pointerup", done);
@@ -826,7 +911,8 @@
   }
 </script>
 
-<section class="view">
+<section class="view" class:thirds class:reading={readingPage}>
+  <div class="sheet">
   <div class="pin">
   {#if initialTab !== "titles"}<PageMenu title="Library" current="library" />{:else}
   <LibraryHeader
@@ -877,10 +963,6 @@
     <p class="offline" role="status">{OFFLINE_NOTE}</p>
   {/if}
 
-  <!-- The pin is a seat in the band, beside the eye and the lock. Only the curtain moves it, and
-       then it goes to the top bar (see LibraryHeader). -->
-  <LibraryBand />
-
   <div class="body">
     {#if layout.categoryNav.mode === "sidebar"}
       <aside class="collections" style:width={`${layout.sidebarWidth}px`} aria-label="Collections">
@@ -899,11 +981,43 @@
           </button>
         {/each}
         <button class="crow more" onclick={() => (categoriesOpen = true)}>Categories…</button>
+        <!-- One and two panes, stacked at the foot of the rail: the swap is a shape, and two buttons
+             that sit on top of each other read as one choice rather than two settings. -->
+        <div class="panemenu" role="group" aria-label="Library panes">
+          <button
+            class="pane"
+            class:on={settings.libraryPane === "single"}
+            aria-pressed={settings.libraryPane === "single"}
+            title="One pane"
+            onclick={() => settings.set("libraryPane", "single")}
+          >1</button>
+          <button
+            class="pane"
+            class:on={settings.libraryPane === "split"}
+            aria-pressed={settings.libraryPane === "split"}
+            title="Two panes"
+            onclick={() => settings.set("libraryPane", "split")}
+          >2</button>
+          <button
+            class="pane"
+            class:on={settings.libraryPane === "three"}
+            aria-pressed={settings.libraryPane === "three"}
+            title="Three panes"
+            onclick={() => settings.set("libraryPane", "three")}
+          >3</button>
+        </div>
       </aside>
     {/if}
 
-    <div class="panes" bind:this={panes}>
+    <div class="panes" class:spread class:solo bind:this={panes}>
       <div class="column">
+        <!--
+          The pin is a seat in the band, beside the eye and the lock. Only the curtain moves it, and
+          then it goes to the top bar (see LibraryHeader). The band belongs to the shelf — it says
+          what the shelf shows — so it is drawn inside the shelf's column and stops at its seam
+          instead of running across the series pane beside it.
+        -->
+        <LibraryBand />
         {#if library.library.length > 0}
         {#if layout.categoryNav.mode !== "sidebar"}
         <CollectionTabs
@@ -996,7 +1110,6 @@
             series={rows}
             view={settings.libraryView}
             cover={cover}
-            columns={settings.browseColumns}
     titlePlacement={settings.browseTitle}
     rowStyle={settings.rowStyle}
             sizes={fileSizes}
@@ -1026,12 +1139,39 @@
           aria-label="Resize the detail pane"
           onpointerdown={startDrag}
         ></div>
-        <aside class="detail" style:width={`${layout.detailWidth}px`} aria-label="Selected series">
-          {#if pickedRow !== null}
+
+        <!-- The second column: the series page, or the chapter when two panes are a reader. -->
+        <aside
+          class="detail"
+          class:reading={openChapter !== null && layout.thirdWidth === 0}
+          style:width={`${layout.detailWidth}px`}
+          aria-label={openChapter !== null && layout.thirdWidth === 0 ? "Reader" : "Selected series"}
+        >
+          {#if openChapter !== null && layout.thirdWidth === 0}
+            <Reader
+              pane
+              seriesId={openChapter.seriesId}
+              chapterId={openChapter.chapterId}
+              onclose={() => readerPane.close()}
+              onnavigate={(id) => readerPane.replace(id)}
+            />
+          {:else if pickedRow !== null}
             <SeriesPage seriesId={pickedRow.id} embedded />
           {:else}
             <p class="hint">Pick a title to see it here. The shelf keeps its place.</p>
           {/if}
+        </aside>
+
+      {:else if openChapter !== null}
+        <!-- One column, reading: the shelf gives its place to the page and comes back on close. -->
+        <aside class="detail reading" style:width="100%" aria-label="Reader">
+          <Reader
+            pane
+            seriesId={openChapter.seriesId}
+            chapterId={openChapter.chapterId}
+            onclose={() => readerPane.close()}
+            onnavigate={(id) => readerPane.replace(id)}
+          />
         </aside>
       {/if}
     </div>
@@ -1050,6 +1190,34 @@
       </div>
     </div>
   {/if}
+  {/if}
+  </div>
+
+  {#if thirds}
+    <!-- The reading column outside the page: its own seam, the top of the scroller, and the whole
+         height of the window — the same surface one-pane reading has always had. -->
+    <div class="thirdpane">
+      <div
+        class="divider"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize the reading pane"
+        onpointerdown={startShareDrag}
+      ></div>
+      <aside class="detail reading third" style:width={`${layout.thirdWidth}px`} aria-label="Reader">
+        {#if openChapter !== null}
+          <Reader
+            pane
+            seriesId={openChapter.seriesId}
+            chapterId={openChapter.chapterId}
+            onclose={() => readerPane.close()}
+            onnavigate={(id) => readerPane.replace(id)}
+          />
+        {:else}
+          <p class="hint">Pick a chapter and it opens here, beside the series.</p>
+        {/if}
+      </aside>
+    </div>
   {/if}
 </section>
 
@@ -1080,33 +1248,6 @@
 
 <Sheet open={displayOpen} title="Display" onclose={() => (displayOpen = false)}>
   <div class="rows">
-    <div class="row presets">
-      <span>Size</span>
-      <div class="presetrow">
-        {#each DENSITY_PRESETS as preset (preset.name)}
-          <button
-            class="chip"
-            class:on={cover === preset.cover && settings.libraryDensity === "manual"}
-            onclick={() => applyPreset(preset)}
-          >{preset.label}</button>
-        {/each}
-      </div>
-    </div>
-    <label class="row">
-      <span>Cover size</span>
-      <input
-        type="range"
-        min="96"
-        max="200"
-        step="4"
-        value={cover}
-        oninput={(event) => {
-          // Dragging the slider is a density choice of its own: "Custom" wins over the presets.
-          settings.set("coverSize", Number(event.currentTarget.value));
-          settings.set("libraryDensity", "manual");
-        }}
-      />
-    </label>
     <label class="row">
       <span>Show “Continue reading”</span>
       <input type="checkbox" checked={settings.showContinue} onchange={(event) => settings.set("showContinue", event.currentTarget.checked)} />
@@ -1201,7 +1342,7 @@
   }
   .library-tabs { display: flex; gap: var(--s2); }
   /* The label is text, so it takes the readable accent: the fill colour is #613583, which is
-     2.15:1 on the dark page. The border keeps the fill - a 1px line has no legibility of its own. */
+     2.15:1 on the dark page. The border keeps the fill — a 1px line has no legibility of its own. */
   .library-tabs [aria-current="page"] { color: var(--accent-text); border-color: var(--accent); }
   /* One line, in place: no dialog, no empty screen, nothing else on this page changes. */
   .offline {
@@ -1228,6 +1369,66 @@
     box-sizing: border-box;
     padding: var(--s4) var(--s4) var(--s6);
     max-width: 1200px;
+  }
+
+  /* Three panes: the page and the reader are two things side by side. The page keeps the padding,
+     the reader gets none of it — so the band and the search sit over the shelves and never over the
+     chapter, and the chapter starts where the window starts. */
+  .view.thirds {
+    display: flex;
+    align-items: stretch;
+    padding: 0;
+    max-width: none;
+    height: 100dvh;
+    overflow: hidden;
+  }
+  /* The page scrolls inside itself, so the reader beside it is a still column rather than a sticky
+     panel being re-composited on every wheel tick. */
+  .view.thirds .sheet {
+    flex: 1;
+    min-width: 0;
+    overflow-y: auto;
+    overscroll-behavior-y: contain;
+    box-sizing: border-box;
+    padding: var(--s4) var(--s4) var(--s6);
+  }
+  .thirdpane {
+    flex: none;
+    display: flex;
+    align-items: stretch;
+    height: 100%;
+  }
+  .thirdpane .divider {
+    align-self: stretch;
+  }
+  .thirdpane .detail.reading.third {
+    height: 100%;
+    max-height: none;
+    align-self: stretch;
+    position: relative;
+    top: 0;
+    box-sizing: border-box;
+  }
+
+  /* Reading in one pane (or a spread): the library's chrome belongs to the shelf, and the shelf is
+     away. The reader takes the whole frame — no header above it, no page to scroll behind it. */
+  .view.reading {
+    display: flex;
+    flex-direction: column;
+    padding: 0;
+    max-width: none;
+    height: 100dvh;
+    overflow: hidden;
+  }
+  .view.reading > .pin,
+  .view.reading :global(.bandbox) { display: none; }
+  .view.reading .body { flex: 1; min-height: 0; }
+  .view.reading .panes { height: 100%; }
+  .view.reading .detail.reading {
+    height: 100%;
+    max-height: none;
+    position: relative;
+    top: 0;
   }
 
   /* A sheet's footer: the two buttons sit at the end, Cancel first so Apply is the reach. */
@@ -1277,6 +1478,34 @@
   .collections::-webkit-scrollbar {
     display: none;
   }
+
+  /* One control, not three buttons: a single frame with the answers stacked inside it, the
+     chosen one filled. The rows share a border, so it reads as a vertical menu. */
+  .panemenu {
+    display: grid;
+    gap: 0;
+    margin-top: var(--s3);
+    padding: 0;
+    border: 1px solid var(--line);
+    border-radius: var(--r2);
+    overflow: hidden;
+    background: var(--surface);
+  }
+  .panemenu .pane {
+    all: unset;
+    cursor: pointer;
+    display: grid;
+    place-items: center;
+    min-height: 28px;
+    border-radius: 0;
+    font-size: var(--t-sm);
+    font-variant-numeric: tabular-nums;
+    color: var(--text-3);
+  }
+  .panemenu .pane + .pane { border-top: 1px solid var(--line); }
+  .panemenu .pane:hover { color: var(--text-1); background: var(--surface-2); }
+  .panemenu .pane.on { color: var(--accent); background: var(--surface-2); }
+  .panemenu .pane:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 
   .crow {
     all: unset;
@@ -1333,6 +1562,22 @@
   }
 
   /* The pane scrolls on its own, so the shelf keeps its place while chapters are read. */
+  /* The spread: the shelf steps aside (hidden, not unmounted) and the reading surface takes both
+     columns, so the gutter falls where the divider was — and the divider is no longer a handle. */
+  .panes.spread .column,
+  .panes.solo .column { display: none; }
+  .panes.spread .divider { display: none; }
+
+  /* The third column's seam is a handle now, so it does not also draw a border there. */
+  .detail.third { border-left: none; }
+
+  .detail.reading {
+    position: relative;
+    height: calc(100dvh - var(--s4) * 2);
+    padding: 0;
+    overflow: hidden;
+  }
+
   .detail {
     flex: none;
     position: sticky;

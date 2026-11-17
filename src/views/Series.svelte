@@ -19,6 +19,7 @@
   import Sheet from "../components/Sheet.svelte";
   import MigrateSheet from "../components/MigrateSheet.svelte";
   import { go, pathTo } from "../lib/nav";
+  import { startReading } from "../state/reader-pane.svelte";
   import { flipOrder, orderChapters, orderLabel, type ChapterOrder } from "../lib/chapter-order";
   import { chapterTitle } from "../lib/titles";
 
@@ -39,7 +40,7 @@
   let query = $state("");
   let onlyUnread = $state(false);
   let onlyDownloaded = $state(false);
-  let order = $state<ChapterOrder>("newest");
+  let order = $state<ChapterOrder>("oldest");
 
   let expanded = $state(false);
   let menuOpen = $state(false);
@@ -127,14 +128,22 @@
   const unread = $derived(chapters.filter((chapter) => !chapter.read).length);
   const next = $derived(position === null ? null : chapters.find((chapter) => chapter.id === position?.chapterId) ?? null);
 
+  /** In flight: the seat spins, and a second tap cannot start a second write. */
+  let saving = $state(false);
+
   async function toggleSaved(): Promise<void> {
-    if (series === null) return;
-    if (saved) {
-      await library.unsave(series.id);
-      saved = false;
-    } else {
-      await library.save(series, chapters);
-      saved = true;
+    if (series === null || saving) return;
+    saving = true;
+    try {
+      if (saved) {
+        await library.unsave(series.id);
+        saved = false;
+      } else {
+        await library.save(series, chapters);
+        saved = true;
+      }
+    } finally {
+      saving = false;
     }
   }
 
@@ -285,30 +294,60 @@
         <p class="facts">{[series.status, `Source: ${series.provider}`].filter(Boolean).join(" · ")}</p>
         <div class="actions">
           {#if next}
-            <button class="btn primary wide" onclick={() => go(pathTo("read", seriesId, next.id))}>
+            <button class="btn primary wide" onclick={() => startReading(seriesId, next.id, embedded)}>
               Continue · {chapterTitle(next)}{position ? ` · p.${position.page + 1}` : ""}
             </button>
           {:else if chapters.length > 0}
-            <button class="btn primary wide" onclick={() => go(pathTo("read", seriesId, chapters[chapters.length - 1].id))}>Start reading</button>
+            <button class="btn primary wide" onclick={() => startReading(seriesId, chapters[chapters.length - 1].id, embedded)}>Start reading</button>
           {/if}
           <div class="pair">
-            <button class="btn" onclick={() => void toggleSaved()}>{saved ? "In library" : "Add to library"}</button>
+            <!-- In the library or not is the glyph and its tone: four cells alone, four cells with
+                 the last replaced by a tick when the title is on the shelf. Adding spins while the
+                 write is in flight, so the state after the tap is the state it shows. -->
+            <button
+              class="btn icon"
+              class:on={saved}
+              aria-pressed={saved}
+              aria-label={saved ? "In your library — tap to remove" : "Add to library"}
+              title={saved ? "In your library — tap to remove" : "Add to library"}
+              disabled={saving}
+              onclick={() => void toggleSaved()}
+            >
+              {#if saving}
+                <span class="spin" aria-hidden="true"></span>
+              {:else}
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d={saved ? "M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 17.5l2.5 2.5L20 15.5" : "M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z"} />
+                </svg>
+              {/if}
+            </button>
             {#if chapters.length > 0}
-              <button class="btn" disabled={downloads.inQueue(chapters[0].id)} onclick={() => downloads.enqueue(seriesId, chapters[0])}>Download</button>
-            {/if}
-          </div>
-          <SourceLink url={series.url} />
-        </div>
-        {#if saved && categories.items.length > 0}
-          <div class="cats">
-            {#each categories.items.filter((c) => !privacy.locked || !c.hidden) as category (category.id)}
-              <button disabled={privacy.locked} class="chip" class:on={(series.categoryIds ?? []).includes(category.id)} onclick={() => void toggleCategory(category.id)}>
-                {category.name}
+              <button
+                class="btn icon"
+                aria-label={`Download ${chapterTitle(chapters[0])}`}
+                title="Download"
+                disabled={downloads.inQueue(chapters[0].id)}
+                onclick={() => downloads.enqueue(seriesId, chapters[0])}
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v10M8 10l4 4 4-4M5 20h14" /></svg>
               </button>
-            {/each}
+            {/if}
+            <SourceLink url={series.url} icon />
           </div>
-        {/if}
+        </div>
       </div>
+
+      <!-- The shelves this title sits in, under the row it belongs to: the cover is sized by the
+           text and the actions, and the chips are a second row rather than part of that measure. -->
+      {#if saved && categories.items.length > 0}
+        <div class="cats">
+          {#each categories.items.filter((c) => !privacy.locked || !c.hidden) as category (category.id)}
+            <button disabled={privacy.locked} class="chip" class:on={(series.categoryIds ?? []).includes(category.id)} onclick={() => void toggleCategory(category.id)}>
+              {category.name}
+            </button>
+          {/each}
+        </div>
+      {/if}
     </div>
 
     {#if series.description}
@@ -357,12 +396,12 @@
                     heldId = "";
                     return;
                   }
-                  go(pathTo("read", seriesId, chapter.id));
+                  startReading(seriesId, chapter.id, embedded);
                 }}
                 onkeydown={(event) => {
                   if (event.key === "Enter" || event.key === " ") {
                     event.preventDefault();
-                    go(pathTo("read", seriesId, chapter.id));
+                    startReading(seriesId, chapter.id, embedded);
                   }
                   // Keyboard parity with the hold: a menu without a pointer.
                   if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
@@ -469,7 +508,7 @@
     {@const aboveUnread = above.filter((row) => !row.read).length}
     {@const belowUnread = below.filter((row) => !row.read).length}
     <div class="menu">
-      <button class="menu-item" onclick={() => go(pathTo("read", seriesId, chapter.id))}>Read</button>
+      <button class="menu-item" onclick={() => startReading(seriesId, chapter.id, embedded)}>Read</button>
       {#if chapter.read}
         <button class="menu-item" onclick={() => void setRead(chapter, false)}>Mark unread</button>
       {:else}
@@ -540,11 +579,16 @@
     stroke-linejoin: round;
   }
 
+  /* Two columns, and the artwork is the height of the first row — the title down to the action
+     row — instead of its own 2:3 guess. A cover that ends wherever its aspect ratio said left a
+     ragged edge under the actions and a gap under the cover. */
   .hero {
-    display: flex;
-    gap: var(--s3);
+    display: grid;
+    grid-template-columns: clamp(128px, 38%, 168px) minmax(0, 1fr);
+    column-gap: var(--s3);
+    row-gap: var(--s2);
     margin-bottom: var(--s4);
-    align-items: start;
+    align-items: stretch;
   }
 
   /*
@@ -554,14 +598,18 @@
    * buttons below it are content-sized instead of stretched.
    */
   .hero > :global(div.cover.hero) {
+    grid-column: 1;
+    grid-row: 1;
     width: 100%;
-    flex: 0 0 clamp(128px, 38%, 168px);
+    aspect-ratio: auto;
+    align-self: stretch;
   }
 
   .meta {
+    grid-column: 2;
+    grid-row: 1;
     display: grid;
     grid-template-columns: minmax(0, 1fr);
-    flex: 1;
     gap: var(--s2);
     align-content: start;
     min-width: 0;
@@ -601,21 +649,42 @@
     text-align: center;
   }
 
-  /* Content-sized, not two half-columns: these are two short verbs, and stretching them to the
-     whole column is what squeezed the cover beside them. */
+  /* One row of glyphs, never a wrapped stack: three 36 px seats and their gaps are 124 px, which
+     fits beside the cover even in the narrowest pane. */
   .pair {
     display: flex;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
+    align-items: center;
     gap: var(--s2);
   }
-
+  /* Square seats: the three glyphs read as one row of equal controls rather than three pills of
+     different heights. */
   .pair .btn {
-    width: auto;
-    min-width: 7.5rem;
-    padding: 0 var(--s3);
+    width: 40px;
+    min-width: 40px;
+    min-height: 40px;
+    padding: 0;
+  }
+
+  /* The in-flight mark for the library seat: an arc of the seat's own colour, turning. */
+  .spin {
+    width: 16px;
+    height: 16px;
+    border: 2px solid currentColor;
+    border-right-color: transparent;
+    border-radius: 50%;
+    animation: turn 700ms linear infinite;
+  }
+  @keyframes turn {
+    to { transform: rotate(360deg); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .spin { animation-duration: 2.4s; }
   }
 
   .cats {
+    grid-column: 2;
+    grid-row: 2;
     display: flex;
     flex-wrap: wrap;
     gap: var(--s2);
@@ -678,8 +747,10 @@
     margin-left: var(--s2);
   }
 
+  /* The order belongs to the count it orders: "12 chapters · 3 unread · Oldest first" reads as
+     one sentence, so the chip sits beside it rather than pinned to the far edge. */
   .sortchip {
-    margin-left: auto;
+    margin-left: 0;
   }
 
   .cacts {
@@ -692,9 +763,12 @@
   }
 
   .cacts .field {
-    width: 160px;
+    flex: 1 1 120px;
+    width: auto;
+    min-width: 0;
     padding: 5px var(--s2);
   }
+  .cacts .chip { flex: none; }
 
   .list {
     list-style: none;

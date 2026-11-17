@@ -288,7 +288,19 @@ export async function openLibraryProfile(options: OpenProfileOptions = {}): Prom
       }
     },
     async attachDalvik(baseUrl: string): Promise<string | null> {
-      const next = await openDalvik(config, baseUrl, listExtensions);
+      // Asked more than once on purpose. The host was started by this app moments ago, and the probe
+      // carries a 4 s clock: while the main thread is still opening the library — a first launch with
+      // a large one holds it for seconds — the answer is ready but the clock wins, plugin-http
+      // cancels the request, and a healthy host was reported as missing ("Request cancelled", or
+      // "undefined" when the bridge rejected with a bare string). Two more attempts after the shell
+      // has painted tell a busy host from an absent one; a port with nothing on it refuses the
+      // connection in milliseconds, so this costs a dead host nothing but two quick calls.
+      let next = await openDalvik(config, baseUrl, listExtensions);
+      for (const wait of [2_000, 5_000]) {
+        if (next.dalvik !== null) break;
+        await new Promise((resolve) => setTimeout(resolve, wait));
+        next = await openDalvik(config, baseUrl, listExtensions);
+      }
       const at = providers.findIndex((provider) => provider.kind === "dalvik");
       if (at >= 0) providers.splice(at, 1);
       if (next.provider !== null) providers.push(next.provider);

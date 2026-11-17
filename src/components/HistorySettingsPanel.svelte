@@ -104,7 +104,7 @@
       value={settings.historyPane}
       onchange={(event) => settings.set("historyPane", event.currentTarget.value as typeof settings.historyPane)}
     >
-      {#each PANE_CHOICES as choice (choice.id)}
+      {#each PANE_CHOICES.filter((choice) => choice.id !== "three") as choice (choice.id)}
         <option value={choice.id}>{choice.label}</option>
       {/each}
     </select>

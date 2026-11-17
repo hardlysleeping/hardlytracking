@@ -10,6 +10,8 @@
  * the tests read the same numbers, so a layout cannot drift from its spec without a failing test.
  */
 
+import { paneMode, type PanePreference } from "./view-options";
+
 export type DeviceClass = "phone" | "tablet" | "desktop";
 
 /** Where the collection list lives. */
@@ -38,14 +40,14 @@ export interface LibraryLayout {
   device: DeviceClass;
   /** `single` is one pane; `split` puts the detail beside the grid. */
   mode: "single" | "split";
-  /** True in the middle band, where a split is possible but not forced. */
-  optionalSplit: boolean;
   categoryNav: CategoryNavPlan;
   /** Width of the collection sidebar when `categoryNav.mode === "sidebar"`. */
   sidebarWidth: number;
   /** Width of the grid, once the rail, sidebar and detail pane take theirs. */
   gridWidth: number;
   detailWidth: number;
+  /** Width of the reading column in three-pane mode, 0 when there is no third pane. */
+  thirdWidth: number;
   /** The grid/detail split, 0 when there is no pane. */
   splitRatio: number;
   density: Density;
@@ -57,10 +59,24 @@ export interface LayoutOptions {
   nav?: CategoryNavPreference;
   collectionCount?: number;
   pinnedCount?: number;
+  /** In three panes, the shelf's share of the room above the three floors. */
+  splitRatio3?: number;
+  /** In three panes, the series column's share of the room the shelf leaves. */
+  detailShare?: number;
   /** A remembered ratio from the user dragging the divider. */
   splitRatio?: number;
-  /** The user asked for a split in the middle band. */
-  forceSplit?: boolean;
+  /**
+   * Settings → Library → Library panes. `single` never splits and `split` splits as soon as the
+   * window has enough height and content width; automatic follows the same available-width rule.
+   */
+  pane?: PanePreference;
+  /**
+   * The narrowest the shelf may be left when a split is drawn.
+   *
+   * It used to be a constant (420), which on a laptop meant two panes never appeared at all. It is
+   * a preference now, because how narrow a column of covers is still readable is the reader's call.
+   */
+  minGridWidth?: number;
 }
 
 /**
@@ -82,19 +98,32 @@ export function deviceClass(width: number, height: number = width): DeviceClass 
   return "desktop";
 }
 
-/** Navigation chrome outside the library column. */
+/**
+ * Navigation chrome outside the library column.
+ *
+ * One width for every screen that has a nav column. A 1280 breakpoint used to trade 148 px of
+ * shelf for labels beside the icons, so dragging a window wider suddenly shrank the library —
+ * a panel of chrome should not get bigger because there is more room.
+ */
 export function railWidth(device: DeviceClass): number {
-  if (device === "desktop") return 224;
-  if (device === "tablet") return 76;
-  return 0;
+  return device === "phone" ? 0 : 76;
 }
 
 export const PAGE_PADDING = 32;
 export const MIN_GRID_WIDTH = 420;
+/**
+ * The narrowest the shelf may be: the width of its own display menu.
+ *
+ * The row/grid/cards switcher is three options of 52 px inside a frame, which is ~170 px — below
+ * that the menu wraps and the row of buttons becomes two rows of debris. A pane's floor should be
+ * where its controls stop working, not a number someone can drag past.
+ */
+export const MIN_SHELF_WIDTH = 200;
 export const MIN_DETAIL_WIDTH = 340;
 export const MAX_DETAIL_WIDTH = 520;
+/** The narrowest a reading column may be: two pages, or one page and its margins. */
+export const MIN_READER_WIDTH = 420;
 export const MIN_SIDEBAR_WIDTH = 200;
-export const MAX_SIDEBAR_WIDTH = 280;
 
 /** Cover widths. `comfortable` is the tablet default; `compact` is for very large libraries. */
 export const DENSITIES: Record<Density, number> = { compact: 88, comfortable: 112, large: 148 };
@@ -154,17 +183,10 @@ export function collectionBar<T extends { pinned: boolean }>(
   return { shown: ordered.slice(0, take), overflow: ordered.slice(take) };
 }
 
-/**
- * The split is a question about *usable* width, not device width.
- *
- *   < 750    single pane, always
- *   750–1050 a split is possible but the user opts in
- *   > 1050   split by default
- *
- * And it needs height: a 1100×520 window has no room for a detail pane that can be read.
- */
-export const SPLIT_OPTIONAL_AT = 750;
-export const SPLIT_DEFAULT_AT = 1050;
+/** Minimum content width for a Library pane split, after navigation and sidebar chrome. */
+export const LIBRARY_SPLIT_MIN_WIDTH = 750;
+/** Automatic category sidebar breakpoint; independent of the pane-mode decision. */
+export const CATEGORY_SIDEBAR_AUTO_AT = 1050;
 export const MIN_SPLIT_HEIGHT = 600;
 
 /**
@@ -209,8 +231,8 @@ export function categoryNavPlan(
   const capacity = chipCapacity(usable);
 
   // A sidebar is only worth its width if the grid still has a usable minimum beside it.
-  const sidebarFits = usable - sidebarWidth(usable) >= MIN_GRID_WIDTH;
-  const wantsSidebar = preference === "sidebar" || (preference === "automatic" && usable >= SPLIT_DEFAULT_AT);
+  const sidebarFits = usable - sidebarWidth() >= MIN_GRID_WIDTH;
+  const wantsSidebar = preference === "sidebar" || (preference === "automatic" && usable >= CATEGORY_SIDEBAR_AUTO_AT);
 
   if (wantsSidebar && sidebarFits) {
     return { mode: "sidebar", visible: 0, overflow: 0, pinned };
@@ -223,9 +245,15 @@ export function categoryNavPlan(
   return { mode: "overflow", visible, overflow: Math.max(count - visible, 0), pinned };
 }
 
-/** The sidebar's width: a fifth of the space, clamped so it stays a list and not a wall. */
-export function sidebarWidth(usable: number): number {
-  return clamp(usable * 0.2, MIN_SIDEBAR_WIDTH, MAX_SIDEBAR_WIDTH);
+/**
+ * The sidebar's width: one list, at one width.
+ *
+ * It was a fifth of the window, clamped at 280 — so widening the window widened the list, and a
+ * column of category names stole room from the shelf every time the frame grew. A sidebar is
+ * chrome; chrome does not resize because the window did.
+ */
+export function sidebarWidth(): number {
+  return MIN_SIDEBAR_WIDTH;
 }
 
 /** Columns for a grid of `available` px at a cover width, clamped 2–8. */
@@ -271,27 +299,86 @@ export function libraryLayout(width: number, height: number, options: LayoutOpti
   const pinnedCount = options.pinnedCount ?? 0;
 
   const nav = categoryNavPlan(usable, preference, collectionCount, pinnedCount);
-  const sidebar = nav.mode === "sidebar" ? sidebarWidth(usable) : 0;
+  const sidebar = nav.mode === "sidebar" ? sidebarWidth() : 0;
   const gridSpace = Math.max(usable - sidebar, 0);
 
-  // The split is decided on the space the window has, then checked against the space the grid would
-  // actually be left with. A sidebar is worth its width only if the grid still gets its minimum.
-  const tallEnough = height >= MIN_SPLIT_HEIGHT;
-  const canSplit = usable >= SPLIT_OPTIONAL_AT && tallEnough;
-  const splitByDefault = usable > SPLIT_DEFAULT_AT && tallEnough;
-  const ratio = clamp(options.splitRatio ?? 0.58, 0.45, 0.75);
-  const wanted = splitByDefault || (canSplit && options.forceSplit === true);
-  const detailWidth = wanted ? clamp(gridSpace * (1 - ratio), MIN_DETAIL_WIDTH, MAX_DETAIL_WIDTH) : 0;
-  const split = wanted && gridSpace - detailWidth >= MIN_GRID_WIDTH;
+  // A phone on its side is short but wide, and two panes side by side is exactly what that shape
+  // wants; the height test is there to stop a *portrait* phone splitting into two slivers. A Duo
+  // opened flat lands here too: wide enough is the whole test.
+  const landscape = width > height;
+  const tallEnough = height >= MIN_SPLIT_HEIGHT || (landscape && width >= LIBRARY_SPLIT_MIN_WIDTH);
+  const minGrid = clamp(options.minGridWidth ?? MIN_SHELF_WIDTH, MIN_SHELF_WIDTH, MIN_GRID_WIDTH);
+  const panePreference = options.pane ?? "auto";
+  const paneConstraints = {
+    list: minGrid,
+    detail: MIN_DETAIL_WIDTH,
+    gutter: 0,
+    splitAt: LIBRARY_SPLIT_MIN_WIDTH,
+    automaticAt: LIBRARY_SPLIT_MIN_WIDTH,
+  };
+  // The resolver receives the room left after the nav rail, padding and category sidebar. A short
+  // portrait gets zero eligible width; a short landscape keeps its real room to divide.
+  const splitWidth = tallEnough ? gridSpace : 0;
+  const wanted = paneMode(panePreference, splitWidth, paneConstraints) === "split";
+  /*
+   * The split is a *share* of the room, and the room is whatever the window has.
+   *
+   * The detail pane used to be a width in pixels, pinned between 340 and 520. That made the shelf
+   * the only pane that answered a resize: every pixel the window lost came out of the grid while
+   * the detail sat at its number, and widening the window stopped giving the detail anything once
+   * it hit 520. Both panes follow the share now — the divider sets the shape, the window sets how
+   * much of it there is — and only the two floors are fixed numbers.
+   */
+  const floorShare = gridSpace > 0 ? minGrid / gridSpace : 0.5;
+  const ceilingShare = gridSpace > 0 ? 1 - MIN_DETAIL_WIDTH / gridSpace : 0.5;
+  const given = options.splitRatio;
+  const asked = typeof given === "number" && Number.isFinite(given) ? given : 0.58;
+  const ratio = Math.min(Math.max(asked, floorShare), Math.max(floorShare, ceilingShare));
+  /*
+   * Three panes are the shelf, the series and the chapter — the shape HardlyReader ships, one
+   * column further along. The reading column is the one that has to be honest: a page squeezed
+   * under 420px is a page with its margins eaten, so when the window cannot hold all three the
+   * reader is what steps aside (two panes), then the series (one pane). Floors, not guesses.
+   */
+  const canHoldThree = gridSpace >= minGrid + MIN_DETAIL_WIDTH + MIN_READER_WIDTH;
+  const three = wanted && panePreference === "three" && canHoldThree;
+  /*
+   * Three columns divide the room that is *above their floors*, not the window.
+   *
+   * Giving the shelf its share of the window first was the bug behind "the handles do nothing" in
+   * three panes: at a 1440 window the shelf took 58% of 1424, which left the series and the chapter
+   * exactly their floors — so both seams were pinned and neither handle had anywhere to go. Now
+   * every column starts at its floor and the two shares divide the slack, which means each seam has
+   * room to move at any window wide enough to hold three at all.
+   */
+  const given3 = options.splitRatio3;
+  const shelfShare3 = typeof given3 === "number" && Number.isFinite(given3) ? Math.min(Math.max(given3, 0), 1) : 0.58;
+  const givenDetail = options.detailShare;
+  const seriesShare = typeof givenDetail === "number" && Number.isFinite(givenDetail) ? Math.min(Math.max(givenDetail, 0), 1) : 0.4;
+  const slack = three ? gridSpace - minGrid - MIN_DETAIL_WIDTH - MIN_READER_WIDTH : 0;
+  const shelfWidth = !wanted
+    ? gridSpace
+    : three
+      ? minGrid + Math.round(slack * shelfShare3)
+      : Math.min(Math.round(gridSpace * ratio), gridSpace - MIN_DETAIL_WIDTH);
+  const rest = gridSpace - shelfWidth;
+  const seriesSlack = three ? rest - MIN_DETAIL_WIDTH - MIN_READER_WIDTH : 0;
+  const detailWidth = !wanted
+    ? 0
+    : three
+      ? MIN_DETAIL_WIDTH + Math.round(seriesSlack * seriesShare)
+      : rest;
+  const split = wanted && detailWidth >= MIN_DETAIL_WIDTH;
+  const thirdWidth = split && three ? gridSpace - shelfWidth - detailWidth : 0;
 
   return {
     device,
     mode: split ? "split" : "single",
-    optionalSplit: canSplit && !splitByDefault,
     categoryNav: nav,
     sidebarWidth: sidebar,
-    gridWidth: Math.max(gridSpace - detailWidth, 0),
+    gridWidth: Math.max(split ? shelfWidth : gridSpace, 0),
     detailWidth: split ? detailWidth : 0,
+    thirdWidth,
     splitRatio: split ? ratio : 0,
     density: defaultDensity(device),
     resume: device === "phone" ? "menu" : device === "tablet" ? "always" : "hover",

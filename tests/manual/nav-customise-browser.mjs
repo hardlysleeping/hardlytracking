@@ -36,10 +36,10 @@ try {
   // ---- (a) the bar draws the pref, in the pref's order, and nothing else changed ---------------
   let state=await prefs();
   assert.deepEqual(state.bottomNav,['more','history','search','browse','library'],'the stored order was loaded as stored');
-  assert.deepEqual(await barLabels(),['More','History','Search','Browse','Library'],'the bar is the pref order');
+  assert.deepEqual(await barLabels(),['Settings','History','Search','Browse','Library'],'the bar is the pref order');
   const bar=await page.locator('nav.bar button').evaluateAll(ns=>ns.map(n=>{const r=n.getBoundingClientRect();return {label:n.getAttribute('aria-label'),text:n.innerText.trim(),height:r.height,width:r.width,current:n.getAttribute('aria-current'),color:getComputedStyle(n).color};}));
   assert.equal(bar.length,5);
-  for(const item of bar){assert.equal(item.text,item.label,'the floating menu labels each destination');assert.ok(item.height>=44,`${item.label} keeps its tap target`);}
+  for(const item of bar){assert.equal(item.text,'','the floating menu is icons only, with no label text');assert.ok(item.label.length>0,'each icon still names its page for a screen reader');assert.ok(item.height>=44,`${item.label} keeps its tap target`);}
   const menuBox=await page.locator('nav.bar').evaluate(n=>{const r=n.getBoundingClientRect(),s=getComputedStyle(n);return {left:r.left,right:r.right,top:r.top,bottom:r.bottom,height:r.height,position:s.position,borderRadius:s.borderRadius,borderTop:s.borderTopWidth,borderLeft:s.borderLeftWidth,shadow:s.boxShadow};});
   assert.equal(menuBox.position,'fixed');
   assert.equal(menuBox.height,56,'the floating menu keeps its compact height');
@@ -56,7 +56,7 @@ try {
   assert.equal(type.weight,'650');
   assert.ok(type.height>=44,'the title is a 44 px tap target');
   await noOverflow();
-  evidence.push({check:'(a) floating bottom menu = pref order, labelled 48 px targets, inset glass pill, title keeps h1 type',bar,type,menuBox,token2xl});
+  evidence.push({check:'(a) floating bottom menu = pref order, icons only with named targets, inset glass pill, title keeps h1 type',bar,type,menuBox,token2xl});
   await shot('a-bar-order');
 
   // ---- (f) the title menu lists every destination and navigates --------------------------------
@@ -64,7 +64,7 @@ try {
   await page.waitForTimeout(200);
   assert.equal(await page.locator('[role="menu"]').count(),1);
   const items=await menuItems();
-  assert.deepEqual(items.map(item=>item.name),['Library','Browse','Search','History','More'],'every destination, in DESTINATIONS order');
+  assert.deepEqual(items.map(item=>item.name),['Library','History','Search','Browse','Settings'],'every destination, in DESTINATIONS order');
   assert.equal(items.find(item=>item.name==='Library').current,'page');
   assert.ok(items.every(item=>item.height>=44),'44 px rows');
   const box=await page.locator('[role="menu"]').evaluate(n=>{const r=n.getBoundingClientRect();return {top:r.top,bottom:r.bottom,left:r.left,right:r.right};});
@@ -92,7 +92,7 @@ try {
   assert.equal(await page.locator('[role="menu"]').count(),0,'an outside tap closes');
   // Every destination page carries the same menu, and each one marks itself as the current page.
   const visited=[];
-  for(const name of ['Browse','History','More','Library']){
+  for(const name of ['Browse','History','Settings','Library']){
     await title().click();
     await page.waitForTimeout(150);
     await page.getByRole('menuitem',{name,exact:true}).click();
@@ -129,15 +129,15 @@ try {
   // ---- (b) hiding a destination removes it from the bar, not from the app ----------------------
   await route('#/settings');
   const barEditor=page.locator('.navedit').first();
-  assert.deepEqual(await barEditor.locator('.navlabel').evaluateAll(ns=>ns.map(n=>n.textContent.trim())),['More','History','Search','Browse','Library'],'every destination is listed, bar order first');
+  assert.deepEqual(await barEditor.locator('.navlabel').evaluateAll(ns=>ns.map(n=>n.textContent.trim())),['Settings','History','Search','Browse','Library'],'every destination is listed, bar order first');
   await page.getByRole('button',{name:'Hide Browse in the navigation',exact:true}).click();
   await page.waitForTimeout(200);
   assert.deepEqual((await prefs()).bottomNav,['more','history','search','library']);
   await route('#/library');
-  assert.deepEqual(await barLabels(),['More','History','Search','Library'],'Browse is off the bar');
+  assert.deepEqual(await barLabels(),['Settings','History','Search','Library'],'Browse is off the bar');
   await title().click();
   await page.waitForTimeout(150);
-  assert.deepEqual((await menuItems()).map(item=>item.name),['Library','Browse','Search','History','More'],'the title menu still lists the hidden page');
+  assert.deepEqual((await menuItems()).map(item=>item.name),['Library','History','Search','Browse','Settings'],'the title menu still lists the hidden page');
   await page.getByRole('menuitem',{name:'Browse',exact:true}).click();
   await page.waitForTimeout(400);
   assert.equal(await page.evaluate(()=>location.hash),'#/browse','and navigating there works');
@@ -153,15 +153,15 @@ try {
   await page.getByRole('button',{name:'Move Library up',exact:true}).click();
   await page.waitForTimeout(200);
   assert.deepEqual((await prefs()).bottomNav,['more','library','history','search']);
-  assert.deepEqual(await barEditor.locator('.navrow .navlabel').evaluateAll(ns=>ns.map(n=>n.textContent.trim())),['More','Library','History','Search','Browse'],'the editor lists the bar in its new order');
+  assert.deepEqual(await barEditor.locator('.navrow .navlabel').evaluateAll(ns=>ns.map(n=>n.textContent.trim())),['Settings','Library','History','Search','Browse'],'the editor lists the bar in its new order');
   await route('#/library');
-  assert.deepEqual(await barLabels(),['More','Library','History','Search'],'the bar draws the new order');
+  assert.deepEqual(await barLabels(),['Settings','Library','History','Search'],'the bar draws the new order');
   evidence.push({check:'(d) arrow reordering changes the bar order',bar:await barLabels()});
   await shot('d-bar-reordered');
 
   // ---- (c) the last visible destination cannot be hidden -------------------------------------
   await route('#/settings');
-  for(const name of ['More','History','Search']){
+  for(const name of ['Settings','History','Search']){
     await page.getByRole('button',{name:`Hide ${name} in the navigation`,exact:true}).click();
     await page.waitForTimeout(120);
   }

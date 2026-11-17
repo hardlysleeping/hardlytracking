@@ -10,7 +10,7 @@ test('Stats is one door under More, not a bottom-bar tab, and the bar has no dup
   const route = parseRoute('#/stats');
   assert.equal(route.name, 'stats');
   assert.equal(destinationOf(route), 'more');
-  assert.equal(backHref(route), '/more');
+  assert.equal(backHref(route), '/settings');
   // Every destination is unique, and the bar's set is exactly the daily ones.
   assert.equal(new Set(DESTINATIONS.map(row => row.id)).size, DESTINATIONS.length);
   assert.deepEqual(DESTINATIONS.map(row => row.id), ['library', 'history', 'search', 'browse', 'more']);

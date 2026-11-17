@@ -10,7 +10,7 @@
  */
 
 export type Margins = "comfortable" | "compact" | "none";
-export type PanePreference = "auto" | "single" | "split";
+export type PanePreference = "auto" | "single" | "split" | "three";
 export type Density = "auto" | "manual" | "compact" | "comfortable" | "large";
 
 /**
@@ -43,6 +43,7 @@ export const PANE_CHOICES: Array<{ id: PanePreference; label: string }> = [
   { id: "auto", label: "Automatic" },
   { id: "single", label: "One pane" },
   { id: "split", label: "Two panes" },
+  { id: "three", label: "Three panes" },
 ];
 
 /** Horizontal and vertical padding for a screen, in px. */
@@ -66,22 +67,33 @@ export function contentGap(margins: Margins): number {
  * answer is a single pane, and the caller can say so instead of drawing a 40 px list. `auto` splits
  * only when there is room to spare — 1000 px is the same floor the tablet layout uses.
  */
+export interface PaneConstraints {
+  list: number;
+  detail: number;
+  /** Space reserved for the divider between the panes. */
+  gutter?: number;
+  /** Earliest width at which an explicit split can be drawn. */
+  splitAt?: number;
+  /** Automatic mode's width threshold; explicit preferences still use the same minimums. */
+  automaticAt?: number;
+}
+
+/** One shared pane-mode decision, parameterized by available content width and its floors. */
 export function paneMode(
   preference: PanePreference,
   width: number,
-  minimums: { list: number; detail: number } = { list: 300, detail: 340 },
+  minimums: PaneConstraints = { list: 300, detail: 340 },
 ): "single" | "split" {
-  // Both panes at their minimum plus a gutter is the floor — a split that leaves no room between
-  // them is a single pane with a seam drawn in it.
-  const floor = minimums.list + minimums.detail + 120;
+  const floor = minimums.list + minimums.detail + (minimums.gutter ?? 120);
+  const splitAt = Math.max(floor, minimums.splitAt ?? 0);
   if (preference === "single") return "single";
-  if (preference === "split") return width >= floor ? "split" : "single";
-  return width >= Math.max(1000, floor) ? "split" : "single";
+  if (preference === "split" || preference === "three") return width >= splitAt ? "split" : "single";
+  return width >= Math.max(splitAt, minimums.automaticAt ?? 1000) ? "split" : "single";
 }
 
-/** True when the reader asked for two panes and this screen cannot draw them. */
-export function squeezed(preference: PanePreference, width: number, minimums?: { list: number; detail: number }): boolean {
-  return preference === "split" && paneMode(preference, width, minimums) === "single";
+/** True when an explicit multi-pane preference cannot be drawn at the available width. */
+export function squeezed(preference: PanePreference, width: number, minimums?: PaneConstraints): boolean {
+  return (preference === "split" || preference === "three") && paneMode(preference, width, minimums) === "single";
 }
 
 /** The share of the width the list pane takes, clamped so neither side collapses. */

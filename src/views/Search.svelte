@@ -29,6 +29,10 @@
   const CHECKED_BOX = "M4 4h16v16H4zM8 12.2l2.6 2.6L16.4 9";
   import SourceLink from "../components/SourceLink.svelte";
   import { settings } from "../state/settings.svelte";
+  import { viewport } from "../lib/layout.svelte";
+  import { libraryLayout } from "../lib/layout-modes";
+  import { readerPane, startReading } from "../state/reader-pane.svelte";
+  import Reader from "./Reader.svelte";
   import {
     detailsCacheKey,
     isFresh,
@@ -516,6 +520,20 @@
   });
 
 
+  /**
+   * The same pane arithmetic the library uses, so "two panes" means the same shape on both
+   * screens: results beside the details, and the reading column when one is open.
+   */
+  const layout = $derived(
+    libraryLayout(viewport.width, viewport.height, {
+      collectionCount: 0,
+      splitRatio: settings.splitRatio,
+      detailShare: settings.detailShare,
+      pane: settings.libraryPane,
+    }),
+  );
+  const split = $derived(layout.mode === "split");
+  const openChapter = $derived(readerPane.open);
 </script>
 
 {#snippet detailCard()}
@@ -576,7 +594,7 @@
                     class:read={chapter.read}
                     onclick={() => {
                       if (issueSeries !== record?.id) return;
-                      go(pathTo("read", record!.id, chapter.id));
+                      startReading(record!.id, chapter.id);
                     }}
                   >
                     <span class="diname">{chapterTitle(chapter)}</span>
@@ -628,7 +646,7 @@
   {/if}
 {/snippet}
 
-<section class="view">
+<section class="view" class:wide={split}>
   <!--
     The heading and the field are one pinned block: a search page whose field scrolls away is a page
     you have to scroll back up to use. `.pin` is sticky in `app.css`, together with every other
@@ -707,7 +725,7 @@
 
   <BrowseDisplay />
 
-  <div class="stage">
+  <div class="stage" class:panes={split}>
     <div class="results">
       {#if notice !== ""}
         <p class="notice" role="status">{notice}</p>
@@ -744,7 +762,6 @@
               series={block.items}
               cover={116}
               view={settings.libraryView}
-              columns={settings.browseColumns}
     titlePlacement={settings.browseTitle}
     rowStyle={settings.rowStyle}
               sizes={fileSizes}
@@ -754,8 +771,8 @@
               onpick={(series) => show(series)}
               onlongpress={(series) => (actions = series)}
               onselect={(series) => toggleSelect(series.id)}
-              expandAfter={record !== null && block.items.some((item) => item.id === record.id) ? record.id : null}
-              expanded={record !== null ? detailCard : null}
+              expandAfter={!split && record !== null && block.items.some((item) => item.id === record.id) ? record.id : null}
+              expanded={!split && record !== null ? detailCard : null}
             />
           {/if}
           {#if block.hasNext}
@@ -765,6 +782,28 @@
       {/each}
     </div>
 
+    {#if split}
+      <aside
+        class="detail"
+        class:reading={openChapter !== null}
+        style:width={`${layout.detailWidth}px`}
+        aria-label={openChapter === null ? "Details" : "Reader"}
+      >
+        {#if openChapter !== null}
+          <Reader
+            pane
+            seriesId={openChapter.seriesId}
+            chapterId={openChapter.chapterId}
+            onclose={() => readerPane.close()}
+            onnavigate={(id) => readerPane.replace(id)}
+          />
+        {:else if record !== null}
+          {@render detailCard()}
+        {:else}
+          <p class="hint">Pick a result to see it here. The list keeps its place.</p>
+        {/if}
+      </aside>
+    {/if}
   </div>
 
   <SeriesActions
@@ -792,6 +831,32 @@
   .view {
     padding: var(--s4) var(--s4) var(--s7);
     max-width: 1100px;
+  }
+
+  /* Side by side, the results are a column of their own rather than a page: the reading measure
+     stops applying and the pane gets the width it was given. */
+  .view.wide { max-width: none; }
+
+  .stage.panes {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--s3);
+  }
+  .stage.panes .results { flex: 1; min-width: 0; }
+  .stage.panes .detail {
+    flex: none;
+    position: sticky;
+    top: var(--s4);
+    max-height: calc(100dvh - var(--s4) * 2);
+    overflow-y: auto;
+    box-sizing: border-box;
+    border-left: 1px solid var(--line);
+    padding-left: var(--s3);
+  }
+  .stage.panes .detail.reading {
+    height: calc(100dvh - var(--s4) * 2);
+    padding: 0;
+    overflow: hidden;
   }
 
   .bar {

@@ -184,3 +184,47 @@ test("a read mark goes to our database, and the chapter list draws it back", asy
     await host.close();
   }
 });
+
+test("a capability check cancelled by a busy first paint is asked again, not called a missing host", async (t) => {
+  // The shape of the desktop bug: the app's own runtime is up (its log says so), but the first
+  // probe loses its 4 s clock to the main thread that is still opening the library, and the shell's
+  // HTTP bridge rejects with the bare string "Request cancelled". That used to end as a warning —
+  // "no extension host at …: Request cancelled", or worse, ": undefined" — for a host that answers
+  // perfectly well a second later.
+  const host = await stubHost();
+  try {
+    const database = memoryDatabase();
+    let attempts = 0;
+    const real = globalThis.fetch;
+    const fetchImpl = (input, init) => {
+      const url = typeof input === "string" ? input : input.url;
+      if (url.endsWith("/capabilities")) {
+        attempts += 1;
+        if (attempts < 3) return Promise.reject("Request cancelled");
+      }
+      return real(input, init);
+    };
+    // Opened with no host at all, exactly like a shell that attaches its own runtime afterwards.
+    const profile = await openLibraryProfile({ database, mihonBase: null, dalvikBase: null, fetchImpl });
+
+    // The waits between attempts are real time; the test does not spend seven seconds on them.
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const flush = async () => { for (let i = 0; i < 8; i += 1) await Promise.resolve(); };
+    const pending = profile.attachDalvik(host.baseUrl);
+    await flush();
+    t.mock.timers.tick(2_000);
+    await flush();
+    t.mock.timers.tick(5_000);
+    await flush();
+    const warning = await pending;
+
+    assert.equal(warning, null, "the second answer attached the host");
+    assert.equal(attempts, 3, "each cancelled probe was asked again");
+    assert.equal(profile.dalvik?.baseUrl, host.baseUrl);
+    assert.deepEqual(profile.warnings, [], "a host that answered is not reported as missing");
+    assert.equal(providerFor(profile.providers, "dalvik:src:1").kind, "dalvik");
+  } finally {
+    t.mock.timers.reset();
+    await host.close();
+  }
+});

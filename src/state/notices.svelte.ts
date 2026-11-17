@@ -5,7 +5,7 @@
  * page down — and because nothing took it away, a single failure left a permanent band across the
  * top. It is an overlay now: it covers the top of the screen for a few seconds, the layout underneath
  * does not move, and it leaves on its own. Everything it said is kept in `lib/notice-log`, which the
- * More page shows inline.
+ * Settings page shows inline.
  *
  * Two rules that are not arbitrary:
  *

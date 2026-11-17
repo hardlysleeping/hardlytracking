@@ -251,6 +251,19 @@ function setCookieOf(response: Response): string[] {
   return single === null || single === "" ? [] : [single];
 }
 
+/**
+ * What a rejected call is worth saying out loud.
+ *
+ * A refusal is not always an `Error`: a shell's HTTP bridge can reject with a bare string, and
+ * `(error as Error).message` then printed the word "undefined" — an error message that named
+ * nothing and could not be searched for.
+ */
+function reason(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  const text = String(error).trim();
+  return text === "" || text === "[object Object]" ? "the request failed" : text;
+}
+
 export class DalvikClient {
   readonly baseUrl: string;
   private readonly fetchImpl: typeof fetch;
@@ -282,7 +295,7 @@ export class DalvikClient {
     try {
       response = await this.fetchImpl(`${this.baseUrl}/capabilities`, { signal: controller.signal, headers: apiHeaders() });
     } catch (error) {
-      throw new DalvikError(`no extension host at ${this.baseUrl}: ${(error as Error).message}`, 0);
+      throw new DalvikError(`no extension host at ${this.baseUrl}: ${reason(error)}`, 0);
     } finally {
       clearTimeout(timer);
     }
@@ -318,7 +331,7 @@ export class DalvikClient {
         signal: controller.signal,
       });
     } catch (error) {
-      throw new DalvikError(`the extension host is not answering at ${this.baseUrl}: ${(error as Error).message}`, 0);
+      throw new DalvikError(`the extension host is not answering at ${this.baseUrl}: ${reason(error)}`, 0);
     } finally {
       clearTimeout(timer);
     }

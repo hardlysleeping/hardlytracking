@@ -1,10 +1,9 @@
 <script lang="ts">
   import { settings } from "../state/settings.svelte";
-  import { viewport } from "../lib/layout.svelte";
-  import { browseMode, columnsFor, maxColumns } from "../lib/browse-display";
+  import { browseMode } from "../lib/browse-display";
 
   /**
-   * One display menu, expanded in place.
+   * One display menu, expanded in place: it never opens as a popover.
    *
    * It is a menu — a single control with a frame, a label and its options inside — but it never
    * drops down: the options are laid out in the menu itself, so seeing what Rows looks like costs
@@ -12,10 +11,9 @@
    * because a shelf's shape is recognised by its picture, not by three words that all sound alike.
    */
   const mode = $derived(browseMode(settings.libraryView));
+
   /** The placement the toggle will switch to when pressed. */
   const otherTitle = $derived(settings.browseTitle === "below" ? "overlay" : "below");
-  const columns = $derived(columnsFor(settings.browseColumns, viewport.width, viewport.height));
-  const ceiling = $derived(maxColumns(viewport.width, viewport.height));
 
   const LAYOUTS = [
     { id: "row" as const, label: "Rows", path: "M4 7h16M4 12h16M4 17h16" },
@@ -58,11 +56,6 @@
         <span>{settings.browseTitle === "below" ? "Below" : "On cover"}</span>
       </button>
     </div>
-    <label class="columns">
-      <output>{columns} across</output>
-      <input aria-label="Grid columns" type="range" min="2" max={ceiling} step="1" value={columns}
-        oninput={(e) => settings.set("browseColumns", Number(e.currentTarget.value))} />
-    </label>
   {/if}
 </div>
 
@@ -127,20 +120,10 @@
 
   .opt:hover, .opt:focus-visible { color: var(--text-1); background: var(--surface); }
 
+  /* The view switcher is a segmented control: icon plus word, so it takes the text number. */
+  .opt:active { transform: scale(0.985); }
+
   /* The chosen word is text and takes the readable accent (2.03:1 as a fill colour on dark); the
      inset ring stays the fill, which is what makes the state readable at a glance. */
   .opt.on { color: var(--accent-text, var(--accent, var(--text-1))); background: var(--surface); box-shadow: inset 0 0 0 1px var(--accent, var(--line)); }
-
-  .columns {
-    display: flex;
-    align-items: center;
-    gap: var(--s2);
-    margin-left: auto;
-    padding-right: 2px;
-    min-width: 0;
-    font-size: var(--t-sm);
-    color: var(--text-2);
-  }
-  .columns output { min-width: 5.5ch; font-variant-numeric: tabular-nums; }
-  .columns input { width: 100px; min-width: 0; margin: 0; }
 </style>

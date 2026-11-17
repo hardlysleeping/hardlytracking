@@ -10,8 +10,12 @@
   import { library } from "../state/library.svelte";
   import { downloads } from "../state/downloads.svelte";
   import { inbox } from "../state/inbox.svelte";
+  import { plugins } from "../state/plugins.svelte";
+  import { notices } from "../state/notices.svelte";
+  import { noticeTime } from "../lib/notice-log";
   import { go } from "../lib/nav";
   import { onMount } from "svelte";
+  import PageMenu from "../components/PageMenu.svelte";
   import SyncAccount from "../components/SyncAccount.svelte";
   import TrackersPanel from "../components/TrackersPanel.svelte";
   import LibrarySettingsPanel from "../components/LibrarySettingsPanel.svelte";
@@ -153,7 +157,12 @@ import PrivacyPanel from "../components/PrivacyPanel.svelte";
     // The bell's count, and whether there is an account at all. One call, and
     // only when this screen is opened: nothing here fetches on launch.
     void inbox.load();
+    // The notice log: what the app said at the top of the screen, newest first. It is read here
+    // because the overlay is gone in seconds and "what did that say?" lands on this page.
+    void notices.load();
   });
+
+  const pluginCount = $derived(plugins.list.length);
 
   const link = $derived(info === null ? null : pairingLink(info, token));
 
@@ -194,12 +203,37 @@ import PrivacyPanel from "../components/PrivacyPanel.svelte";
 </script>
 
 <section class="view">
-  <header class="bar">
-    <button class="btn ghost icon" aria-label="Back" onclick={() => go("/more")}>
-      <svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7" /></svg>
-    </button>
-    <h1>Settings</h1>
+  <header class="top">
+    <PageMenu title="Settings" current="more" />
   </header>
+
+  <!--
+    The pages that are not daily tabs, as rows on this page. They used to be rows on a page called
+    More that then opened Settings — two presses to reach a control, behind a page named for the
+    leftover rather than for what it holds. The rows keep their one-line explanation, because a name
+    like "Appearance" does not say what is behind it.
+  -->
+  <nav class="doors" aria-label="Settings pages">
+    <button class="row door" onclick={() => go("/appearance")}>
+      <span class="t">Appearance</span>
+      <span class="s">Theme, colours, page background</span>
+      <span class="chev" aria-hidden="true">›</span>
+    </button>
+    <button class="row door" onclick={() => go("/stats")}>
+      <span class="t">Stats</span>
+      <span class="s">What you have read, and when</span>
+      <span class="chev" aria-hidden="true">›</span>
+    </button>
+    <button class="row door" onclick={() => go("/plugins")}>
+      <span class="t">Plugins</span>
+      <span class="s">{pluginCount} installed</span>
+      <span class="chev" aria-hidden="true">›</span>
+    </button>
+    <button class="row door sync" onclick={() => go("/sync")}>
+      <span class="t">Sync<span class="s">Optional cloud sync · account and subscription</span></span>
+      <span class="chev" aria-hidden="true">›</span>
+    </button>
+  </nav>
 
   <!-- One page of sections, each of which unfolds where it stands. The General/Trackers tabs made
        the same page dress up as two pages and hid half the settings behind a press; a section that
@@ -551,6 +585,32 @@ import PrivacyPanel from "../components/PrivacyPanel.svelte";
   </details>
 
   <SyncAccount />
+
+  <section class="notices" aria-label="Notices">
+    <header class="nhead">
+      <h2>Notices</h2>
+      {#if notices.log.length > 0}
+        <button class="clear" onclick={() => notices.clearLog()}>Clear</button>
+      {/if}
+    </header>
+    {#if notices.log.length === 0}
+      <p class="none">Nothing to report. Anything the app tells you at the top of the screen is kept here.</p>
+    {:else}
+      <ol class="log">
+        {#each notices.log as entry (entry.at + entry.text)}
+          <li>
+            <span class="when">{noticeTime(entry.at)}</span>
+            <span class="what selectable">{entry.text}</span>
+          </li>
+        {/each}
+      </ol>
+    {/if}
+  </section>
+
+  <p class="about">
+    HardlyTracking · a Mihon/Komikku-compatible reader. Your library, history and downloads live on
+    this device; sync is optional and paid, the reader is not.
+  </p>
 </section>
 
 <style>
@@ -587,26 +647,116 @@ import PrivacyPanel from "../components/PrivacyPanel.svelte";
     max-width: 720px;
   }
 
-  .bar {
-    display: flex;
-    align-items: center;
-    gap: var(--s2);
+  .top {
     margin-bottom: var(--s4);
   }
 
-  .bar svg {
-    width: 18px;
-    height: 18px;
-    fill: none;
-    stroke: currentColor;
-    stroke-width: 1.7;
-    stroke-linecap: round;
-    stroke-linejoin: round;
+  /* The doors: the pages that are not daily tabs. Same shape as the list the More page drew — name
+     on the left, its one-line explanation beside it, chevron on the right — so nothing moved except
+     the page it stands on. */
+  .doors {
+    display: grid;
+    margin-bottom: var(--s5);
   }
 
-  h1 {
-    font-size: var(--t-xl);
-    font-weight: 650;
+  .row.door {
+    all: unset;
+    cursor: pointer;
+    display: grid;
+    grid-template-columns: 1fr auto auto;
+    align-items: center;
+    gap: var(--s3);
+    padding: var(--s3) var(--s2);
+    min-height: 52px;
+    box-sizing: border-box;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .row.door.sync { grid-template-columns: minmax(0, 1fr) auto; }
+  .row.door:hover { background: var(--surface-2); }
+  .row.door:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+  .t {
+    font-size: var(--t-md);
+  }
+
+  .s {
+    font-size: var(--t-xs);
+    color: var(--text-3);
+  }
+
+  .t .s {
+    display: block;
+    margin-top: var(--s1);
+    overflow-wrap: anywhere;
+  }
+
+  .notices {
+    margin: var(--s5) 0;
+  }
+
+  .nhead {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--s3);
+    padding-bottom: var(--s2);
+    border-bottom: 1px solid var(--line);
+  }
+
+  .nhead h2 {
+    font-size: var(--t-md);
+    font-weight: 600;
+    text-transform: none;
+    letter-spacing: 0;
+    color: inherit;
+  }
+
+  .clear {
+    all: unset;
+    cursor: pointer;
+    min-height: 44px;
+    padding: 0 var(--s2);
+    font-size: var(--t-xs);
+    color: var(--text-3);
+  }
+
+  .none {
+    margin: var(--s3) 0 0;
+    font-size: var(--t-xs);
+    color: var(--text-3);
+    line-height: 1.6;
+  }
+
+  .log {
+    list-style: none;
+    margin: var(--s2) 0 0;
+    padding: 0;
+    display: grid;
+  }
+
+  .log li {
+    display: grid;
+    gap: 2px;
+    padding: var(--s2) 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .when {
+    font-size: var(--t-xs);
+    color: var(--text-3);
+  }
+
+  .what {
+    font-size: var(--t-sm);
+    overflow-wrap: anywhere;
+  }
+
+  .about {
+    font-size: var(--t-xs);
+    color: var(--text-3);
+    line-height: 1.7;
+    max-width: 52ch;
   }
 
   .group {

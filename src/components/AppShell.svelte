@@ -168,43 +168,59 @@
       .filter((destination): destination is Destination => destination !== undefined);
     return picked.length > 0 ? picked : DESTINATIONS;
   });
+  /**
+   * One pane or two, from the shelf's own sidebar.
+   *
+   * The library's collections column only exists when collections are laid out as a column, so
+   * putting the swap there meant most readers never saw it. It belongs to the shell's navigation
+   * column instead: the shape of the shelf is a standing choice, like where you are.
+   */
+  const paneSwap = active === "library";
 </script>
 
-<div class="app" class:compact={device === "phone"} class:medium={device === "tablet"} class:large={device === "desktop"}>
+<div class="app" class:compact={device === "phone"} class:medium={device !== "phone"}>
   <!-- First stop in the tab order: the nav repeats on every screen, and a
        keyboard reader should be able to jump past it. -->
   <a class="skip-link" href="#content">Skip to content</a>
-  {#if device === "desktop"}
-    <aside class="sidebar">
-      <div class="brand">HardlyTracking</div>
-      <nav aria-label="Main">
-        {#each bar as destination (destination.id)}
-          <button
-            class="item"
-            class:on={active === destination.id}
-            aria-current={active === destination.id ? "page" : undefined}
-            onclick={() => go(destination.href)}
-          >
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d={destination.icon} /></svg>
-            <span>{destination.label}</span>
-          </button>
-        {/each}
-      </nav>
-    </aside>
-  {:else if device === "tablet"}
+  {#if device !== "phone"}
     <nav class="rail" aria-label="Main">
       {#each bar as destination (destination.id)}
         <button
           class="item"
           class:on={active === destination.id}
           aria-current={active === destination.id ? "page" : undefined}
+          aria-label={destination.label}
           onclick={() => go(destination.href)}
           title={destination.label}
         >
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d={destination.icon} /></svg>
-          <span>{destination.label}</span>
         </button>
       {/each}
+      {#if paneSwap}
+        <div class="panemenu" role="group" aria-label="Library panes">
+          <button
+            class="pane"
+            class:on={settings.libraryPane === "single"}
+            aria-pressed={settings.libraryPane === "single"}
+            title="One pane"
+            onclick={() => settings.set("libraryPane", "single")}
+          >1</button>
+          <button
+            class="pane"
+            class:on={settings.libraryPane === "split"}
+            aria-pressed={settings.libraryPane === "split"}
+            title="Two panes"
+            onclick={() => settings.set("libraryPane", "split")}
+          >2</button>
+          <button
+            class="pane"
+            class:on={settings.libraryPane === "three"}
+            aria-pressed={settings.libraryPane === "three"}
+            title="Three panes"
+            onclick={() => settings.set("libraryPane", "three")}
+          >3</button>
+        </div>
+      {/if}
     </nav>
   {/if}
 
@@ -267,10 +283,6 @@
      * WKWebView it hands the frame to a separate momentum scroller that `position: sticky` headings do
      * not stick to — the title rides up with the content during a flick and snaps back at the end.
      */
-  }
-
-  .app.large main {
-    margin-left: var(--sidebar-w);
   }
 
   .app.medium main {
@@ -387,46 +399,33 @@
     color: var(--text-1);
   }
 
-  /* ---- sidebar (large) ---- */
-  .sidebar {
-    position: fixed;
-    inset: 0 auto 0 0;
-    width: var(--sidebar-w);
-    padding: calc(var(--s5) + var(--safe-t)) var(--s3) var(--s4) calc(var(--s3) + var(--safe-l));
-    border-right: 1px solid var(--line);
+  /* One control, not three buttons: a single frame with the answers stacked inside it, the
+     chosen one filled. The rows share a border, so it reads as a vertical menu. */
+  .panemenu {
+    display: grid;
+    gap: 0;
+    margin-top: var(--s3);
+    padding: 0;
+    border: 1px solid var(--line);
+    border-radius: var(--r2);
+    overflow: hidden;
     background: var(--surface);
-    display: flex;
-    flex-direction: column;
-    gap: var(--s5);
   }
-
-  .brand {
+  .panemenu .pane {
+    all: unset;
+    cursor: pointer;
+    display: grid;
+    place-items: center;
+    min-height: 28px;
+    border-radius: 0;
     font-size: var(--t-sm);
-    font-weight: 600;
-    letter-spacing: 0.02em;
-    color: var(--text-2);
-    padding: 0 var(--s3);
+    font-variant-numeric: tabular-nums;
+    color: var(--text-3);
   }
-
-  .sidebar nav {
-    flex-direction: column;
-    gap: 2px;
-    /* The destinations sit in the middle of the column, not pinned under the brand: a
-       full-height sidebar with five buttons stacked at the top reads as an unfinished menu.
-       `auto` on both sides is what centres them without moving the brand. */
-    margin-block: auto;
-  }
-
-  .sidebar .item {
-    padding: var(--s2) var(--s3);
-    font-size: var(--t-md);
-    min-height: 40px;
-  }
-
-  .sidebar .item.on {
-    background: var(--surface-2);
-    font-weight: 600;
-  }
+  .panemenu .pane + .pane { border-top: 1px solid var(--line); }
+  .panemenu .pane:hover { color: var(--text-1); background: var(--surface-2); }
+  .panemenu .pane.on { color: var(--accent); background: var(--surface-2); }
+  .panemenu .pane:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 
   /* ---- rail (medium) ---- */
   .rail {
@@ -443,10 +442,12 @@
   }
 
   .rail .item {
-    flex-direction: column;
-    gap: 2px;
+    /* Icons only: the name is in the tooltip and the accessible name, the way the phone's bar
+       does it. A 44 px target is the floor for a thumb, label or not. */
+    justify-content: center;
+    width: 100%;
+    min-height: 44px;
     padding: var(--s2) 0;
-    font-size: var(--t-xs);
   }
 
   .rail .item.on {

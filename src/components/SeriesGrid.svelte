@@ -10,9 +10,9 @@
   import type { Series } from "../api/source";
   import type { Badge } from "../lib/library/badges";
   import Cover from "./Cover.svelte";
-  import { browseMode, columnsFor, knownSize, rowStyleOf, type RowStyle } from "../lib/browse-display";
-  import { viewport } from "../lib/layout.svelte";
+  import { browseMode, knownSize, rowStyleOf, type RowStyle } from "../lib/browse-display";
   import { go, pathTo } from "../lib/nav";
+  import { startReading } from "../state/reader-pane.svelte";
   import { clampText } from "../lib/clamp-text";
 
   /** A screenful and a bit; the rest arrives while the reader is still looking at the first row. */
@@ -36,7 +36,6 @@
   interface Props {
     series: Series[];
     view?: "grid" | "compact" | "list" | "row" | "card";
-    columns?: number;
     sizes?: Map<string, number>;
     totals?: Map<string, number>;
     /** Minimum cover width in px; the column count follows from it. */
@@ -92,7 +91,6 @@
   let {
     series,
     view = "grid",
-    columns,
     sizes = new Map(),
     totals = new Map(),
     cover = 132,
@@ -149,7 +147,6 @@
   const mode = $derived(browseMode(view));
   /** A title laid over the cover: only in the grid, and only when the reader asked for it. */
   const overlaid = $derived(titlePlacement === "overlay" && mode === "grid");
-  const columnCount = $derived(columnsFor(columns, viewport.width, viewport.height));
 
   let pressTimer: ReturnType<typeof setTimeout> | null = null;
   /** The tile under a held finger, and whether that hold has turned into a drag. */
@@ -241,7 +238,7 @@
   function resumeAt(event: MouseEvent, item: Series): void {
     event.stopPropagation();
     const chapterId = resume.get(item.id);
-    if (chapterId !== undefined) go(pathTo("read", item.id, chapterId));
+    if (chapterId !== undefined) startReading(item.id, chapterId);
   }
 </script>
 
@@ -249,8 +246,11 @@
   <p class="empty">{empty}</p>
 {:else}
   <div class="browse-rail">
-  <div class="set {mode}" class:overtitle={overlaid} class:compact={view === "compact"} class:explicit={columns !== undefined} class:row-line={mode === "row" && row === "line"} class:row-preview={mode === "row" && row === "preview"} class:row-table={mode === "row" && row === "table"} style:--columns={columnCount} style:--cover="{cover}px">
-    {#each drawn as item (item.id)}
+  <div class="set {mode}" class:overtitle={overlaid} class:compact={view === "compact"} class:row-line={mode === "row" && row === "line"} class:row-preview={mode === "row" && row === "preview"} class:row-table={mode === "row" && row === "table"} style:--cover="{cover}px">
+    <!-- Keyed by layout as well as id: `contain-intrinsic-size: auto` remembers the height a tile
+         last measured, so a row's 68 px would be reused as the grid's reserved height and the
+         covers would be cut off. A new key gives the new layout fresh elements to measure. -->
+    {#each drawn as item (`${mode}:${item.id}`)}
       {#if expanded !== null && expandAfter !== null && item.id === (expansionAnchor ?? expandAfter)}
         <div class="expand" data-expanded="true">
           {@render expanded()}
@@ -347,13 +347,6 @@
             </span>
             <span class="sub">{[totals.has(item.id) ? `${totals.get(item.id)} chapters` : "", unread.has(item.id) ? `${badgeFor(item.id)} unread` : "", knownSize(sizes.get(item.id)) !== null ? `${knownSize(sizes.get(item.id))} on device` : "Size unknown"].filter(Boolean).join(" · ")}</span>
             {#if mode === "card" && item.description}<span class="description">{item.description}</span>{/if}
-          {:else if overlaid}
-            <!-- The title is on the cover now, so this row exists only for an unread count. -->
-            {#if badgeFor(item.id) > 0}<span class="sub">{badgeFor(item.id)} unread</span>{/if}
-          {:else if view === "compact"}
-            <span class="sub">{badgeFor(item.id) > 0 ? `${badgeFor(item.id)} unread` : ""}</span>
-          {:else}
-            <span class="sub">{badgeFor(item.id) > 0 ? `${badgeFor(item.id)} unread` : "\u00a0"}</span>
           {/if}
         </span>
         {#if mode === "row" && row !== "table"}
@@ -378,12 +371,22 @@
 
 <style>
   .browse-rail { min-width:0; max-width:100%; }
-  .set.explicit.grid { grid-template-columns:repeat(var(--columns), minmax(0, 1fr)); }
+  /* The count is the width's answer: as many covers as fit at the chosen size. A column count set
+     by hand drew two enormous tiles on a wide window and cut every title to a stub. */
   /* A card is the "tell me about it" layout, not a page: tight padding, a smaller cover and two
      lines of description leave the information and drop the air around it. */
   /* The card view follows the slider, like the grid: `auto-fit minmax(200px,1fr)` invented its
      own column count, and a 132 px centred cover left a band of empty surface on both sides. */
-  .set.card { display:grid; grid-template-columns:repeat(var(--columns), minmax(0, 1fr)); gap:8px; }
+  /* Cards fit themselves: as many as the width holds at a readable card size, and each one takes
+     the leftover so the row ends flush. No column count to set, no half-empty last row. */
+  .set.card {
+    display: grid;
+    /* A card is a card, not a sheet: it may grow to a comfortable width and no further, so ten
+       of them are ten cards rather than three stretched ones. The leftover is spent on the gaps,
+       which keeps the last column flush with the shelf above it. */
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 240px), 1fr));
+    gap: 8px;
+  }
   .set.card .tile { padding:8px; border:1px solid var(--line); background:var(--surface); align-content:start; }
   .set.card .art { width:100%; justify-self:stretch; }
   .set.card .meta { gap:0; }
@@ -399,7 +402,6 @@
   /* Without a title row the reserved height is the cover plus a hair, so rows stop leaving a gap
      where the title used to be. */
   .set.overtitle .tile { contain-intrinsic-size: auto calc(var(--cover) * 1.5 + 6px); }
-  .set.explicit.grid { gap: var(--s2) var(--s1); }
   .set {
     /* Replacing the tapped row must not make the browser anchor to a later tile and jump. */
     overflow-anchor: none;

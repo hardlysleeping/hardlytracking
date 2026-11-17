@@ -25,6 +25,8 @@ import { upstreamPath } from "./upstream-path.mjs";
 import { komgaTarget } from "./komga-target.mjs";
 import { serveSuwayomi } from "./suwayomi-target.mjs";
 import { networkInterfaces } from "node:os";
+import { Readable, Transform } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import { readFile } from "node:fs/promises";
 import { extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -384,11 +386,15 @@ const IMAGE_MAX_BYTES = 32 * 1024 * 1024;
 /**
  * A scanned volume.
  *
- * Bigger than the image ceiling because a comic is one file: a 200-page scan lands between 10 and
- * 60 MB, and archive.org's worst items run past 150. Still a ceiling — the largest real volume that
- * is not a mistake is about this size.
+ * A 200-page scan lands between 10 and 60 MB, but archive.org's HD sets are one file per volume and
+ * run far past that: the danke-Empire Berserk volumes are 469–927 MB. The ceiling was 192 MB, which
+ * refused half of them with a 413 the reader could only report as "not a zip archive" — a book that
+ * is simply too big looked like a broken file. The route streams now, so the ceiling is about what
+ * a browser can still hold as one Blob, not about this process's memory.
  */
-const FILE_MAX_BYTES = 192 * 1024 * 1024;
+const FILE_MAX_BYTES = 1024 * 1024 * 1024;
+/** How long a book transfer may take: minutes, not the 30 s a metadata call gets. */
+const FILE_DEADLINE_MS = 300_000;
 
 /**
  * What a book file may be.
@@ -460,7 +466,10 @@ async function serveUpstream(request, response, kind) {
   }
 
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 30_000);
+  // A page image is small enough to buffer whole; a scanned volume is not. The file route streams,
+  // so its clock covers the transfer rather than the round trip.
+  const limit = kind === "file" ? FILE_MAX_BYTES : IMAGE_MAX_BYTES;
+  const timer = setTimeout(() => controller.abort(), kind === "file" ? FILE_DEADLINE_MS : 30_000);
   try {
     const upstream = await fetch(parsed, { headers, signal: controller.signal, redirect: "follow" });
     if (!upstream.ok) {
@@ -478,8 +487,33 @@ async function serveUpstream(request, response, kind) {
       response.end(kind === "file" ? "not a book file" : "not an image");
       return;
     }
+    const stated = Number.parseInt(upstream.headers.get("content-length") ?? "", 10);
+    if (Number.isFinite(stated) && stated > limit) {
+      response.writeHead(413, { "Content-Type": "text/plain" });
+      response.end("too large");
+      return;
+    }
+    if (kind === "file") {
+      // The book goes out as it arrives: the browser needs every byte anyway, and a second copy held
+      // here only doubled the memory a 900 MB scan costs. A server that overstates or omits its
+      // length is cut off by the counter, because the ceiling is still the ceiling.
+      response.writeHead(200, {
+        "Content-Type": type,
+        ...(Number.isFinite(stated) ? { "Content-Length": String(stated) } : {}),
+        "Cache-Control": "public, max-age=86400",
+      });
+      let seen = 0;
+      const counter = new Transform({
+        transform(chunk, _encoding, callback) {
+          seen += chunk.length;
+          callback(seen > limit ? new Error("too large") : null, chunk);
+        },
+      });
+      await pipeline(Readable.fromWeb(upstream.body), counter, response);
+      return;
+    }
     const bytes = Buffer.from(await upstream.arrayBuffer());
-    if (bytes.length > (kind === "file" ? FILE_MAX_BYTES : IMAGE_MAX_BYTES)) {
+    if (bytes.length > limit) {
       response.writeHead(413, { "Content-Type": "text/plain" });
       response.end("too large");
       return;
@@ -492,6 +526,12 @@ async function serveUpstream(request, response, kind) {
     });
     response.end(bytes);
   } catch (error) {
+    // A stream that failed halfway has already sent its headers and some of the book: the honest
+    // answer is to cut the connection so the reader sees a failed fetch, not a complete-looking file.
+    if (response.headersSent) {
+      response.destroy();
+      return;
+    }
     response.writeHead(504, { "Content-Type": "text/plain" });
     response.end(`fetch failed: ${String(error)}`);
   } finally {

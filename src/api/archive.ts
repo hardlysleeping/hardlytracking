@@ -45,7 +45,7 @@ import {
   type Source,
   type SourceProvider,
 } from "./source";
-import { RUNTIME_DEADLINE_MS, DeadlineError, deadlined, withDeadline } from "../lib/deadline";
+import { BOOK_DEADLINE_MS, RUNTIME_DEADLINE_MS, DeadlineError, deadlined, withDeadline } from "../lib/deadline";
 import { apiUrl, hasLocalServer, withToken } from "../lib/host";
 import { openComic, kindOf } from "../lib/files/index";
 import type { LibraryStore } from "../lib/db/store";
@@ -269,7 +269,7 @@ export function naturalBookOrder(books: readonly BookFile[]): BookFile[] {
  * so this is the one call with its own, longer limit. It is still a limit: waiting four minutes for
  * a page to appear is worse than being told the archive did not send it.
  */
-export const BOOK_DOWNLOAD_DEADLINE_MS = 240_000;
+export const BOOK_DOWNLOAD_DEADLINE_MS = BOOK_DEADLINE_MS;
 
 /** A volume, opened: enough for the reader to ask for page N without knowing where it came from. */
 export interface ArchivedBook {

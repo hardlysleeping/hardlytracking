@@ -41,10 +41,13 @@ export const DESTINATIONS: Destination[] = [
     icon: "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM15.5 8.5l-2 5-5 2 2-5z",
   },
   {
+    // The page ids are the bar's saved order, so `more` stays the id even though the page it opens
+    // is Settings: renaming the id would silently drop this destination from every bar that already
+    // names it.
     id: "more",
-    label: "More",
-    href: "/more",
-    icon: "M12 5h.01M12 12h.01M12 19h.01",
+    label: "Settings",
+    href: "/settings",
+    icon: "M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-1.8-.3 1.6 1.6 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.6 1.6 0 0 0-1-1.5 1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0 .3-1.8 1.6 1.6 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.6 1.6 0 0 0 1.5-1 1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3H9a1.6 1.6 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 1 1.5 1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8V9a1.6 1.6 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1ZM12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4Z",
   },
 ];
 
@@ -80,8 +83,8 @@ export function backHref(route: Route): string | null {
   if (route.name === "source" || route.name === "extensions") return "/browse";
   // A package page is reached from the Extensions list, which is the index of packages.
   if (route.name === "software") return "/extensions";
-  // Messages are reached from the bell in Settings, so back goes there, not to More.
-  if (route.name === "messages") return "/settings";
-  if (route.name === "appearance" || route.name === "stats") return "/more";
-  return "/more";
+  // `/more` and `/settings` draw the same page, and Settings is now the destination, so every page
+  // pushed under `more` returns there.
+  if (route.name === "settings") return null;
+  return "/settings";
 }

@@ -28,7 +28,7 @@ try {
 
   // 1. The picture is the pref, and it is the same list the real bar draws.
   assert.deepEqual(await pref(), ["more", "history", "search", "browse", "library"]);
-  assert.deepEqual(await previewLabels(), ["More", "History", "Search", "Browse", "Library"], "preview is not the pref order");
+  assert.deepEqual(await previewLabels(), ["Settings", "History", "Search", "Browse", "Library"], "preview is not the pref order");
   assert.deepEqual(await previewLabels(), await barLabels(), "preview and the real bar disagree");
 
   // 2. The preview is a picture, not a second set of controls.
@@ -41,14 +41,14 @@ try {
   const motion = await page.evaluate(async () => {
     const items = () => [...document.querySelectorAll('[data-preview="true"] button')];
     const byLabel = (label) => items().find((el) => el.getAttribute("aria-label") === label);
-    const startX = byLabel("More").getBoundingClientRect().x;
+    const startX = byLabel("Settings").getBoundingClientRect().x;
     const targetX = byLabel("History").getBoundingClientRect().x;
-    [...document.querySelectorAll(".navedit button")].find((el) => el.getAttribute("aria-label") === "Move More down").click();
+    [...document.querySelectorAll(".navedit button")].find((el) => el.getAttribute("aria-label") === "Move Settings down").click();
     const samples = [];
     const until = performance.now() + 400;
     await new Promise((done) => {
       const tick = () => {
-        const node = byLabel("More");
+        const node = byLabel("Settings");
         if (node) samples.push(node.getBoundingClientRect().x);
         if (performance.now() < until) requestAnimationFrame(tick);
         else done();
@@ -58,7 +58,7 @@ try {
     return { startX, targetX, samples };
   });
   const final = await page.locator('[data-preview="true"] button').evaluateAll((ns) => ns.map((n) => n.getAttribute("aria-label")));
-  assert.deepEqual(final, ["History", "More", "Search", "Browse", "Library"], "the preview did not follow the arrow");
+  assert.deepEqual(final, ["History", "Settings", "Search", "Browse", "Library"], "the preview did not follow the arrow");
   assert.deepEqual(await pref(), ["history", "more", "search", "browse", "library"], "the pref was not written");
   assert.deepEqual(await barLabels(), final, "the real bar did not follow the arrow");
   const low = Math.min(motion.startX, motion.targetX) + 1;
@@ -70,14 +70,14 @@ try {
   // 4. Taking a page off the bar takes it out of the picture too.
   await page.getByRole("button", { name: "Hide Browse in the navigation" }).click();
   await page.waitForTimeout(350);
-  assert.deepEqual(await previewLabels(), ["History", "More", "Search", "Library"], "a hidden page is still drawn in the preview");
-  assert.deepEqual(await barLabels(), ["History", "More", "Search", "Library"]);
+  assert.deepEqual(await previewLabels(), ["History", "Settings", "Search", "Library"], "a hidden page is still drawn in the preview");
+  assert.deepEqual(await barLabels(), ["History", "Settings", "Search", "Library"]);
   evidence.push({ check: "a page taken off the bar leaves the preview with it" });
 
   // 5. And putting it back lands it at the end, where the preview shows it.
   await page.getByRole("button", { name: "Show Browse in the navigation" }).click();
   await page.waitForTimeout(350);
-  assert.deepEqual(await previewLabels(), ["History", "More", "Search", "Library", "Browse"]);
+  assert.deepEqual(await previewLabels(), ["History", "Settings", "Search", "Library", "Browse"]);
   evidence.push({ check: "a page put back appears where the preview shows it", preview: await previewLabels() });
 
   const overflow = await page.evaluate(() =>

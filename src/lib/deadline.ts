@@ -24,6 +24,16 @@
 /** How long any single runtime call may take before it is called a hung source. */
 export const RUNTIME_DEADLINE_MS = 30_000;
 
+/**
+ * A book that has to arrive before it has any pages.
+ *
+ * Thirty seconds is right for a metadata call and impossible for a 469 MB scan: the transfer is
+ * healthy, it is simply big. archive.org bounds its own volume download by this, and the reader
+ * waits this long for that page list, so a slow volume ends in a real failure instead of a sentence
+ * claiming the source went quiet while the bytes were still coming.
+ */
+export const BOOK_DEADLINE_MS = 240_000;
+
 /** A call that ran out of time. Distinct from a network error, and named after what it waited on. */
 export class DeadlineError extends Error {
   readonly ms: number;

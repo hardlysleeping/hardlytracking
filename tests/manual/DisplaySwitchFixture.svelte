@@ -31,7 +31,6 @@
   <SeriesGrid
     series={rows}
     {view}
-    columns={settings.browseColumns}
     rowStyle={settings.rowStyle}
     titlePlacement={settings.browseTitle}
     {unread}

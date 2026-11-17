@@ -1,5 +1,5 @@
 /**
- * The notice log: what the app said at the top of the screen, kept on the More page.
+ * The notice log: what the app said at the top of the screen, kept on the Settings page.
  *
  * The overlay is transient by design, so the log is what makes it answerable later. These tests pin
  * the three things that would make it useless: an unbounded log, a log that repeats one sentence

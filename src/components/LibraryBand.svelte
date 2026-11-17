@@ -99,7 +99,7 @@
 {/if}
 
 <style>
-  .bandbox { display: grid; gap: 2px; margin-bottom: var(--s2); }
+  .bandbox { display: grid; gap: 0; margin-bottom: var(--s2); }
 
   /* The tab is the band's handle, so it is the band's width — a caret in the corner read as a
      dropdown belonging to the row underneath rather than the control for it. The width stays; the
@@ -112,7 +112,7 @@
     align-items: center;
     justify-content: center;
     width: 100%;
-    min-height: 20px;
+    min-height: 12px;
     padding: 0;
     border: 0;
     background: transparent;
@@ -122,12 +122,12 @@
   .grip {
     display: grid;
     place-items: center;
-    width: 30px;
-    height: 18px;
+    width: 84px;
+    height: 14px;
     border-radius: var(--r-pill);
     transition: background 120ms ease;
   }
-  .bandbox.collapsed .tab { min-height: 26px; color: var(--text-2); }
+  .bandbox.collapsed .tab { min-height: 22px; color: var(--text-2); }
   /* Folded, the band is nothing but this handle, so it gets the faintest pill to tell the thumb
      where to land — a soft fill, no ring. A bordered pill read as a button from another design
      sitting alone above the shelf. */

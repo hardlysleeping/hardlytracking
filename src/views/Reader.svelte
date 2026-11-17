@@ -24,7 +24,7 @@
   import { go, pathTo } from "../lib/nav";
   import { leaveReader, readerOriginLabel } from "../lib/reader-origin";
   import { pageSrc } from "../lib/pages";
-  import { RUNTIME_DEADLINE_MS, withDeadline } from "../lib/deadline";
+  import { BOOK_DEADLINE_MS, RUNTIME_DEADLINE_MS, withDeadline } from "../lib/deadline";
   import { INACTIVITY_TIMEOUT_MS, sessionEndAt, shouldEndForBackground, type SessionClose } from "../lib/history";
   import Sheet from "../components/Sheet.svelte";
   import { plugins } from "../state/plugins.svelte";
@@ -36,8 +36,38 @@
   interface Props {
     seriesId: string;
     chapterId: string;
+    /**
+     * Drawn inside a pane of the library rather than on its own screen.
+     *
+     * Everything the screen version does with the *window* is wrong here: it cannot be `fixed`,
+     * its exit door cannot navigate away, and swapping chapter must not rewrite the address bar
+     * into a route that would unmount the shelf this pane sits beside.
+     */
+    pane?: boolean;
+    /** Closing the pane, from the exit door or Esc. */
+    onclose?: () => void;
+    /** Opening another chapter in the same pane. */
+    onnavigate?: (chapterId: string) => void;
   }
-  let { seriesId, chapterId }: Props = $props();
+  let { seriesId, chapterId, pane = false, onclose, onnavigate }: Props = $props();
+
+  /** Out of the chapter: back to the shelf in a pane, back to the origin on a screen. */
+  function exit(): void {
+    if (pane) {
+      onclose?.();
+      return;
+    }
+    leaveReader(owner);
+  }
+
+  /** Another chapter, kept in the same place. */
+  function openChapter(id: string): void {
+    if (pane) {
+      onnavigate?.(id);
+      return;
+    }
+    go(pathTo("read", owner, id));
+  }
 
   let pages = $state<Page[]>([]);
   /** Where the exit door goes, read once: the router recorded it before this screen mounted. */
@@ -360,6 +390,9 @@
     { id: "paged", label: "Paged" },
     { id: "ltr", label: "Left → right" },
     { id: "rtl", label: "Right → left" },
+    // Two pages at once, gutter down the middle. It is the shape a Duo, a desktop window or a
+    // two-pane library asks for, so it is offered only when the library is in two-pane mode.
+    { id: "duo", label: "Two pages" },
   ] as const;
 
   const FITS = [
@@ -371,6 +404,19 @@
 
   /** Plugin reader entries. Empty unless a plugin declared one and the user granted ui.reader. */
   const pluginActions = $derived(plugins.actionsFor("reader"));
+  const duo = $derived(settings.readerMode === "duo" && (settings.libraryPane === "split" || settings.libraryPane === "three"));
+  /** Pages as spreads: page 1 alone, then 2+3, 4+5 — the way a printed book falls open. */
+  const pairs = $derived.by(() => {
+    const out: Page[][] = [];
+    if (!duo) return out;
+    for (let i = 0; i < pages.length; i += 2) {
+      const first = pages[i];
+      if (first === undefined) break;
+      const next = pages[i + 1];
+      out.push(next === undefined ? [first] : [first, next]);
+    }
+    return out;
+  });
   const horizontal = $derived(settings.readerMode === "paged" || settings.readerMode === "ltr" || settings.readerMode === "rtl");
   const rtl = $derived(settings.readerMode === "rtl");
 
@@ -579,8 +625,12 @@
       // was waiting on, in the same 30 s the rest of the app uses for a source that has gone quiet.
       // A downloaded chapter wins: it is the one that works with no network.
       const local = await guard(withDeadline(downloads.local(id), RUNTIME_DEADLINE_MS, "this device's downloads", signal));
+      // An archive.org volume is a file that has to arrive before it has any pages, so its page list
+      // gets the book's deadline. Thirty seconds is right for a metadata call and reported a healthy
+      // 469 MB scan as a source that had gone quiet.
+      const pagesDeadline = id.startsWith("archive:") ? BOOK_DEADLINE_MS : RUNTIME_DEADLINE_MS;
       const nextPages = local === null
-        ? await guard(withDeadline(library.pages(id), RUNTIME_DEADLINE_MS, 'the page list', signal)) : null;
+        ? await guard(withDeadline(library.pages(id), pagesDeadline, 'the page list', signal)) : null;
       const progress = await guard(withDeadline(library.profile.store.getProgress(id), RUNTIME_DEADLINE_MS, 'the library database', signal));
       index = Math.min(progress?.page ?? 0, Math.max((local?.urls.length ?? nextPages?.length ?? 0) - 1, 0));
       fromDownload = local !== null;
@@ -600,7 +650,7 @@
       owner = await guard(ownerOf(seriesId, id, signal));
       scaleOwner = owner;
       void loadSeriesTitle(owner);
-      if (owner !== seriesId) history.replaceState(null, "", `#${pathTo("read", owner, id)}`);
+      if (!pane && owner !== seriesId) history.replaceState(null, "", `#${pathTo("read", owner, id)}`);
 
       // The chapter list is a nicety for the name and the prev/next buttons; with the host down
       // it must not stop a downloaded chapter from opening, so the stored list is the fallback.
@@ -728,6 +778,10 @@
 
   function onKey(event: KeyboardEvent): void {
     if (settingsOpen) return;
+    // In a pane the library is still on screen beside the page, and typing in it is not a page
+    // turn. The screen version has nothing else to type into, so it keeps the window.
+    const target = event.target;
+    if (pane && target instanceof HTMLElement && target.closest("input, textarea, select, [contenteditable='true']") !== null) return;
     const key = event.key;
     if (key === "ArrowRight" || key === "ArrowDown" || key === " " || key === "PageDown") {
       event.preventDefault();
@@ -736,16 +790,17 @@
       event.preventDefault();
       step(key === "PageUp" ? -1 : rtl ? 1 : -1);
     } else if (key === "j" || key === "J") {
-      if (following !== null) go(pathTo("read", owner, following.id));
+      if (following !== null) openChapter(following.id);
     } else if (key === "k" || key === "K") {
-      if (previous !== null) go(pathTo("read", owner, previous.id));
+      if (previous !== null) openChapter(previous.id);
     } else if (key === "f" || key === "F") {
       if (document.fullscreenElement === null) void document.documentElement.requestFullscreen?.();
       else void document.exitFullscreen?.();
     } else if (key === "r" || key === "R") {
       void toggleRead();
     } else if (key === "Escape") {
-      if (chrome) leaveReader(owner);
+      if (pane) exit();
+      else if (chrome) leaveReader(owner);
       else showChrome();
     }
   }
@@ -764,14 +819,14 @@
 
 <svelte:window onkeydown={onKey} />
 
-<section class="reader" class:hide={!chrome}>
+<section class="reader" class:hide={!chrome} class:pane>
   <header class="chrome top" class:shown={chrome || stuck}>
     <!--
       One exit, to the screen this reader was opened from. A ▶ on a library card resumes a chapter
       without ever showing the series page, so "Back to series" used to land on a page the reader had
       not asked for and lose the shelf they left; the label names where this door actually goes.
     -->
-    <button class="btn ghost icon" aria-label={backLabel === "the series" ? "Back to the series" : `Back to ${backLabel}`} title={backLabel === "the series" ? "Back to the series" : `Back to ${backLabel}`} onclick={() => leaveReader(owner)}>
+    <button class="btn ghost icon" aria-label={backLabel === "the series" ? "Back to the series" : `Back to ${backLabel}`} title={backLabel === "the series" ? "Back to the series" : `Back to ${backLabel}`} onclick={exit}>
       <svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7" /></svg>
     </button>
     <div class="titles">
@@ -850,7 +905,7 @@
       style:--gap="{settings.pageGap}px"
       style:--page-scale={pageScale}
     >
-      {#each pages as page (page.index)}
+      {#snippet pageBox(page: Page)}
         <div
           class="page"
           data-page={page.index}
@@ -872,7 +927,19 @@
             <div class="missing" role="note">Page {page.index + 1} is not on this device</div>
           {/if}
         </div>
-      {/each}
+      {/snippet}
+
+      {#if duo}
+        <!-- Two pages at once, with the gutter down the middle and no handle on it: a spread is a
+             page shape, not a pane you resize. -->
+        {#each pairs as pair (pair[0].index)}
+          <div class="pair">
+            {#each pair as page (page.index)}{@render pageBox(page)}{/each}
+          </div>
+        {/each}
+      {:else}
+        {#each pages as page (page.index)}{@render pageBox(page)}{/each}
+      {/if}
     </div>
 
 
@@ -906,8 +973,14 @@
       </div>
     {/if}
     <div class="turn">
-      <button class="btn" disabled={previous === null} onclick={() => previous && go(pathTo("read", owner, previous.id))}>‹ Previous chapter</button>
-      <button class="btn" disabled={following === null} onclick={() => following && go(pathTo("read", owner, following.id))}>Next chapter ›</button>
+      <!-- Two arrows, no words: the footer already says which chapter this is, and the label the
+           buttons lost still names them to a screen reader and to a long press. -->
+      <button class="btn icon" aria-label="Previous chapter" title="Previous chapter" disabled={previous === null} onclick={() => previous && openChapter(previous.id)}>
+        <svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7" /></svg>
+      </button>
+      <button class="btn icon" aria-label="Next chapter" title="Next chapter" disabled={following === null} onclick={() => following && openChapter(following.id)}>
+        <svg viewBox="0 0 24 24"><path d="M9 5l7 7-7 7" /></svg>
+      </button>
     </div>
   </footer>
 </section>
@@ -916,7 +989,7 @@
   <div class="group">
     <span class="label">Reading mode</span>
     <div class="chips">
-      {#each MODES as option (option.id)}
+      {#each MODES.filter((option) => option.id !== "duo" || settings.libraryPane === "split" || settings.libraryPane === "three") as option (option.id)}
         <button class="chip" class:on={settings.readerMode === option.id} onclick={() => mode(option.id)}>{option.label}</button>
       {/each}
     </div>
@@ -1011,6 +1084,15 @@
     display: flex;
     flex-direction: column;
     overflow: hidden;
+  }
+
+  /* In a pane the page is one column of the library: it fills the box it is given instead of the
+     window, and the chrome anchors to that box. */
+  .reader.pane {
+    position: relative;
+    inset: auto;
+    height: 100%;
+    min-height: 0;
   }
 
   .chrome {
@@ -1134,6 +1216,17 @@
     gap: 0;
   }
   .scroller.horizontal.rtl { direction: rtl; }
+  /* A spread: two pages in one row with the gutter on the centre line. The seam is a page edge,
+     not a divider — nothing to grab. */
+  .pair {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0;
+    width: 100%;
+  }
+  .pair .page { width: 50%; min-width: 0; }
+
   .page {
     position: relative;
     flex: none;
@@ -1162,16 +1255,21 @@
   img:not([src]) { visibility: hidden; }
   /* object-fit cannot resize an auto-sized image, and width/height are not valid values.
      Give each fit actual dimensions. Height may pan horizontally; Whole page never clips. */
-  /* Height fit: a tall page is wider than the screen, so the slot must start at the left edge and
-     pan. `min-width: 100%` plus `justify-content: safe center` centred that overflow and clipped both
-     sides, which is the "weird cropping" this fit had. */
+  /* Height fit: the slot is the surface, and the page sits in it by its auto margins — centred when
+     the fitted page is narrower than the window, flush left when it is wider, because there is no
+     free space to split and the overflow has to be reachable by panning. `justify-content: center`
+     could not do both: it centres an overflowing page too, which puts its left edge out of reach. */
   .scroller[data-fit='height'] .page {
-    min-width: 0;
-    width: max-content;
+    min-width: 100%;
+    width: 100%;
     min-height: calc(var(--reader-height) * var(--page-scale));
     justify-content: flex-start;
   }
-  .scroller[data-fit='height'] img { width: auto; height: calc(var(--reader-height) * var(--page-scale)); }
+  .scroller[data-fit='height'] img {
+    width: auto;
+    height: calc(var(--reader-height) * var(--page-scale));
+    margin-inline: auto;
+  }
   /* Height fit means one page per screen, so a page starts at the top of the surface instead of
      wherever the swipe happened to stop. Snapping is the difference between "Height" and "Width
      with taller pages" — without it every page landed half-way and the reader had to trim up. */
@@ -1193,7 +1291,10 @@
   /* Measured on a 1320x2868 screenshot: the page filled the width (no side bands) and its own aspect
      left 14 % of the height unused — but split 75 px above and 323 px below, i.e. the page sat at the
      top with all the slack under it. In whole-page mode the page is centred in the reading surface
-     instead, so what cannot be filled is evenly around it rather than dumped at the bottom. */
+     instead, so what cannot be filled is evenly around it rather than dumped at the bottom.
+     `safe` matters: centring overflowing content (a long list of pages, or one page taller than the
+     surface) pushed the first page up by 75 px so its top was clipped and scrolled out of reach.
+     Safe centring centres only what fits and falls back to the start when it does not. */
   .scroller[data-fit='contain'] {
     justify-content: safe center;
   }
@@ -1276,8 +1377,11 @@
   }
 
   .turn .btn {
+    /* A glyph has no width of its own: the button keeps the 44px tap target it had as a pill. */
+    width: 44px;
+    min-width: 44px;
     min-height: 44px;
-    padding: 0 var(--s2);
+    padding: 0;
     font-size: var(--t-sm);
     justify-content: center;
     color: var(--text-1);

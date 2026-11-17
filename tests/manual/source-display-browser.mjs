@@ -86,19 +86,16 @@ try {
   if (String(card.descriptionLines) !== "2") throw new Error(`card description should clamp at 2 lines, got ${card.descriptionLines}`);
   evidence.push({ check: "card is compact", ...card });
 
-  // 6. A desktop window offers twelve columns, and the shelf really draws twelve.
+  // 6. A desktop window fills as many covers as fit, and there is no column count to set.
   const wide = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   wide.on("pageerror", (error) => errors.push(error.message));
   await wide.goto(`${BASE}/tests/manual/source-display.html`);
   await wide.waitForSelector(".set .tile");
-  const ceiling = await wide.locator('input[aria-label="Grid columns"]').getAttribute("max");
-  if (ceiling !== "12") throw new Error(`a 1440px window should offer 12 columns, the slider caps at ${ceiling}`);
-  await wide.evaluate(() => window.sourceFixture.settings.set("browseColumns", 12));
   await wide.waitForTimeout(200);
   const drawn = await wide.locator(".set").first().evaluate((el) => getComputedStyle(el).gridTemplateColumns.split(" ").length);
-  if (drawn !== 12) throw new Error(`12 columns were asked for and the grid drew ${drawn}`);
-  const label = await wide.locator('input[aria-label="Grid columns"]').inputValue();
-  evidence.push({ check: "desktop grid goes to 12 across", ceiling, drawn, slider: label });
+  if (drawn < 4) throw new Error(`a 1440px window should fill its width with covers, drew ${drawn}`);
+  if ((await wide.locator('input[aria-label="Columns"]').count()) !== 0) throw new Error("the columns slider is back");
+  evidence.push({ check: "desktop grid fills the width", drawn });
   await wide.close();
 
   console.log(JSON.stringify({ pass: true, evidence, errors }, null, 2));

@@ -46,14 +46,16 @@ Settings → Library → Category navigation
 
 ## Split pane
 
-Decided on usable width **and** height, then checked against what the grid is left with:
+One shared `paneMode` resolver decides single vs split. Library and Search pass it the content width
+left after navigation, padding and the category sidebar, plus the saved `settings.libraryPane` choice.
+The `single` choice stays single; `auto` and `split` use the same availability rule. If the saved
+choice cannot fit, the view temporarily renders one pane without changing that preference.
 
 ```
-< 750 usable           single pane, always
-750 – 1050 usable      split possible, opt-in (optionalSplit = true)
-> 1050 usable          split by default
-height < 600           never splits — a wide short window has no readable detail pane
-grid would drop < 420  no split, even if the width says yes
+content width < 750 or below pane floors   single pane
+content width ≥ 750 and height ≥ 600       split available to auto/split
+short landscape with enough width           split available
+single preference                           always one pane
 ```
 
 Default ratio 58 / 42, draggable between 45 / 55 and 75 / 25, remembered per device. Detail pane
@@ -269,6 +271,6 @@ library subtracted.
 Measured in the browser at 390 / 768 / 1180 / 1440: bar / rail / rail / sidebar chrome; cover 148 / 112 /
 112 / 112; columns 2 / 5 / 3 / 4; detail pane absent / absent / 360 / 398.
 
-Not wired yet: the middle band's opt-in split (`optionalSplit` is decided and tested but nothing flips
-`forceSplit`), and `selectionBar: "pinned"` only moves the floating bar's offset rather than docking it in
-the column.
+The former middle-band `forceSplit` switch is removed: Library, Search and History use the shared pane
+mode resolver with their own content-width constraints. `selectionBar: "pinned"` still only moves the
+floating bar's offset rather than docking it in the column.

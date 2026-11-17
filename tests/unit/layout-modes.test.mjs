@@ -44,7 +44,7 @@ test("device classes: phone, tablet, desktop at the plan's boundaries", () => {
 test("chrome: a tablet keeps a rail, a desktop a sidebar, a phone neither", () => {
   assert.equal(railWidth("phone"), 0);
   assert.equal(railWidth("tablet"), 76);
-  assert.equal(railWidth("desktop"), 224);
+  assert.equal(railWidth("desktop"), 76, "the nav column does not widen with the window");
 });
 
 test("a phone is one pane, large covers, resume in the menu", () => {
@@ -59,7 +59,6 @@ test("a phone is one pane, large covers, resume in the menu", () => {
 test("a tablet portrait is one pane with a category bar, and no split", () => {
   const layout = libraryLayout(768, 1024, { collectionCount: 4 });
   assert.equal(layout.mode, "single");
-  assert.equal(layout.optionalSplit, false);
   assert.equal(layout.categoryNav.mode, "tabs");
   assert.equal(layout.density, "comfortable");
   assert.equal(layout.resume, "always");
@@ -69,26 +68,23 @@ test("a tablet landscape splits by default, with a detail pane and a sidebar", (
   const layout = libraryLayout(1180, 820, { collectionCount: 6 });
   assert.equal(layout.mode, "split");
   assert.equal(layout.categoryNav.mode, "sidebar");
-  assert.ok(layout.detailWidth >= 340 && layout.detailWidth <= 520);
+  assert.ok(layout.detailWidth >= 340);
   assert.ok(layout.gridWidth > 0);
   assert.equal(layout.selectionBar, "pinned");
 });
 
-test("a wide but short window does not split: a detail pane needs height too", () => {
-  const layout = libraryLayout(1180, 520, { collectionCount: 6 });
-  assert.equal(layout.mode, "single");
-  assert.equal(layout.optionalSplit, false);
+test("a short window splits in landscape but not in portrait", () => {
+  // Sideways: short and wide — two panes side by side is the shape that fits.
+  assert.equal(libraryLayout(1180, 520, { collectionCount: 6 }).mode, "split");
+  // The same phone upright has no width to give a second pane, so it stays one.
+  assert.equal(libraryLayout(520, 1180, { collectionCount: 6 }).mode, "single");
 });
 
-test("the middle band offers a split but does not force it", () => {
-  // 800 wide tablet: usable 692, below the optional threshold
-  assert.equal(libraryLayout(800, 900, { collectionCount: 3 }).optionalSplit, false);
-  // 900 wide with tabs: usable 792, optional but still single until asked
-  const optional = libraryLayout(900, 900, { collectionCount: 3, nav: "tabs" });
-  assert.equal(optional.optionalSplit, true);
-  assert.equal(optional.mode, "single");
-  const forced = libraryLayout(900, 900, { collectionCount: 3, nav: "tabs", forceSplit: true });
-  assert.equal(forced.mode, "split");
+test("one pane resolver governs automatic and explicit Library choices", () => {
+  assert.equal(libraryLayout(800, 900, { collectionCount: 3, pane: "auto" }).mode, "single");
+  assert.equal(libraryLayout(900, 900, { collectionCount: 3, nav: "tabs", pane: "auto" }).mode, "split");
+  assert.equal(libraryLayout(900, 900, { collectionCount: 3, nav: "tabs", pane: "split" }).mode, "split");
+  assert.equal(libraryLayout(900, 900, { collectionCount: 3, nav: "tabs", pane: "single" }).mode, "single");
 });
 
 test("a desktop gets a split, a remembered ratio and hover affordances", () => {
@@ -100,8 +96,30 @@ test("a desktop gets a split, a remembered ratio and hover affordances", () => {
 });
 
 test("a dragged ratio is clamped so neither pane becomes unusable", () => {
-  assert.equal(libraryLayout(1440, 900, { splitRatio: 0.1 }).splitRatio, 0.45);
-  assert.equal(libraryLayout(1440, 900, { splitRatio: 0.95 }).splitRatio, 0.75);
+  const narrowest = libraryLayout(1440, 900, { splitRatio: 0.1 });
+  assert.ok(narrowest.gridWidth <= 420, "the shelf may be dragged down to its own floor");
+  assert.equal(narrowest.detailWidth, 1440 - 76 - 32 - narrowest.gridWidth - (narrowest.sidebarWidth ?? 0));
+  const widest = libraryLayout(1440, 900, { splitRatio: 0.95 });
+  assert.ok(widest.detailWidth >= 340, "the detail keeps its floor");
+});
+
+test("both panes follow the window: the split keeps its share", () => {
+  const wide = libraryLayout(1600, 900, { collectionCount: 6, splitRatio: 0.6 });
+  const narrow = libraryLayout(1200, 900, { collectionCount: 6, splitRatio: 0.6 });
+  assert.ok(narrow.gridWidth < wide.gridWidth, "the shelf shrinks with the window");
+  assert.ok(narrow.detailWidth < wide.detailWidth, "and so does the detail");
+});
+
+test("three panes: shelf, series and a reading column that keeps its floor", () => {
+  const wide = libraryLayout(1680, 900, { collectionCount: 6, pane: "three", minGridWidth: 200 });
+  assert.equal(wide.mode, "split");
+  assert.ok(wide.thirdWidth >= 420, "the reader keeps its floor");
+  assert.ok(wide.detailWidth >= 340, "the series keeps its floor");
+  assert.ok(wide.gridWidth >= 200, "the shelf keeps the minimum the reader set");
+  // A window that cannot hold all three keeps two panes rather than drawing a sliver of pages.
+  const narrow = libraryLayout(1200, 900, { collectionCount: 6, pane: "three", minGridWidth: 200 });
+  assert.equal(narrow.thirdWidth, 0);
+  assert.equal(narrow.mode, "split");
 });
 
 test("category navigation: tabs when everything fits", () => {
@@ -138,10 +156,9 @@ test("category navigation: a sidebar is never drawn at phone width", () => {
   assert.equal(layout.sidebarWidth, 0);
 });
 
-test("sidebar width is clamped to a list, not a wall", () => {
-  assert.equal(sidebarWidth(400), 200);
-  assert.equal(sidebarWidth(5000), 280);
-  assert.ok(sidebarWidth(1072) >= 200 && sidebarWidth(1072) <= 280);
+test("a sidebar keeps one width, whatever the window", () => {
+  // Chrome does not grow because the window did: a list of categories is a list at every size.
+  assert.equal(sidebarWidth(), 200);
 });
 
 test("columns follow from the available width, and never go below two or above eight", () => {

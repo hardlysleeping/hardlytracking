@@ -41,10 +41,10 @@ function cornerOr(value: unknown): NavCorner {
 
 import { DEFAULT_READ_AHEAD, readAheadOf, type ReadAhead } from "../lib/reader-ahead";
 import { scaleMapOf } from "../lib/reader-scale";
-import { browseMode, columnsFor, rowStyleOf, type RowStyle } from "../lib/browse-display";
+import { browseMode, rowStyleOf, type RowStyle } from "../lib/browse-display";
 export type LibraryView = "grid" | "compact" | "list" | "row" | "card";
 export type Sort = "title" | "recent" | "source";
-export type ReaderMode = "vertical" | "paged" | "ltr" | "rtl";
+export type ReaderMode = "vertical" | "paged" | "ltr" | "rtl" | "duo";
 export type Fit = "width" | "height" | "contain" | "fill";
 
 const KEY = "settings.";
@@ -59,7 +59,6 @@ export interface Prefs {
    * library, so it travels in an export and survives a relaunch like every other display choice.
    */
   rowStyle: RowStyle;
-  browseColumns: number;
   /**
    * Where a grid tile's title goes: under the artwork, or on it.
    *
@@ -74,6 +73,10 @@ export interface Prefs {
   categoryNav: CategoryNavPreference;
   /** The grid/detail split, remembered after the divider is dragged. */
   splitRatio: number;
+  /** In three panes, the shelf's share of the room above the three floors. */
+  splitRatio3: number;
+  /** In three panes, the series column's share of the room the shelf leaves. */
+  detailShare: number;
   /** The old three-value sort, kept readable; `sortByCollection` is what the library uses. */
   librarySort: Sort;
   /** One sort per collection, keyed by category id, `"all"` for the whole library. */
@@ -187,6 +190,7 @@ export interface Prefs {
   maximizeSpace: boolean;
   /** One pane or two, for the library. */
   libraryPane: PanePreference;
+  /** The narrowest shelf a two-pane split may leave, in px. */
   /** One pane or two, for history. */
   historyPane: PanePreference;
   /** Which corner the phone's floating Back/Forward buttons sit in. */
@@ -237,12 +241,13 @@ class Settings {
 
   libraryView = $state<LibraryView>("grid");
   rowStyle = $state<RowStyle>("line");
-  browseColumns = $state(3);
   browseTitle = $state<"below" | "overlay">("below");
   coverSize = $state(132);
   libraryDensity = $state<DensityPreference>("auto");
   categoryNav = $state<CategoryNavPreference>("automatic");
   splitRatio = $state(0.58);
+  splitRatio3 = $state(0.58);
+  detailShare = $state(0.4);
   librarySort = $state<Sort>("title");
   sortByCollection = $state<Record<string, SortSpec>>({});
   manualOrder = $state<Record<string, string[]>>({});
@@ -315,7 +320,6 @@ class Settings {
     };
     const legacyView = await read("libraryView", this.libraryView);
     this.libraryView = browseMode(legacyView);
-    this.browseColumns = columnsFor(await read("browseColumns", this.browseColumns), 1280);
     this.rowStyle = rowStyleOf(await read<unknown>("rowStyle", this.rowStyle));
     this.toolsCollapsed = (await read<boolean>("toolsCollapsed", false)) === true;
     const title = await read("browseTitle", this.browseTitle);
@@ -324,6 +328,8 @@ class Settings {
     this.libraryDensity = await read("libraryDensity", this.libraryDensity);
     this.categoryNav = await read("categoryNav", this.categoryNav);
     this.splitRatio = await read("splitRatio", this.splitRatio);
+    this.splitRatio3 = await read("splitRatio3", this.splitRatio3);
+    this.detailShare = await read("detailShare", this.detailShare);
     this.librarySort = await read("librarySort", this.librarySort);
     this.sortByCollection = await read("sortByCollection", this.sortByCollection);
     this.manualOrder = await read("manualOrder", this.manualOrder);

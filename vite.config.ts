@@ -46,6 +46,17 @@ export default defineConfig({
         target: LOCAL_PROXY,
         changeOrigin: true,
       },
+      // `/api/file` and `/api/img` are the two routes a dev tab silently lost: unproxied, they are
+      // the SPA's own `index.html` with a 200, so an archive.org volume arrived as HTML and the zip
+      // reader called it "not a zip archive", and every remote cover drew a broken picture.
+      "/api/file": {
+        target: LOCAL_PROXY,
+        changeOrigin: true,
+      },
+      "/api/img": {
+        target: LOCAL_PROXY,
+        changeOrigin: true,
+      },
       "/api/suwayomi": {
         target: LOCAL_PROXY,
         changeOrigin: true,

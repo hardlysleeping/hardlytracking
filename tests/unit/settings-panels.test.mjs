@@ -30,8 +30,6 @@ test("Settings renders the shared panels instead of its own copies", () => {
 
 test("every Library control the old Settings group had is still in the panel", () => {
   for (const label of [
-    "Cover size",
-    "Density",
     "Category navigation",
     "Library panes",
     "Show “Continue reading”",
@@ -41,6 +39,8 @@ test("every Library control the old Settings group had is still in the panel", (
   }
   // Every option of the two selects, by name.
   for (const option of ["Automatic", "Tabs", "Sidebar"]) assert.ok(libraryPanel.includes(`>${option}<`), `${option} is still offered`);
+  // Size and density live in the display menu; the panel does not repeat them.
+  assert.doesNotMatch(libraryPanel, /Cover size/, "Cover size left the panel");
   // The view/columns row still comes from the one component that owns it.
   assert.match(libraryPanel, /<BrowseDisplay \/>/, "the panel draws BrowseDisplay unless the page does");
 });

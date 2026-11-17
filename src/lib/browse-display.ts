@@ -1,5 +1,4 @@
 /** One durable display choice shared by Library and Search. Collection snapshots never override it. */
-import { deviceClass } from "./layout-modes";
 export type BrowseMode = "row" | "grid" | "card";
 export function browseMode(value: unknown): BrowseMode {
   if (value === "row" || value === "list") return "row";
@@ -24,22 +23,6 @@ export const ROW_STYLES: ReadonlyArray<{ id: RowStyle; label: string; note: stri
 ];
 export function rowStyleOf(value: unknown): RowStyle {
   return value === "preview" || value === "table" ? value : "line";
-}
-/**
- * The most columns the slider offers, per device: 1-3 on a phone, 1-6 on a tablet or a desktop.
- *
- * One is allowed everywhere (a single large card). Six is the ceiling past which a card is narrower
- * than the words under it, so tapping the right one stops being reliable.
- */
-export function maxColumns(width: number, height = width): number {
-  const device = deviceClass(width, height);
-  // A desktop window is wide enough for ten covers at the default size; a phone gets three and a
-  // tablet six, so the slider only ever offers columns the screen can actually draw.
-  return device === "phone" ? 3 : device === "tablet" ? 6 : 10;
-}
-export function columnsFor(value: unknown, width: number, height = width): number {
-  const n = typeof value === "number" && Number.isFinite(value) ? Math.round(value) : 3;
-  return Math.min(maxColumns(width, height), Math.max(1, n));
 }
 export function knownSize(bytes: unknown): string | null {
   if (typeof bytes !== "number" || !Number.isFinite(bytes) || bytes < 0) return null;

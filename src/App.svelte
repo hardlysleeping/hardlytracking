@@ -195,7 +195,7 @@ import { sourceMarks } from "./state/source-marks.svelte";
       <!--
         An overlay, not a bar in the layout: a notice used to push the header and the page down and
         then stay there until tapped. It now floats over the top for seven seconds (see
-        `state/notices`) and everything it said is kept in the log on the More page.
+        `state/notices`) and everything it said is kept in the log on the Settings page.
       -->
       <GlobalWarning
         message={notices.current}

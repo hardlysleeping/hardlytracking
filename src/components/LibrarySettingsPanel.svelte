@@ -9,8 +9,6 @@
    */
   import { settings } from "../state/settings.svelte";
   import BrowseDisplay from "./BrowseDisplay.svelte";
-  import { DENSITY_OPTIONS, coverWidth, deviceClass } from "../lib/layout-modes";
-  import { viewport } from "../lib/layout.svelte";
   import { PANE_CHOICES } from "../lib/view-options";
   import { LIBRARY_SECTIONS, moveItem } from "../lib/nav-order";
 
@@ -19,11 +17,6 @@
     browse?: boolean;
   }
   let { browse = true }: Props = $props();
-
-  /** The slider shows the cover the library actually draws, not a value a preset overrides. */
-  const cover = $derived(
-    coverWidth(settings.libraryDensity, deviceClass(viewport.width, viewport.height), settings.coverSize),
-  );
 
   /** The tabs above the shelf, in the order the reader put them. */
   function moveSection(id: string, delta: number): void {
@@ -37,32 +30,6 @@
   {#if browse}
     <BrowseDisplay />
   {/if}
-
-  <label class="row">
-    <span>Cover size</span>
-    <input
-      type="range"
-      min="96"
-      max="200"
-      step="4"
-      value={cover}
-      oninput={(event) => {
-        settings.set("coverSize", Number(event.currentTarget.value));
-        settings.set("libraryDensity", "manual");
-      }}
-    />
-  </label>
-
-  <div class="row">
-    <span>Density</span>
-    <div class="chips">
-      {#each DENSITY_OPTIONS as option (option.id)}
-        <button class="chip" class:on={settings.libraryDensity === option.id} onclick={() => settings.set("libraryDensity", option.id)}>
-          {option.label}
-        </button>
-      {/each}
-    </div>
-  </div>
 
   <label class="row">
     <span>Category navigation</span>

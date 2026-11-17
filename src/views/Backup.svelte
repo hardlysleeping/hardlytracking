@@ -174,7 +174,7 @@
 
 <section class="view">
   <header class="bar">
-    <button class="btn ghost icon" aria-label="Back" onclick={() => go("/more")}>
+    <button class="btn ghost icon" aria-label="Back" onclick={() => go("/settings")}>
       <svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7" /></svg>
     </button>
     <h1>Backup &amp; restore</h1>

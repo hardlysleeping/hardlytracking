@@ -53,7 +53,6 @@
       animate:flip={{ duration: 180 }}
     >
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d={destination.icon} /></svg>
-      <span class="bar-label">{destination.label}</span>
     </button>
   {/each}
 </nav>
@@ -84,11 +83,22 @@
     box-shadow: 0 10px 28px rgb(0 0 0 / 42%);
   }
 
+  /**
+   * Icons only, on every screen that draws this bar.
+   *
+   * The labels were the reason the bar needed a second line of type at 10 px, which is below what a
+   * phone can read at arm's length and made five destinations into five cramped columns. The icon
+   * is the destination; the name is still in `aria-label` and in the tooltip, so nothing is lost to
+   * a screen reader or to a long press. The rail and the sidebar keep their labels — they have the
+   * room.
+   */
   .item {
     all: unset;
     cursor: pointer;
+    position: relative;
     display: flex;
     align-items: center;
+    justify-content: center;
     color: var(--text-3);
     border-radius: var(--r-pill);
     transition:
@@ -99,9 +109,6 @@
     height: 44px;
     min-height: 44px;
     padding: 2px 1px;
-    justify-content: center;
-    flex-direction: column;
-    gap: 2px;
   }
 
   /* A picture of the bar: no pointer, no press, nothing that suggests it can be tapped. */
@@ -121,6 +128,7 @@
     stroke-linecap: round;
     stroke-linejoin: round;
     flex: none;
+    position: relative;
   }
 
   .item:hover {
@@ -136,18 +144,25 @@
     box-shadow: 0 6px 18px rgb(0 0 0 / 35%);
   }
 
-  .bar-label {
-    font-size: 10px;
-    line-height: 1;
-    white-space: nowrap;
-    max-width: 100%;
-    overflow: hidden;
-    text-overflow: ellipsis;
+  .item.on {
+    color: #fff;
   }
 
-  .item.on {
+  /* The accent is an icon-sized pill, not the whole tap target.
+   *
+   * With a label under the icon the full-width pill read as a tab; with icons only it was a wide
+   * empty oval four times the width of the glyph in it. The button stays the full width, so the
+   * target and the even spacing are unchanged — only the painted shape is smaller. */
+  .item.on::before {
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 52px;
+    height: 34px;
+    border-radius: var(--r-pill);
     background: var(--accent);
-    color: #fff;
+    transform: translate(-50%, -50%);
   }
 
   .item.on:hover {
