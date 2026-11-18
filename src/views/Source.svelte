@@ -534,17 +534,11 @@
     /* The shell's own gutter, capped: at the default 16px the covers in a three-across grid were
        the smallest thing on the screen, which is the report "excessive margins are squishing the
        cover images". The user's own margins setting still wins when it is tighter (compact 10px
-       becomes 8, none 4 stays 4). `!important` because the shell applies the margin with it. */
-    padding-left: min(var(--pad-x), var(--s2)) !important;
-    padding-right: min(var(--pad-x), var(--s2)) !important;
-  }
-
-  /* The pinned header pulls out by the same gutter it is given back, or it hangs past the edge. */
-  .view > .pin {
-    margin-left: calc(-1 * min(var(--pad-x), var(--s2))) !important;
-    margin-right: calc(-1 * min(var(--pad-x), var(--s2))) !important;
-    padding-left: min(var(--pad-x), var(--s2)) !important;
-    padding-right: min(var(--pad-x), var(--s2)) !important;
+       becomes 8, none 4 stays 4). `!important` because the shell applies the margin with it, and
+       declared as the view's gutter so the pinned header in app.css cancels exactly this much. */
+    --view-pad-x: min(var(--pad-x), var(--s2));
+    padding-left: var(--view-pad-x) !important;
+    padding-right: var(--view-pad-x) !important;
   }
 
   .view.embedded {

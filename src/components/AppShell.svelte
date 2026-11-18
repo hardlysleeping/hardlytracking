@@ -282,6 +282,17 @@
     min-width: 0;
     min-height: 0;
     overflow-y: auto;
+    /*
+     * Sideways is not a scroll this app has: every screen is laid out to the width it is given, and
+     * a page that could be dragged left and right by a few pixels is a bug the reader cannot unsee.
+     *
+     * `clip`, not `hidden`: `visible` is not allowed beside `auto`/`hidden`, so the browser promotes
+     * it to `auto` and the scroller becomes a horizontal one no matter what the stylesheet asked for
+     * — which is how an 8 px overshoot on one heading let a whole title page be dragged sideways. A
+     * view that genuinely needs a wide strip scrolls it itself (`Extensions`' chip rails do), and a
+     * descendant's own `overflow-x` is unaffected by this.
+     */
+    overflow-x: clip;
     overscroll-behavior-y: contain;
     /*
      * No `-webkit-overflow-scrolling: touch`. It is legacy (iOS 13 scrolls this way anyway) and in

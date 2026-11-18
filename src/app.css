@@ -559,8 +559,18 @@ button.ghost:disabled {
 }
 
 .view {
-  padding-left: var(--pad-x) !important;
-  padding-right: var(--pad-x) !important;
+  /**
+   * The gutter this view actually uses, as one number both the view and its sticky header read.
+   *
+   * The header below cancels the view's inline padding to reach the edge of the screen and gives the
+   * same amount back as its own padding. When the two disagreed the header hung past the edge: a
+   * series page capped its own gutter at 8 px while the header cancelled 16 px, so the bar was 456 px
+   * wide in a 440 px window and the whole page could be dragged 8 px sideways — on a phone, that is
+   * "I can horizontally scroll".
+   */
+  --view-pad-x: var(--pad-x);
+  padding-left: var(--view-pad-x) !important;
+  padding-right: var(--view-pad-x) !important;
   padding-top: var(--pad-y) !important;
   /* A capped view centres in the space it is given. Each screen keeps its own max-width, but on a
      wide window the cap used to sit at x=0 and leave every spare pixel on the right — 240 px on the
@@ -594,10 +604,10 @@ button.ghost:disabled {
   top: 0;
   z-index: 30;
   margin-top: calc(-1 * var(--pad-y));
-  margin-left: calc(-1 * var(--pad-x));
-  margin-right: calc(-1 * var(--pad-x));
-  padding-left: var(--pad-x);
-  padding-right: var(--pad-x);
+  margin-left: calc(-1 * var(--view-pad-x));
+  margin-right: calc(-1 * var(--view-pad-x));
+  padding-left: var(--view-pad-x);
+  padding-right: var(--view-pad-x);
   padding-top: calc(var(--safe-t) + var(--pad-y));
   background: var(--bg);
   box-shadow: none;

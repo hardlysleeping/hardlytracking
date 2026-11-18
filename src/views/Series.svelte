@@ -554,9 +554,12 @@
     padding: var(--s3) var(--s4) var(--s8);
     max-width: 980px;
     /* Same gutter cap as a source page: sixteen pixels of shell margin on each side was the width
-       the issue rows and the hero were paying for. See Source.svelte for the rule. */
-    padding-left: min(var(--pad-x), var(--s2)) !important;
-    padding-right: min(var(--pad-x), var(--s2)) !important;
+       the issue rows and the hero were paying for. Declared as the view's gutter, not only as its
+       padding, so the sticky header in app.css cancels exactly this much and the page cannot be
+       dragged sideways by the difference (it was 8 px per side, a 456 px bar in a 440 px window). */
+    --view-pad-x: min(var(--pad-x), var(--s2));
+    padding-left: var(--view-pad-x) !important;
+    padding-right: var(--view-pad-x) !important;
   }
 
   .view.embedded {
