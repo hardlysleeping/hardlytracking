@@ -35,19 +35,24 @@ Two things that job will not do:
 - **It publishes whatever the legs produced**, so a leg that was cancelled for reasons outside the build
   (see §5) leaves the release missing that platform rather than failing loudly.
 
-## 3. The IPA is a separate, manual step — twice over
+## 3. The IPA is a separate run, but it publishes itself
 
-`ios-ipa.yml` is `workflow_dispatch` only, because macOS minutes are not free, and it uploads an
-**artifact**, never a release asset. A tag therefore does *not* produce a downloadable IPA:
+`ios-ipa.yml` is `workflow_dispatch` only, because macOS minutes are not free. It uploads the IPA to
+**both** the stable `ios-0.1.0` download and the release for the version it just built, so a tag plus
+one dispatch produces a downloadable IPA with no hand step:
 
-    gh workflow run ios-ipa.yml --ref v0.5.3 -f ref=v0.5.3
+    gh workflow run ios-ipa.yml --ref v0.7.16 -f ref=v0.7.16
+
+The upload is a build step (`gh release upload … --clobber`) and it verifies itself by asking the
+releases API for the asset size, so a silent failure fails the run. It used to be manual: 0.5.1
+shipped with no IPA at all, 0.5.2 and 0.5.3 were fixed up by hand, and 0.7.13–0.7.15 each needed it
+too. Keep a copy locally as well, because `~/IPA/HardlyTracking-unsigned.ipa` is what gets sideloaded:
+
     gh run download <run-id> -n HardlyTracking-unsigned-ipa -D /tmp/ipa
     cp /tmp/ipa/HardlyTracking-unsigned.ipa ~/IPA/HardlyTracking-unsigned.ipa
-    gh release upload v0.5.3 /tmp/HardlyTracking_0.5.3_unsigned.ipa --clobber
 
-0.5.1 shipped with no IPA on its release page for exactly this reason, and the IPA existed only as a CI
-artifact that nobody would find; 0.5.2 and 0.5.3 were fixed up by hand. Check the version
-and build inside the bundle before uploading — unpacking `Payload/App.app/Info.plist` is enough:
+`scripts/ipa.sh` does the dispatch, the watch and the copy in one command. Check the version and build
+inside the bundle — unpacking `Payload/App.app/Info.plist` is enough:
 
     unzip -q -o ~/IPA/HardlyTracking-unsigned.ipa 'Payload/*.app/Info.plist' -d /tmp/check
     python3 -c "import plistlib,glob; d=plistlib.load(open(glob.glob('/tmp/check/Payload/*.app/Info.plist')[0],'rb')); print(d['CFBundleShortVersionString'], d['CFBundleVersion'])"

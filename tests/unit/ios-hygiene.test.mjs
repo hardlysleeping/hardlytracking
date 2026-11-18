@@ -176,3 +176,15 @@ test("the workflow archives on the current SDK and checks the built bundle", () 
   assert.match(workflow, /PrivacyInfo\.xcprivacy/);
   assert.match(workflow, /MinimumOSVersion/);
 });
+
+test("the workflow puts the IPA on a release, not just in the run", () => {
+  const workflow = readFileSync(WORKFLOW, "utf8");
+  // 0.5.1 shipped with no IPA because the release upload was a hand step, and 0.5.2/0.5.3 were
+  // fixed up by hand. An artifact nobody downloads is the failure this asserts against.
+  assert.match(workflow, /permissions:\s*\n\s*contents: write/, "the IPA job cannot write a release");
+  assert.match(workflow, /gh release upload ios-0\.1\.0/, "the stable download slot is not refreshed");
+  assert.match(workflow, /gh release upload "v\$VERSION"/, "the version's own release is not updated");
+  assert.match(workflow, /HardlyTracking_\$\{VERSION\}_unsigned\.ipa/, "the asset name does not follow the other releases");
+  // The verification is the API's answer, so a silent upload failure cannot pass.
+  assert.match(workflow, /select\(\.name == "HardlyTracking-unsigned\.ipa"\) \| \.size/);
+});

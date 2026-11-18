@@ -17,6 +17,10 @@ on:
 jobs:
   ipa:
     runs-on: macos-15
+    # The last step writes release assets: an artifact is invisible to anyone downloading the app,
+    # and 0.5.1 shipped with no IPA because the upload was a hand step.
+    permissions:
+      contents: write
     # The first run compiles an OpenJDK Zero static library into a framework (prepare_command); later
     # runs hit the runner's cache only if the image provides one, so budget for the slow path.
     timeout-minutes: 60
@@ -216,3 +220,33 @@ jobs:
           name: HardlyTracking-unsigned-ipa
           path: ${{ runner.temp }}/HardlyTracking-unsigned.ipa
           if-no-files-found: error
+
+      - name: The IPA lands on the release, not just in CI
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # An artifact is not a download. 0.5.1 shipped with no IPA on its release page and 0.5.2
+          # and 0.5.3 were fixed up by hand, so the upload is part of the build now.
+          VERSION=$(node -p "require('./package.json').version")
+          IPA="$RUNNER_TEMP/HardlyTracking-unsigned.ipa"
+          test -f "$IPA" || { echo "::error::nothing at $IPA"; exit 1; }
+
+          # The stable slot every older link and README points at.
+          gh release upload ios-0.1.0 "$IPA" --repo "$GITHUB_REPOSITORY" --clobber
+
+          # The tag for this version, when it exists, under the name the other releases use.
+          if gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            cp "$IPA" "$RUNNER_TEMP/HardlyTracking_${VERSION}_unsigned.ipa"
+            gh release upload "v$VERSION" \
+              "$RUNNER_TEMP/HardlyTracking_${VERSION}_unsigned.ipa" \
+              --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            echo "no release v$VERSION yet; the stable slot carries this build"
+          fi
+
+          # The upload is verified by asking GitHub, not by trusting the command's exit code.
+          SIZE=$(gh release view ios-0.1.0 --repo "$GITHUB_REPOSITORY" --json assets \
+            -q '.assets[] | select(.name == "HardlyTracking-unsigned.ipa") | .size')
+          echo "stable slot: ${SIZE:-missing} bytes, built: $(wc -c < "$IPA" | tr -d ' ') bytes"
+          test "${SIZE:-}" = "$(wc -c < "$IPA" | tr -d ' ')"
