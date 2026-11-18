@@ -38,8 +38,12 @@ const LOADER = ["--experimental-strip-types", "--import", "./tests/unit/register
 /** The card's own numbers. */
 const FPS_MIN = 55;
 const FREEZE_MS = 1_000;
-/** A tap that still feels like a tap; measured at ~130 ms on a 48 000-chapter library. */
-const SELECTION_P95_MS = 400;
+/**
+ * A tap that still feels like a tap. The index made this 0.10–1.29 ms p95 on a 48 000-chapter
+ * library, down from ~130 ms, so the bound sits at 50 ms: loose enough for a loaded CI box, tight
+ * enough that a return to the old per-chapter pass fails here instead of on the phone.
+ */
+const SELECTION_P95_MS = 50;
 /** A cold start that is not a wait; measured at ~176 ms. */
 const COLD_OPEN_MAX_MS = 1_500;
 
