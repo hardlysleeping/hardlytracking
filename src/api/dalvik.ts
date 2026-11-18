@@ -963,7 +963,9 @@ export function createDalvikProvider(options: DalvikProviderOptions): SourceProv
         }
         const headers = page.headers !== null && typeof page.headers === "object" ? page.headers : undefined;
         return {
-          index: typeof page.index === "number" ? page.index : index,
+          // Position, not the extension's own number: a Dalvik source may count from 1 or skip,
+          // and every reader-side index (notes, `data-page`, progress) is a position.
+          index,
           url: address,
           ...(headers === undefined || Object.keys(headers).length === 0 ? {} : { headers }),
         };

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { untrack } from "svelte";
   import { imageCache } from "../lib/cache/images";
+  import { watchNear } from "../lib/near-viewport";
   import { isCoverKey } from "../lib/files/cover";
   /**
    * A cover, with two honest failures instead of a broken-image icon: no cover URL at all draws the
@@ -125,24 +126,19 @@
     // every cover the moment the shelf opened, which is thousands of images for the forty visible.
     const target = tile;
     if (target === null) return;
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (!entries.some((entry) => entry.isIntersecting)) return;
-        observer.disconnect();
-        nearby = true;
-        void imageCache.resolve(url, headers === undefined ? {} : { headers }).then((resolved) => {
-          if (live && resolved !== url) {
-            src = resolved;
-            onresolve?.(resolved);
-          }
-        });
-      },
-      { rootMargin: "200% 0px" },
-    );
-    observer.observe(target);
+    const stop = watchNear(target, () => {
+      // One shot, from a shared observer: the cover is near enough to fetch.
+      nearby = true;
+      void imageCache.resolve(url, headers === undefined ? {} : { headers }).then((resolved) => {
+        if (live && resolved !== url) {
+          src = resolved;
+          onresolve?.(resolved);
+        }
+      });
+    });
     return () => {
       live = false;
-      observer.disconnect();
+      stop();
     };
   });
 </script>

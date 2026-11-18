@@ -36,6 +36,8 @@ export interface DownloadStore {
   listDownloadPages(chapterId: string): Promise<Array<{ index: number; blob: Blob }>>;
   putDownloadPage(row: { id: string; chapterId: string; index: number; blob: Blob }): Promise<void>;
   allDownloadPages(): Promise<Array<{ id: string; chapterId: string; index: number; blob: Blob }>>;
+  /** Every page row without its bytes: the launch reconcile's read. */
+  allDownloadPageMeta(): Promise<Array<{ id: string; chapterId: string; index: number; bytes?: number; blob?: Blob }>>;
   getPref<T>(key: string): Promise<T | undefined>;
   setPref<T>(key: string, value: T): Promise<void>;
 }
@@ -125,7 +127,9 @@ export class DownloadEngine {
     const store = this.deps.store;
     const [rows, pages, queued] = await Promise.all([
       store.listDownloads(),
-      store.allDownloadPages(),
+      // Metadata only: a launch that read every stored page image to count it was loading the whole
+      // download folder into memory to answer "how many pages does this chapter have".
+      store.allDownloadPageMeta(),
       store.getPref<QueueItem[]>(QUEUE_PREF),
     ]);
 
@@ -133,7 +137,9 @@ export class DownloadEngine {
     for (const page of pages) {
       const count = stored.get(page.chapterId) ?? { pages: 0, bytes: 0 };
       count.pages += 1;
-      count.bytes += page.blob.size;
+      // A row from before the split has no recorded size; its blob is the only source, and reading
+      // it once here is cheaper than recounting every launch.
+      count.bytes += page.bytes ?? page.blob?.size ?? 0;
       stored.set(page.chapterId, count);
     }
 

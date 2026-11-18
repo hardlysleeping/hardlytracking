@@ -99,5 +99,17 @@ function finish(frames: number[], firstPaint: number): void {
     out.textContent = line;
     document.title = line;
     console.log(line);
+    // The whole measurement, for a headless reader (`scripts/bench-read.mjs`) that needs the frame
+    // array rather than the one line: the acceptance gate reads the worst frame, not just the p95.
+    (window as unknown as { __bench?: unknown }).__bench = {
+      rows,
+      firstPaint,
+      fps,
+      p95,
+      frames,
+      worstFrame: frames.length === 0 ? 0 : Math.max(...frames),
+      mutations,
+      readMarkMs: performance.now() - after,
+    };
   });
 }

@@ -14,6 +14,8 @@
   import { go, pathTo } from "../lib/nav";
   import { startReading } from "../state/reader-pane.svelte";
   import { clampText } from "../lib/clamp-text";
+  import { columnCount, rowStart } from "../lib/grid-row";
+  import { itemWindow, scrollRoot } from "../lib/window";
 
   /** A screenful and a bit; the rest arrives while the reader is still looking at the first row. */
   const FIRST_DRAW = 120;
@@ -120,15 +122,108 @@
    *
    * A 5 000-title library is 5 000 covers to *create*, and creating them is the first paint: 412 ms
    * on this box before the reader sees anything, even though all but a dozen are off screen.
-   * `content-visibility` skips their rendering but not their creation. So the grid draws the first
-   * screenful and grows in idle steps; every tile already reserves its height
-   * (`contain-intrinsic-size`), so the document is the right length from the first frame and the
-   * scrollbar, the scroll offset and a drag do not notice the rest arriving.
+   * `content-visibility` skips their rendering but not their creation. Below `WINDOW_MIN` the grid
+   * still draws the first screenful and grows in idle steps; above it the window below decides which
+   * rows exist at all, and two spacers hold the shelf's height.
    */
   let drawnCount = $state(FIRST_DRAW);
-  const drawn = $derived(series.length <= drawnCount ? series : series.slice(0, drawnCount));
+
+  /**
+   * Above this many titles, the shelf is windowed rather than grown.
+   *
+   * A short shelf of 200 is not worth the bookkeeping, and windowing it would make a tab or a drag
+   * behave differently for no gain. A 5 000-title library is where creation cost is the problem.
+   */
+  const WINDOW_MIN = 400;
+
+  /** The scroll container the shelf sits in (the shell's `main`, or a library column). */
+  let host = $state<HTMLElement | null>(null);
+  let scrollTop = $state(0);
+  let viewportHeight = $state(0);
+  let columns = $state(1);
+  let rowHeight = $state(0);
+
+  /**
+   * One row's height, measured rather than assumed.
+   *
+   * The tile reserves its own height (`contain-intrinsic-size`), and every mode has one uniform row
+   * — a cover plus a title clamped to a fixed number of lines, or a fixed list row. Measuring the
+   * first tile keeps the spacers exact for the mode, the cover size and the theme's spacing without
+   * repeating any of those numbers here.
+   */
+  function measureRows(el: HTMLElement): void {
+    const style = getComputedStyle(el);
+    columns = Math.max(1, columnCount(style.gridTemplateColumns));
+    const tile = el.querySelector<HTMLElement>(".tile");
+    if (tile === null) return;
+    const gap = Number.parseFloat(style.rowGap === "normal" ? "0" : style.rowGap) || 0;
+    const box = tile.getBoundingClientRect().height;
+    if (box > 0) rowHeight = box + gap;
+  }
 
   $effect(() => {
+    const el = host;
+    if (el === null) return;
+    const root = scrollRoot(el);
+    if (root === null) return;
+    const documentScrolled = root === document.documentElement;
+    let frame: number | null = null;
+    const read = (): void => {
+      frame = null;
+      scrollTop = documentScrolled ? (globalThis.scrollY ?? 0) : root.scrollTop;
+      viewportHeight = documentScrolled ? globalThis.innerHeight ?? 0 : root.clientHeight;
+    };
+    const onScroll = (): void => {
+      if (frame !== null) return;
+      frame = requestAnimationFrame(read);
+    };
+    read();
+    measureRows(el);
+    root.addEventListener("scroll", onScroll, { passive: true });
+    const resize = new ResizeObserver(() => {
+      read();
+      measureRows(el);
+    });
+    resize.observe(root);
+    return () => {
+      root.removeEventListener("scroll", onScroll);
+      resize.disconnect();
+      if (frame !== null) cancelAnimationFrame(frame);
+    };
+  });
+
+  // A new layout, cover size or theme spacing is a new row height; nothing about the scroll moved.
+  $effect(() => {
+    void view;
+    void cover;
+    const el = host;
+    if (el === null) return;
+    void Promise.resolve().then(() => {
+      if (el.isConnected) measureRows(el);
+    });
+  });
+
+  const mode = $derived(browseMode(view));
+
+  /** Windowing is for shelves where creating every tile is the cost; a card's height is not uniform. */
+  const windowed = $derived(series.length > WINDOW_MIN && mode !== "card" && rowHeight > 0);
+
+  const win = $derived(
+    windowed
+      ? itemWindow({
+          count: series.length,
+          columns,
+          rowHeight,
+          scrollTop,
+          viewportHeight,
+        })
+      : { start: 0, end: series.length, padTop: 0, padBottom: 0 },
+  );
+
+  const drawn = $derived(windowed ? series.slice(win.start, win.end) : series.slice(0, drawnCount));
+
+  $effect(() => {
+    if (windowed) return;
     if (series.length <= drawnCount) return;
     let cancelled = false;
     let handle = 0;
@@ -144,9 +239,8 @@
     };
   });
 
-  const mode = $derived(browseMode(view));
-  /** A title laid over the cover: only in the grid, and only when the reader asked for it. */
   const overlaid = $derived(titlePlacement === "overlay" && mode === "grid");
+  /** A title laid over the cover: only in the grid, and only when the reader asked for it. */
 
   let pressTimer: ReturnType<typeof setTimeout> | null = null;
   /** The tile under a held finger, and whether that hold has turned into a drag. */
@@ -209,11 +303,33 @@
   }
 
   let expansionAnchor = $state<string | null>(null);
-  function pick(item: Series, event: MouseEvent) {
-    const tile = event.currentTarget as HTMLElement;
-    const top = tile.getBoundingClientRect().top;
-    const siblings = [...(tile.parentElement?.querySelectorAll<HTMLElement>(":scope > .tile") ?? [])];
-    expansionAnchor = siblings.find(el => Math.abs(el.getBoundingClientRect().top - top) < 2)?.dataset.seriesId ?? item.id;
+
+  /**
+   * How many tiles share a row.
+   *
+   * Read from the grid's own resolved columns rather than from the tiles: the expansion panel used
+   * to find its row by measuring every sibling's `getBoundingClientRect().top` on each selection,
+   * which on a 5 000-title shelf is 5 000 layouts to answer a question one computed style settles.
+   * A list view has no columns, so it is one — the panel opens under the row itself.
+   */
+  function columnsOf(tile: HTMLElement): number {
+    const host = tile.parentElement;
+    if (host === null) return 1;
+    return columnCount(getComputedStyle(host).gridTemplateColumns);
+  }
+
+  function pick(item: Series, index: number, event: MouseEvent) {
+    // The handler lives on the card's button, so the card is its parent — the element the grid
+    // laid out, and the one whose row the panel has to open above.
+    const tile = (event.currentTarget as HTMLElement).closest<HTMLElement>(".tile");
+    const columns = tile === null ? 1 : columnsOf(tile);
+    // The first tile of this one's row is the anchor: the panel opens above the whole row, not
+    // above the tile that happens to be under the finger.
+    //
+    // The index is a position in `series`, not in `drawn`: a windowed shelf draws a slice, and a
+    // slice-relative index would anchor the panel to whichever row happened to be at the top of
+    // the window instead of the row the tapped tile is in.
+    expansionAnchor = series[rowStart(index, columns)]?.id ?? item.id;
     if (selection !== null) {
       onselect?.(item);
       return;
@@ -246,18 +362,32 @@
   <p class="empty">{empty}</p>
 {:else}
   <div class="browse-rail">
-  <div class="set {mode}" class:overtitle={overlaid} class:compact={view === "compact"} class:row-line={mode === "row" && row === "line"} class:row-preview={mode === "row" && row === "preview"} class:row-table={mode === "row" && row === "table"} style:--cover="{cover}px">
+  <div class="set {mode}" bind:this={host} class:overtitle={overlaid} class:compact={view === "compact"} class:row-line={mode === "row" && row === "line"} class:row-preview={mode === "row" && row === "preview"} class:row-table={mode === "row" && row === "table"} style:--cover="{cover}px">
+    <!-- The rows above the window are missing, not gone: this spacer holds their height so the
+         scrollbar, the scroll offset and a drag are the same as a shelf that drew every tile. -->
+    {#if win.padTop > 0}
+      <div class="pad" style:height={`${win.padTop}px`} aria-hidden="true"></div>
+    {/if}
     <!-- Keyed by layout as well as id: `contain-intrinsic-size: auto` remembers the height a tile
          last measured, so a row's 68 px would be reused as the grid's reserved height and the
          covers would be cut off. A new key gives the new layout fresh elements to measure. -->
-    {#each drawn as item (`${mode}:${item.id}`)}
+    {#each drawn as item, index (`${mode}:${item.id}`)}
       {#if expanded !== null && expandAfter !== null && item.id === (expansionAnchor ?? expandAfter)}
         <div class="expand" data-expanded="true">
           {@render expanded()}
         </div>
       {/if}
       {#if expanded === null || expandAfter !== item.id}
-      <button
+      <!--
+        The tile is a plain container, not a button.
+
+        It used to be the `<button>` itself, with the Resume control nested inside it — a button
+        inside a button, which is not a control that exists: browsers pick one of the two, screen
+        readers announce one, and a keyboard cannot reach the other. The card is a plain container;
+        every interaction — click, long press, drag, context menu — belongs to `.open`, the invisible
+        button that covers it, and Resume is that button's sibling.
+      -->
+      <div
         class="tile"
         class:unread={mode === "row" && badgeFor(item.id) > 0}
         class:current={current === item.id}
@@ -265,18 +395,6 @@
         class:held={heldId === item.id}
         class:dragging={dragId === item.id}
         data-series-id={item.id}
-        aria-pressed={selection === null ? undefined : selection.has(item.id)}
-        onclick={(event) => pick(item, event)}
-        onpointerdown={(event) => down(event, item)}
-        onpointermove={moved}
-        onpointerup={(event) => up(event, item)}
-        onpointercancel={(event) => up(event, item)}
-        onpointerleave={(event) => up(event, item)}
-        oncontextmenu={(event) => {
-          if (selection !== null) return;
-          event.preventDefault();
-          onlongpress?.(item);
-        }}
       >
           <div class="art">
             <Cover series={item} />
@@ -290,6 +408,9 @@
               </span>
             {/if}
             {#if resume.has(item.id)}
+              <!-- Resume is the card's second control. It lives inside the artwork so it stays
+                   where a thumb reaches (bottom-right of the cover), and it is a sibling of the
+                   card's invisible open button rather than a child of it. -->
               <button
                 class="resume"
                 aria-label={`Resume ${item.title}`}
@@ -362,9 +483,36 @@
           <span class="cell unread">{badgeFor(item.id) > 0 ? badgeFor(item.id) : ""}</span>
           <span class="cell size">{knownSize(sizes.get(item.id)) ?? ""}</span>
         {/if}
-      </button>
+        <!--
+          The card's one keyboard control, drawn as nothing.
+
+          It covers the tile so the whole card opens on a click or Enter, exactly as the button did
+          when the tile was itself a button — but it is a child of the container rather than the
+          container, so Resume can sit beside it instead of inside it. The ring is drawn on the
+          card's own edge, since the button's box is the whole card.
+        -->
+        <button
+          class="open"
+          aria-label={selection === null ? item.title : `${selection.has(item.id) ? "Deselect" : "Select"} ${item.title}`}
+          aria-pressed={selection === null ? undefined : selection.has(item.id)}
+          onclick={(event) => pick(item, win.start + index, event)}
+          onpointerdown={(event) => down(event, item)}
+          onpointermove={moved}
+          onpointerup={(event) => up(event, item)}
+          onpointercancel={(event) => up(event, item)}
+          onpointerleave={(event) => up(event, item)}
+          oncontextmenu={(event) => {
+            if (selection !== null) return;
+            event.preventDefault();
+            onlongpress?.(item);
+          }}
+        ></button>
+      </div>
       {/if}
     {/each}
+    {#if win.padBottom > 0}
+      <div class="pad" style:height={`${win.padBottom}px`} aria-hidden="true"></div>
+    {/if}
   </div>
   </div>
 {/if}
@@ -429,15 +577,25 @@
 
   /* The opened card spans the grid it opened in. In a list it is one more row, which is already
      full width. */
+  /* A spacer standing in for the rows outside the window: it spans the whole grid so it costs one
+     row's box and not one column's, and it holds no content to focus or read. */
+  .pad {
+    grid-column: 1 / -1;
+    min-height: 0;
+    pointer-events: none;
+  }
+
   .expand {
     grid-column: 1 / -1;
     min-width: 0;
   }
 
   .tile {
-    all: unset;
-    cursor: pointer;
+    /* A container, not a button: the keyboard control is `.open` inside it. */
     display: grid;
+    cursor: pointer;
+    /* The invisible control and the Resume button are positioned against the card. */
+    position: relative;
     /* The title starts right under the artwork, not a gap below it. */
     gap: 3px;
     min-width: 0;
@@ -610,6 +768,26 @@
   .art {
     position: relative;
   }
+  /* The card's whole surface, as one keyboard control. Nothing is painted: the artwork and the
+     title under it are the card, and a button drawn on top of them would be a second card. */
+  .open {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    cursor: pointer;
+    border-radius: inherit;
+    color: transparent;
+    font-size: 0;
+  }
+  /* The ring lands on the card's edge, where the tile's own state rings are drawn. */
+  .open:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+  }
   /* Rings are drawn *inside* what they mark. An outline outside the artwork lands on the tile beside
      it in a tight grid — two selected neighbours read as one bordered box, and a row's ring is cut by
      its own hairline — so every state ring uses a negative offset and the row draws its ring on the
@@ -684,6 +862,8 @@
   /* The resume button sits where a thumb reaches on a phone, not in the corner a badge owns. */
   .resume {
     position: absolute;
+    /* Above `.open`, which covers the whole card and would otherwise swallow this press. */
+    z-index: 2;
     right: var(--s1);
     bottom: var(--s1);
     width: 34px;

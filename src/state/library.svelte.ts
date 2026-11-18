@@ -33,6 +33,7 @@ import { settings } from "./settings.svelte";
 import { incognito } from "./incognito.svelte";
 import { sourceMarks } from "./source-marks.svelte";
 import { shouldKeepTitle } from "../lib/offline/policy";
+import { normalizePages, usableStoredPages } from "../lib/page-list";
 import { requestKeep } from "../lib/offline/sink";
 import { installTrackerSync } from "../lib/trackers/sync";
 import { planReadState, remoteReadCount } from "../lib/read-state";
@@ -928,11 +929,45 @@ class LibraryState {
   }
 
   async pages(chapterId: string): Promise<Page[]> {
-    if (this.profile === null) return [];
+    return (await this.pageList(chapterId)).pages;
+  }
+
+  /**
+   * A chapter's pages, and where the list came from.
+   *
+   * The provider is asked first; the stored list is the answer when the provider has none to give.
+   * Two rules make that a fallback rather than a cache:
+   *
+   * - A source that fails does not empty the reader. The list was written the last time this
+   *   chapter opened, and a train tunnel does not make it wrong. Only a chapter with no stored list
+   *   reports the failure, because that reader has nothing to read.
+   * - An empty answer never replaces a full one. A source that is rate-limited, logged out, or in
+   *   the middle of a bad deploy answers `[]`, and writing that down would destroy the good list the
+   *   device already had — the next offline open would then show a chapter of zero pages.
+   *
+   * `source` is `"stored"` when the list came from the database, so the reader can say so instead
+   * of silently showing a list the source did not just confirm.
+   */
+  async pageList(chapterId: string): Promise<{ pages: Page[]; source: "source" | "stored" }> {
+    if (this.profile === null) return { pages: [], source: "source" };
+    const store = this.profile.store;
     const provider = providerFor(this.profile.providers, chapterId);
-    const pages = await provider.pages(chapterId);
-    await this.profile.store.putPages(chapterId, pages);
-    return pages;
+    let failure: unknown = null;
+    try {
+      const fetched = await provider.pages(chapterId);
+      const pages = normalizePages(fetched);
+      // A provider that answered with pages is the newest truth, and it is written down.
+      if (pages.length > 0) {
+        await store.putPages(chapterId, pages);
+        return { pages, source: "source" };
+      }
+    } catch (error) {
+      failure = error;
+    }
+    const stored = usableStoredPages(await store.getPages(chapterId));
+    if (stored.length > 0) return { pages: stored, source: "stored" };
+    if (failure !== null) throw failure;
+    return { pages: [], source: "source" };
   }
 
   /**

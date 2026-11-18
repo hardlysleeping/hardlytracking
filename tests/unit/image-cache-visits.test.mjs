@@ -10,30 +10,16 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { ImageCache, STORED_IMAGE_SCHEME } from "../../src/lib/cache/images.ts";
 import { planEviction, CACHE_POLICY_DEFAULT } from "../../src/lib/cache/policy.ts";
+import { memoryDatabase } from "../../src/lib/db/open.ts";
 
-/** A database that is a Map, so a test can see exactly which rows were written. */
+/** The app's own in-memory engine, so a test sees exactly which rows were written, per store. */
 function memoryDb() {
-  const rows = new Map();
-  return {
-    rows,
-    async all(store) {
-      assert.equal(store, "imageCache");
-      return [...rows.values()];
-    },
-    async get(store, key) {
-      return rows.get(key);
-    },
-    async put(store, value) {
-      rows.set(value.key, value);
-    },
-    async remove(store, key) {
-      rows.delete(key);
-      return true;
-    },
-  };
+  // The real engine, not a single map: a picture is a row in `imageCache` and its bytes in
+  // `imageCacheData`, and a double that keys both by `key` alone silently overwrites one with the
+  // other (which is exactly the bug this shape exists to avoid).
+  return memoryDatabase();
 }
 
-/** A real Blob that reports a size the test chooses, so eviction maths is not a real 8 MB write. */
 function fakeBlob(bytes, type = "image/png") {
   const blob = new Blob([new Uint8Array(1)], { type });
   Object.defineProperty(blob, "size", { value: bytes });
@@ -93,7 +79,7 @@ test("a picture the app drew itself is never evicted like a downloaded copy", as
     "https://source.example/a.jpg",
   ]);
   await cache.prune();
-  assert.deepEqual([...db.rows.keys()], [`${STORED_IMAGE_SCHEME}book-1#cover`]);
+  assert.deepEqual((await db.all("imageCache")).map((row) => row.key), [`${STORED_IMAGE_SCHEME}book-1#cover`]);
 });
 
 test("a login-protected cover is still drawn with caching switched off, and nothing is stored", async () => {
@@ -108,7 +94,7 @@ test("a login-protected cover is still drawn with caching switched off, and noth
     assert.match(url, /^blob:test\//, "the tile must get a drawable URL");
     assert.equal(calls.length, 1);
     assert.equal(calls[0].headers.Authorization, "Basic abc", "the login must travel with the fetch");
-    assert.equal(db.rows.size, 0, "caching off means no copy on disk");
+    assert.equal((await db.all("imageCache")).length, 0, "caching off means no copy on disk");
 
     // Same session, same picture: the second tile must not fetch again.
     const again = await cache.resolve("https://komga.example/api/v1/books/1/thumbnail", {
@@ -138,7 +124,7 @@ test("with caching on, a seen cover comes back from disk without asking the netw
     const first = await cache.resolve(url);
     assert.match(first, /^blob:test\//);
     assert.equal(calls.length, 1);
-    assert.equal(db.rows.size, 1, "the copy is kept");
+    assert.equal((await db.all("imageCache")).length, 1, "the copy is kept");
 
     // A fresh cache object is a fresh process: the bytes must still be there.
     const reopened = new ImageCache();
@@ -158,5 +144,5 @@ test("the saved ceiling is what prunes, not the default", async () => {
     for (let i = 0; i < 12; i += 1) await cache.resolve(`https://source.example/${i}.jpg`);
   });
   await cache.prune();
-  assert.equal(db.rows.size, 12);
+  assert.equal((await db.all("imageCache")).length, 12);
 });

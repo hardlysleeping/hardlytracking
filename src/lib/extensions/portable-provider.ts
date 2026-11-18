@@ -106,15 +106,19 @@ function chapterOf(kind: ProviderKind, packageId: string, seriesId: string, raw:
   return out;
 }
 
-function pageOf(packageId: string, raw: unknown): Page {
+/**
+ * One page of a chapter, numbered by where the package put it.
+ *
+ * The package's own `index` is ignored on purpose: a third-party package is free to number from 1,
+ * to skip, or to repeat a number, and this client addresses pages by position (the reader's notes,
+ * `data-page`, progress and resume all do). `index` is the position in the list the package answered.
+ */
+function pageOf(packageId: string, raw: unknown, index: number): Page {
   if (!isRecord(raw)) throw new Error(`${packageId} answered a page that is not an object`);
   if (typeof raw.url !== "string" || raw.url === "") {
     throw new Error(`${packageId} answered a page without a url`);
   }
-  const out: Page = {
-    index: typeof raw.index === "number" && Number.isFinite(raw.index) ? raw.index : 0,
-    url: raw.url,
-  };
+  const out: Page = { index, url: raw.url };
   if (isRecord(raw.headers)) out.headers = raw.headers as Record<string, string>;
   return out;
 }
@@ -185,7 +189,7 @@ export function createPortableProvider(options: PortableProviderOptions): Source
     pages: async (chapterId) => {
       const raw = await runtime.call<unknown[]>("pages", [native(chapterId)]);
       if (!Array.isArray(raw)) throw new Error(`${packageId} answered a page list that is not an array`);
-      return raw.map((item) => pageOf(packageId, item));
+      return raw.map((item, index) => pageOf(packageId, item, index));
     },
 
     // `page` is the bookmark the server keeps; a package that has none ignores it.

@@ -9,7 +9,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "check": "tsc --noEmit",
-    "test": "node --experimental-strip-types --import ./tests/unit/register-ts.mjs --test tests/unit/*.test.mjs",
+    "version:check": "node scripts/check-versions.mjs",
+    "test": "node --experimental-strip-types --experimental-test-module-mocks --import ./tests/unit/register-ts.mjs --test tests/unit/*.test.mjs",
     "smoke": "node --experimental-strip-types --import ./tests/unit/register-ts.mjs scripts/smoke.mjs",
     "serve": "node server/proxy.mjs",
     "matrix:check": "node --experimental-strip-types --import ./tests/unit/register-ts.mjs scripts/matrix-check.mjs",
@@ -19,7 +20,9 @@
     "runtime:prepare": "node scripts/prepare-runtime.mjs",
     "desktop": "node scripts/prepare-runtime.mjs && tauri build",
     "perf": "node --experimental-strip-types --import ./tests/unit/register-ts.mjs scripts/library-perf.mjs",
-    "plugin:example": "node scripts/build-example-plugin.mjs"
+    "plugin:example": "node scripts/build-example-plugin.mjs",
+    "perf:sqlite": "node --experimental-strip-types --import ./tests/unit/register-ts.mjs scripts/library-perf-sqlite.mjs",
+    "accept": "node scripts/acceptance.mjs"
   },
   "devDependencies": {
     "@capacitor/cli": "^7.6.10",

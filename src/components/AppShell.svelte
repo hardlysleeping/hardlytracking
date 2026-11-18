@@ -13,6 +13,8 @@
   import { go } from "../lib/nav";
   import { navHistory } from "../lib/nav-history.svelte";
   import { rememberScroll, scrollFor } from "../lib/scroll-memory";
+  import { isWebKitShell } from "../lib/shell-scroll";
+  import { detectPlatform } from "../lib/webview";
   import { settings } from "../state/settings.svelte";
   import BottomBar from "./BottomBar.svelte";
 
@@ -108,6 +110,9 @@
   $effect(() => {
     const el = frame;
     if (el === null) return;
+    // A browser tab, a Linux webview and a Windows webview do not rubber-band a short screen: the
+    // frame is a plain `overflow-y: auto` container there, owned by CSS, with no measurement pass.
+    if (!isWebKitShell(detectPlatform(), navigator.userAgent)) return;
     let queued = false;
     let watched: Element | null = null;
     const measure = () => {
@@ -117,7 +122,9 @@
       if (!overflows && el.scrollTop !== 0) el.scrollTop = 0;
       // A screen's height is usually its single content element's height (a grid, a form, a
       // message), so that element is watched too — otherwise a view that grows without resizing
-      // the frame would keep a stale answer.
+      // the frame would keep a stale answer. A ResizeObserver already sees that growth; a
+      // `childList/subtree` MutationObserver on the whole frame reloaded this answer for every
+      // node any screen ever added, which is the cost this replaces.
       const inner = el.firstElementChild;
       if (watched !== inner) {
         if (watched !== null) observer.unobserve(watched);
@@ -132,15 +139,13 @@
     };
     const observer = new ResizeObserver(schedule);
     observer.observe(el);
-    const mutations = new MutationObserver(schedule);
-    mutations.observe(el, { childList: true, subtree: true, characterData: true });
     // Covers and page images settle after the frame is laid out.
     el.addEventListener("load", schedule, true);
     schedule();
     return () => {
       observer.disconnect();
-      mutations.disconnect();
       el.removeEventListener("load", schedule, true);
+      el.style.removeProperty("overflow-y");
     };
   });
 

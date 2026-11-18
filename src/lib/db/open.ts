@@ -26,6 +26,12 @@ export const STORES = [
   "repos",
   "downloads",
   "downloadPages",
+  /** The bytes behind a `downloadPages` row, keyed by the same id. */
+  "downloadPageData",
+  /** The bytes behind an `imageCache` row. Kept apart so a touch is a metadata write. */
+  "imageCacheData",
+  /** The bytes of a `books` row, so listing a shelf never reads a comic file. */
+  "bookFiles",
   "viewState",
   "syncMeta",
   "tombstones",
@@ -75,6 +81,9 @@ const KEY_PATH: Record<StoreName, string> = {
   pluginStorage: "key",
   downloads: "chapterId",
   downloadPages: "id",
+  downloadPageData: "id",
+  imageCacheData: "key",
+  bookFiles: "seriesId",
   viewState: "key",
   syncMeta: "key",
   tombstones: "key",
@@ -94,11 +103,21 @@ export interface Database {
   get<T>(store: StoreName, key: string): Promise<T | undefined>;
   put(store: StoreName, value: Record<string, unknown>): Promise<void>;
   all<T>(store: StoreName): Promise<T[]>;
+  /**
+   * Every row whose key starts with `prefix`, without reading the rest of the store.
+   *
+   * A downloaded chapter's pages are keyed `${chapterId}#${index}`, so "this chapter's pages" is a
+   * prefix question. It used to be answered by reading every page row on the device and filtering in
+   * JavaScript — with the image blobs attached, because they lived in the same row. One chapter's
+   * pages must cost one chapter, not the whole download folder.
+   */
+  prefix<T>(store: StoreName, prefix: string): Promise<T[]>;
   remove(store: StoreName, key: string): Promise<void>;
 }
 
 const DB_NAME = "hardlytracking";
-const DB_VERSION = 16;
+// 17: the bytes stores (`bookFiles`, `downloadPageData`, `imageCacheData`) — see `STORES`.
+const DB_VERSION = 17;
 
 function wrap<T>(request: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -160,6 +179,13 @@ function openIndexedDb(): Promise<Database> {
       get: <T,>(store: StoreName, key: string) => wrap<T | undefined>(tx(store, "readonly").get(key) as IDBRequest<T | undefined>),
       put: (store: StoreName, value: Record<string, unknown>) => wrap(tx(store, "readwrite").put(value)).then(() => undefined),
       all: <T,>(store: StoreName) => wrap<T[]>(tx(store, "readonly").getAll() as IDBRequest<T[]>),
+      // A key range, not a scan: `getAll` on a bounded range reads only the rows in it.
+      prefix: <T,>(store: StoreName, prefix: string) =>
+        wrap<T[]>(
+          tx(store, "readonly").getAll(
+            IDBKeyRange.bound(prefix, `${prefix}\uffff`),
+          ) as IDBRequest<T[]>,
+        ),
       remove: (store: StoreName, key: string) => wrap(tx(store, "readwrite").delete(key)).then(() => undefined),
     };
   });
@@ -194,6 +220,9 @@ export function memoryDatabase(): Database {
     },
     async all<T,>(store: StoreName) {
       return [...table(store).values()] as T[];
+    },
+    async prefix<T,>(store: StoreName, prefix: string) {
+      return [...table(store).entries()].filter(([key]) => key.startsWith(prefix)).map(([, value]) => value) as T[];
     },
     async remove(store: StoreName, key: string) {
       table(store).delete(key);

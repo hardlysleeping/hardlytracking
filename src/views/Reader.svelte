@@ -23,7 +23,7 @@
   import { tick, untrack } from "svelte";
   import { go, pathTo } from "../lib/nav";
   import { leaveReader, readerOriginLabel } from "../lib/reader-origin";
-  import { pageSrc } from "../lib/pages";
+  import { pageSrc, retryPageSrc } from "../lib/pages";
   import { BOOK_DEADLINE_MS, RUNTIME_DEADLINE_MS, withDeadline } from "../lib/deadline";
   import { INACTIVITY_TIMEOUT_MS, sessionEndAt, shouldEndForBackground, type SessionClose } from "../lib/history";
   import Sheet from "../components/Sheet.svelte";
@@ -32,6 +32,7 @@
   import { SCALE_DEFAULT, SCALE_MAX_PERCENT, SCALE_MIN_PERCENT, scaleFor, scaleOf, scalePercent, withScale } from "../lib/reader-scale";
   import { advancePx, AUTOSCROLL_CURVES, AUTOSCROLL_SPEEDS, progressOf } from "../lib/autoscroll";
   import { ReaderQueue, ReaderTap, readerOrder, type ReaderJob } from "../lib/reader";
+  import { currentPage, remember } from "../lib/reader-scroll";
 
   interface Props {
     seriesId: string;
@@ -83,6 +84,10 @@
   let pageAspect = $state(0);
   let aspects = $state<Record<number, number>>({});
   let notes = $state<Record<number, string>>({});
+  /** Pages whose bytes are being fetched right now, so a blank box can say it is working. */
+  let loading = $state<Record<number, boolean>>({});
+  /** How many times a page has been retried. A retried page is remounted, so its job runs again. */
+  let attempts = $state<Record<number, number>>({});
   let generation = 0;
 
   function schedulePages(): void {
@@ -105,13 +110,21 @@
     if (scaleTimer !== null) { clearTimeout(scaleTimer); scaleTimer = null; }
   });
 
-  function lazyPage(node: HTMLImageElement, page: Page): { destroy: () => void } {
+  function lazyPage(node: HTMLImageElement, params: { page: Page; attempt: number }): { destroy: () => void } {
+    const { page, attempt } = params;
     let live = true;
     const job: ReaderJob = { async run(signal) {
       try {
+        loading[page.index] = true;
         // Producers may not accept AbortSignal. Cancel our wait/activity immediately and discard
         // late results; native work may finish internally but cannot own the next chapter's UI.
-        const src = await withDeadline(pageSrc(page, signal), 45_000, `page ${page.index + 1}`, signal);
+        //
+        // The first attempt points the <img> at the page's own URL. A retry asks for the bytes
+        // through the native transport instead, because the request that just failed is the one an
+        // <img> can make, and making it again fails the same way.
+        const src = attempt > 0
+          ? await withDeadline(retryPageSrc(page, signal), 45_000, `page ${page.index + 1}`, signal)
+          : await withDeadline(pageSrc(page, signal), 45_000, `page ${page.index + 1}`, signal);
         if (!live || signal.aborted) return;
         await new Promise<void>((resolve, reject) => {
           const cleanup = () => {
@@ -157,16 +170,34 @@
         if (!live || signal.aborted) return;
         node.removeAttribute('src');
         notes[page.index] = error instanceof Error ? error.message : String(error);
+      } finally {
+        // The box stops saying "loading" whatever happened; the error card is what speaks next.
+        if (live) delete loading[page.index];
       }
     }};
     jobs.set(page.index, job);
     void tick().then(schedulePages);
     return { destroy() {
       live = false;
+      delete loading[page.index];
       if (jobs.get(page.index) === job) jobs.delete(page.index);
       void tick().then(schedulePages);
       // pages.ts / imageCache own these URLs and their bounded caches, not the DOM action.
     }};
+  }
+
+  /**
+   * Ask for one page again, once.
+   *
+   * The box is remounted (its key carries the attempt number), which runs the page's job from the
+   * start — the same path that was interrupted, not a second, parallel one. Only one retry is
+   * offered per page: a source that failed twice is not going to answer, and a button that keeps
+   * trying is a button that hides that.
+   */
+  function retryPage(page: Page): void {
+    delete notes[page.index];
+    delete loading[page.index];
+    attempts[page.index] = (attempts[page.index] ?? 0) + 1;
   }
 
   const tap = new ReaderTap();
@@ -191,12 +222,63 @@
   let fromDownload = $state(false);
   /** Set when the chapter is on this device but not all of it: pages that arrived, and the rest. */
   let partialNotice = $state<string | null>(null);
+  /** Set when the page list came from the database because the source did not answer. */
+  let storedNotice = $state<string | null>(null);
 
   let chrome = $state(true);
   let settingsOpen = $state(false);
   let hideTimer: ReturnType<typeof setTimeout> | null = null;
 
   let scroller = $state<HTMLDivElement | null>(null);
+
+  /**
+   * The pages currently intersecting the scroller, as the intersection observer last reported them.
+   *
+   * This is what makes the scroll handler cheap: `onScroll` measures these and nothing else, so a
+   * 214-page chapter no longer costs 214 laid-out boxes per frame.
+   */
+  const seen = new Set<number>();
+  /** One measurement pass per animation frame, however many scroll events arrive. */
+  let scrollFrame: number | null = null;
+  let pageObserver: IntersectionObserver | null = null;
+
+  $effect(() => {
+    const host = scroller;
+    // A webview without an observer (or a test) still reads: the handler falls back to the current
+    // page, and `scrollToPage` is what actually moves the scroller.
+    if (host === null || typeof IntersectionObserver === "undefined") return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        remember(seen, entries.map((entry) => ({
+          index: Number((entry.target as HTMLElement).dataset.page),
+          visible: entry.isIntersecting,
+        })));
+        if (entries.length > 0) void tick().then(() => measureCurrent());
+      },
+      { root: host, threshold: 0 },
+    );
+    pageObserver = observer;
+    // Boxes mounted before the scroller existed (the first paint) are picked up on the next tick.
+    void tick().then(() => {
+      for (const element of host.querySelectorAll<HTMLElement>("[data-page]")) observer.observe(element);
+    });
+    return () => {
+      observer.disconnect();
+      if (pageObserver === observer) pageObserver = null;
+      seen.clear();
+    };
+  });
+
+  /** Register one page box with the shared observer, and drop it when its box goes away. */
+  function trackPage(node: HTMLElement): { destroy: () => void } {
+    pageObserver?.observe(node);
+    return {
+      destroy() {
+        pageObserver?.unobserve(node);
+        seen.delete(Number(node.dataset.page));
+      },
+    };
+  }
 
   /**
    * Autoscroll: off until started, and it moves the scroller itself.
@@ -608,9 +690,13 @@
     draftScale = null;
     scaleOwner = seriesId;
     partialNotice = null;
+    storedNotice = null;
     // A chapter that fails to load must not leave the last one's pages on screen: "1 / 124" beside
     // another book's error reads as if this chapter were 124 pages long.
     pages = [];
+    // The observer's set belongs to the chapter being left; keeping it would measure a page box
+    // that no longer exists (and the next chapter's page 1 would not be in it).
+    seen.clear();
 
     chapterName = "";
     chapters = [];
@@ -630,12 +716,17 @@
       // 469 MB scan as a source that had gone quiet.
       const pagesDeadline = id.startsWith("archive:") ? BOOK_DEADLINE_MS : RUNTIME_DEADLINE_MS;
       const nextPages = local === null
-        ? await guard(withDeadline(library.pages(id), pagesDeadline, 'the page list', signal)) : null;
+        ? await guard(withDeadline(library.pageList(id), pagesDeadline, 'the page list', signal)) : null;
       const progress = await guard(withDeadline(library.profile.store.getProgress(id), RUNTIME_DEADLINE_MS, 'the library database', signal));
-      index = Math.min(progress?.page ?? 0, Math.max((local?.urls.length ?? nextPages?.length ?? 0) - 1, 0));
+      index = Math.min(progress?.page ?? 0, Math.max((local?.urls.length ?? nextPages?.pages.length ?? 0) - 1, 0));
       fromDownload = local !== null;
       if (local !== null) openLocal(local, signal);
-      else pages = nextPages ?? [];
+      else pages = nextPages?.pages ?? [];
+      // The list was not confirmed by its source this time: say so, rather than present a stored
+      // list as if the source had just sent it. It still reads — that is the point of keeping it.
+      storedNotice = nextPages?.source === "stored"
+        ? "Using the page list saved on this device. The source did not answer."
+        : null;
       // Only the resumed/current page may start first. Metadata/history are not a paint gate.
       busy = false;
       await tick();
@@ -709,21 +800,40 @@
   function onScroll(): void {
     const host = scroller;
     if (host === null || pages.length === 0) return;
-    const position = host.scrollTop;
+    // One measurement pass per frame, not per scroll event: a trackpad reports dozens a second and
+    // every one of them used to force a layout for every page in the chapter.
+    if (scrollFrame !== null) return;
+    scrollFrame = requestAnimationFrame(() => {
+      scrollFrame = null;
+      measureCurrent();
+    });
+  }
+
+  /**
+   * The page being read, from the boxes the observer says are on screen.
+   *
+   * `seen` is maintained by the `[data-page]` boxes as they enter and leave the scroller, so this
+   * asks the browser about the two or three pages in front of the reader rather than the whole
+   * chapter. When the set is empty — a fling that outran the observer, or the first frame after a
+   * chapter change — the page stays where it is instead of snapping to page one.
+   */
+  function measureCurrent(): void {
+    const host = scroller;
+    if (host === null || pages.length === 0) return;
     const viewport = host.getBoundingClientRect();
-    // The page whose top/left edge is nearest the viewport's is the one being read.
-    let best = 0;
-    let bestDistance = Number.POSITIVE_INFINITY;
-    for (const element of host.querySelectorAll<HTMLElement>("[data-page]")) {
-      const bounds = element.getBoundingClientRect();
-      const distance = horizontal
-        ? Math.abs(rtl ? bounds.right - viewport.right : bounds.left - viewport.left)
-        : Math.abs(element.offsetTop - position);
-      if (distance < bestDistance) {
-        bestDistance = distance;
-        best = Number(element.dataset.page);
+    const position = host.scrollTop;
+    const candidates: Array<{ index: number; distance: number }> = [];
+    for (const pageIndex of seen) {
+      const element = host.querySelector<HTMLElement>(`[data-page="${pageIndex}"]`);
+      if (element === null) continue;
+      if (horizontal) {
+        const bounds = element.getBoundingClientRect();
+        candidates.push({ index: pageIndex, distance: Math.abs(rtl ? bounds.right - viewport.right : bounds.left - viewport.left) });
+      } else {
+        candidates.push({ index: pageIndex, distance: Math.abs(element.offsetTop - position) });
       }
     }
+    const best = currentPage(candidates, index);
     if (best !== index) {
       index = best;
       void saveSoon();
@@ -864,6 +974,7 @@
     </div>
   {/if}
   {#if partialNotice}<p class="banner note">{partialNotice}</p>{/if}
+  {#if storedNotice}<p class="banner note" data-pages="stored">{storedNotice}</p>{/if}
   {#if busy}<p class="loading">Fetching pages…</p>{/if}
   <!-- A chapter that loaded and produced nothing used to be a blank screen with "—" in the footer:
        no error, no pages, nothing to press. It is the shape of a page list that came back empty —
@@ -909,7 +1020,9 @@
         <div
           class="page"
           data-page={page.index}
+          use:trackPage
           data-note={notes[page.index]}
+          data-loading={loading[page.index] === true ? "true" : undefined}
           style:--aspect={aspects[page.index] ?? (pageAspect || .7)}
         >
           {#if Math.abs(page.index - index) > pageWindow}
@@ -918,13 +1031,33 @@
                  "on screen" for every lazy image in it. -->
           {:else if page.url !== '' || page.open !== undefined}
             <img
-              use:lazyPage={page}
+              use:lazyPage={{ page, attempt: attempts[page.index] ?? 0 }}
               alt={`Page ${page.index + 1} of ${pages.length}`}
               decoding="async"
               draggable="false"
             />
           {:else}
             <div class="missing" role="note">Page {page.index + 1} is not on this device</div>
+          {/if}
+          <!--
+            A page that failed is a card with a control, not a sentence painted by CSS.
+
+            The note used to be a `::after` pseudo-element: it could not be focused, could not be
+            pressed, and could not be read by anything looking for a button — the only retry was
+            the whole chapter's. The card keeps the box (so the reader's place does not move) and
+            says what happened next to the one action that can help.
+          -->
+          {#if notes[page.index]}
+            <div class="pageerror" role="alert" data-page-error={page.index}>
+              <p>{notes[page.index]}</p>
+              {#if (attempts[page.index] ?? 0) < 1}
+                <button class="btn" onclick={() => retryPage(page)}>Retry page {page.index + 1}</button>
+              {:else}
+                <p class="hint">This page did not load on a second attempt.</p>
+              {/if}
+            </div>
+          {:else if loading[page.index] === true}
+            <p class="pageloading" aria-live="polite">Loading page {page.index + 1}…</p>
           {/if}
         </div>
       {/snippet}
@@ -934,11 +1067,11 @@
              page shape, not a pane you resize. -->
         {#each pairs as pair (pair[0].index)}
           <div class="pair">
-            {#each pair as page (page.index)}{@render pageBox(page)}{/each}
+            {#each pair as page (`${page.index}:${attempts[page.index] ?? 0}`)}{@render pageBox(page)}{/each}
           </div>
         {/each}
       {:else}
-        {#each pages as page (page.index)}{@render pageBox(page)}{/each}
+        {#each pages as page (`${page.index}:${attempts[page.index] ?? 0}`)}{@render pageBox(page)}{/each}
       {/if}
     </div>
 
@@ -1475,18 +1608,36 @@
     border-color: var(--line);
   }
 
-  /* A page that failed to be produced keeps its box and explains itself. */
-  .page[data-note]::after {
-    content: attr(data-note);
+  /* A page that failed to be produced keeps its box and explains itself, with a control. */
+  .pageerror {
+    position: absolute;
+    inset: auto 0 0 0;
+    top: 50%;
+    transform: translateY(-50%);
+    display: grid;
+    justify-items: center;
+    gap: var(--s2);
+    max-width: 100%;
+    margin: 0 auto;
+    padding: var(--s3);
+    color: var(--text-2);
+    font-size: var(--t-sm);
+    text-align: center;
+  }
+  .pageerror p {
+    margin: 0;
+    max-width: 32ch;
+  }
+
+  /* A page box that is still fetching says so, quietly, in the middle of the space it reserves. */
+  .pageloading {
     position: absolute;
     top: 50%;
     left: 50%;
     transform: translate(-50%, -50%);
-    max-width: 32ch;
-    padding: var(--s3);
+    margin: 0;
     color: var(--text-3);
     font-size: var(--t-sm);
-    text-align: center;
   }
 
   .missing {

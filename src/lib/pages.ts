@@ -20,6 +20,7 @@ export function proxiedImage(url: string): string {
  * downloader cannot disagree about it.
  */
 import type { Page } from "../api/source";
+import { transport } from "../api/transport";
 import { imageCache } from "./cache/images";
 import { DeadlineError, withDeadline } from "./deadline";
 
@@ -117,6 +118,53 @@ async function localPageSrc(page: Page, signal?: AbortSignal): Promise<string> {
 export function forgetLocalPages(): void {
   for (const url of localPages.values()) URL.revokeObjectURL(url);
   localPages.clear();
+}
+
+/**
+ * A second attempt at one page, after an `<img>` already failed on it.
+ *
+ * Repeating the same `<img src>` repeats the same request, so it fails the same way: no `Referer`
+ * that the host insists on, a webview origin the host refuses, an at-home URL whose token has
+ * expired, or a CORS-less fetch the browser will not even report. The bytes are therefore asked for
+ * here through the native transport — the same Rust-side client the sources use, which is not
+ * subject to the webview's origin rules — with the page's own headers, and handed back as a blob
+ * URL. One attempt: a page that fails twice is a page that is not going to load, and a control that
+ * keeps retrying hides that.
+ */
+export async function retryPageSrc(page: Page, signal?: AbortSignal): Promise<string> {
+  signal?.throwIfAborted();
+  if (page.open !== undefined) return localPageSrc(page, signal);
+  const label = `page ${page.index + 1}`;
+  const response = await withDeadline(
+    transport(page.url, { headers: page.headers, signal }),
+    LOCAL_PAGE_DEADLINE_MS,
+    label,
+    signal,
+  );
+  if (!response.ok) throw new Error(`${label} could not be fetched (${response.status})`);
+  const blob = await response.blob();
+  if (blob.size === 0) throw new Error(`${label} came back empty`);
+  signal?.throwIfAborted();
+  const url = URL.createObjectURL(blob);
+  // Bounded like the locally produced pages: a shelf of retries must not pin every scan in memory.
+  retried.set(page.url, url);
+  while (retried.size > LOCAL_PAGE_LIMIT) {
+    const oldest = retried.keys().next();
+    if (oldest.done === true) break;
+    const stale = retried.get(oldest.value);
+    retried.delete(oldest.value);
+    if (stale !== undefined) URL.revokeObjectURL(stale);
+  }
+  return url;
+}
+
+/** Blob URLs produced by a retry, keyed by the page URL that needed one. */
+const retried = new Map<string, string>();
+
+/** Forget every retried page, and any blob URLs they are still holding. */
+export function forgetRetriedPages(): void {
+  for (const url of retried.values()) URL.revokeObjectURL(url);
+  retried.clear();
 }
 
 export function imageSrc(page: Page): string {

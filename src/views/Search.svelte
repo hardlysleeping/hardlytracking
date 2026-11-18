@@ -140,7 +140,7 @@
   let bookSizes = $state<Map<string, number>>(new Map());
   $effect(() => {
     const store = library.profile?.store;
-    if (store) void store.listBooks().then((books) => { bookSizes = new Map(books.map((book) => [book.seriesId, book.bytes])); });
+    if (store) void store.listBookMetadata().then((books) => { bookSizes = new Map(books.map((book) => [book.seriesId, book.bytes])); });
   });
   const fileSizes = $derived.by(() => {
     const sizes = new Map<string, number>();

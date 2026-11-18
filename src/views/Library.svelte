@@ -46,7 +46,17 @@
   import { visibleCategories } from "../lib/categories";
   import { contextOf, sourceKeyOf, visibleRows } from "../lib/marks";
   import { sourceMarks } from "../state/source-marks.svelte";
-  import { MIN_DETAIL_WIDTH, MIN_READER_WIDTH, MIN_SHELF_WIDTH, coverWidth, libraryLayout } from "../lib/layout-modes";
+  import {
+    DEFAULT_SERIES_SHARE,
+    DEFAULT_SHELF_SHARE3,
+    DEFAULT_SPLIT_RATIO,
+    MIN_DETAIL_WIDTH,
+    MIN_READER_WIDTH,
+    MIN_SHELF_WIDTH,
+    coverWidth,
+    libraryLayout,
+  } from "../lib/layout-modes";
+  import { seriesShareAt, shelfShareAt, splitRatioAt } from "../lib/pane-drag";
   import { viewport } from "../lib/layout.svelte";
   import { emptyFacts, runQuery, type QueryFacts } from "../lib/library/query";
   import { EMPTY_FILTER, activeChips, countActive, isEmptyFilter, mergeFilter, withoutChip } from "../lib/library/filter";
@@ -438,7 +448,7 @@
       // dalvik one instead of silently doing nothing.
       store.listMappings(),
     ]);
-    bookSizes = new Map((await store.listBooks()).map((book) => [book.seriesId, book.bytes]));
+    bookSizes = new Map((await store.listBookMetadata()).map((book) => [book.seriesId, book.bytes]));
     // The whole mapping, not just the source id: a migrated title is governed by the source it
     // reads from now, and only the mapping knows which one that is.
     mappedSource = new Map(mappings.map((row) => [row.seriesId, { provider: row.provider, sourceId: row.sourceId }]));
@@ -694,17 +704,23 @@
      */
     const space = layout.gridWidth + layout.detailWidth + layout.thirdWidth;
     const slack = space - minGrid - MIN_DETAIL_WIDTH - MIN_READER_WIDTH;
-    const low = box.width > 0 ? minGrid / box.width : 0.4;
-    const high = box.width > 0 ? (box.width - MIN_DETAIL_WIDTH) / box.width : 0.6;
     const move = (moveEvent: PointerEvent) => {
       if (box.width === 0) return;
-      const px = moveEvent.clientX - box.left;
       if (three) {
-        dragRatio3 = slack > 0 ? Math.min(1, Math.max(0, (px - minGrid) / slack)) : settings.splitRatio3;
+        dragRatio3 = shelfShareAt(moveEvent.clientX, {
+          box,
+          minGrid,
+          slack,
+          fallback: settings.splitRatio3,
+        });
         return;
       }
-      const raw = px / box.width;
-      dragRatio = Math.min(Math.max(high, low), Math.max(low, raw));
+      dragRatio = splitRatioAt(moveEvent.clientX, {
+        box,
+        minGrid,
+        minDetail: MIN_DETAIL_WIDTH,
+        fallback: settings.splitRatio,
+      });
     };
     const done = () => {
       handle.removeEventListener("pointermove", move);
@@ -721,6 +737,24 @@
   }
 
   /**
+   * Put a seam back where it started.
+   *
+   * A drag is easy to overdo and hard to undo by hand: the pane it shrank is the one holding the
+   * handle, so there is no way to drag it back from inside. Double-clicking the handle is the way
+   * out, and it restores the documented default (`DEFAULT_SPLIT_RATIO` and friends) rather than
+   * whatever the layout happened to pick for this window — those are two different numbers once the
+   * window is narrow enough to clamp.
+   */
+  function resetDrag(): void {
+    if (layout.thirdWidth > 0) settings.set("splitRatio3", DEFAULT_SHELF_SHARE3);
+    else settings.set("splitRatio", DEFAULT_SPLIT_RATIO);
+  }
+
+  function resetShare(): void {
+    settings.set("detailShare", DEFAULT_SERIES_SHARE);
+  }
+
+  /**
    * The seam between the series and the chapter.
    *
    * The same arithmetic as the shelf's handle, measured against the space the two right-hand
@@ -733,12 +767,17 @@
     handle.setPointerCapture(event.pointerId);
     // Measured against the slack the two columns share, not their total width: their floors are
     // already spoken for, so a pointer past them must not be able to ask for a sliver.
-    const left = box.left + layout.gridWidth;
     const space = layout.gridWidth + layout.detailWidth + layout.thirdWidth;
     const slack = space - layout.gridWidth - MIN_DETAIL_WIDTH - MIN_READER_WIDTH;
     const move = (moveEvent: PointerEvent) => {
-      const px = moveEvent.clientX - left;
-      dragShare = slack > 0 ? Math.min(1, Math.max(0, (px - MIN_DETAIL_WIDTH) / slack)) : settings.detailShare;
+      dragShare = seriesShareAt(moveEvent.clientX, {
+        box,
+        gridWidth: layout.gridWidth,
+        minGrid: layout.gridWidth,
+        minDetail: MIN_DETAIL_WIDTH,
+        slack,
+        fallback: settings.detailShare,
+      });
     };
     const done = () => {
       handle.removeEventListener("pointermove", move);
@@ -911,7 +950,7 @@
   }
 </script>
 
-<section class="view" class:thirds class:reading={readingPage}>
+<section class="view" class:split={layout.mode === "split"} class:thirds class:reading={readingPage}>
   <div class="sheet">
   <div class="pin">
   {#if initialTab !== "titles"}<PageMenu title="Library" current="library" />{:else}
@@ -1137,7 +1176,9 @@
           role="separator"
           aria-orientation="vertical"
           aria-label="Resize the detail pane"
+          title="Drag to resize · double-click to reset"
           onpointerdown={startDrag}
+          ondblclick={resetDrag}
         ></div>
 
         <!-- The second column: the series page, or the chapter when two panes are a reader. -->
@@ -1202,7 +1243,9 @@
         role="separator"
         aria-orientation="vertical"
         aria-label="Resize the reading pane"
+        title="Drag to resize · double-click to reset"
         onpointerdown={startShareDrag}
+        ondblclick={resetShare}
       ></div>
       <aside class="detail reading third" style:width={`${layout.thirdWidth}px`} aria-label="Reader">
         {#if openChapter !== null}
@@ -1371,6 +1414,31 @@
     max-width: 1200px;
   }
 
+  /* A split uses the room it is given.
+     The 1200 px cap is a reading measure for a single column. Left on beside a detail pane it made
+     the layout and the screen disagree: `libraryLayout` divides the window's room (the shell's rail
+     and this padding already taken out), so at 1440 it believed the shelf had 657 px while the cap
+     left it 464 — and a drag clamped against the panes it could actually see could ask for a shelf
+     narrower than the floor the arithmetic had just promised. Measured: 44 px. The panes are two
+     columns of a master/detail screen, not prose; they grow with the window. */
+  .view.split {
+    max-width: none;
+  }
+
+  /* The floors, enforced by the box rather than only by the arithmetic.
+     `libraryLayout` decides the mode, and its floors are what make a split legal at all — but the
+     seam and the gap between the collections and the panes are 29 px of chrome the widths do not
+     name, so the last 29 px of a drag land inside a column instead of between them. These two lines
+     are the promise #3 makes: whatever happens to the arithmetic, neither pane is drawn under its
+     minimum, and the detail gives way instead of overflowing the row. */
+  .view.split .column {
+    min-width: 200px; /* MIN_SHELF_WIDTH */
+  }
+
+  .view.split .detail {
+    max-width: calc(100% - 217px); /* MIN_SHELF_WIDTH + the 9 px seam and its 8 px of margins */
+  }
+
   /* Three panes: the page and the reader are two things side by side. The page keeps the padding,
      the reader gets none of it — so the band and the search sit over the shelves and never over the
      chapter, and the chapter starts where the window starts. */
@@ -1398,8 +1466,13 @@
     align-items: stretch;
     height: 100%;
   }
+  /* The three-pane view is already exactly one screen tall and scrolls inside itself, so its seam
+     stretches the column instead of sticking to the window. */
   .thirdpane .divider {
+    position: static;
     align-self: stretch;
+    height: auto;
+    max-height: none;
   }
   .thirdpane .detail.reading.third {
     height: 100%;
@@ -1546,7 +1619,21 @@
 
   .divider {
     flex: none;
-    align-self: stretch;
+    /*
+     * The handle is the height of the window, not the height of the shelf.
+     *
+     * It used to be `align-self: stretch` in a flex row whose tallest item is the shelf column: on a
+     * 5 000-title library that is a seam tens of thousands of pixels tall. It draws nothing below
+     * the fold, but it does two worse things — the resize cursor is live over every pixel of the
+     * document's right edge, and the box the drag measures no longer matches what the reader sees.
+     * Sticky, at the same viewport-bound height as the pane it resizes, keeps the handle where the
+     * eye and the pointer are.
+     */
+    position: sticky;
+    top: var(--s4);
+    align-self: flex-start;
+    height: calc(100dvh - var(--s4) * 2);
+    max-height: calc(100dvh - var(--s4) * 2);
     width: 9px;
     margin: 0 var(--s1);
     border-radius: var(--r-pill);

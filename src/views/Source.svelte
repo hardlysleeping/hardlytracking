@@ -24,6 +24,7 @@
   import CollapseFloat from "../components/CollapseFloat.svelte";
   import { settings } from "../state/settings.svelte";
   import { activeCount, cleanSelection } from "../lib/source-filters";
+  import { generations } from "../lib/latest";
   import { go, pathTo } from "../lib/nav";
 
   interface Props {
@@ -123,6 +124,15 @@
   let settingsOpen = $state(false);
 
   /**
+   * Which listing request is allowed to paint.
+   *
+   * A tap on Latest while Popular is still loading must not be overwritten when Popular answers:
+   * the newest request owns the grid, the spinner and the error banner, and an older answer is
+   * dropped where it lands. Same rule the detail and reader screens already apply by hand.
+   */
+  const listingRuns = generations();
+
+  /**
    * The source's own filter form, asked once per source.
    *
    * An empty list is the answer for most sources, and it is also where a provider that cannot ask
@@ -200,27 +210,37 @@
   }
 
   async function run(next = 1): Promise<void> {
+    // Claimed before the guards, so a run that returns early still invalidates the one in flight:
+    // leaving a source has to stop the answer it was waiting for from filling the next one's grid.
+    const token = listingRuns.begin();
     if (!visibility.sourceAllowed(sourceId)) return;
     const revision = privacy.revision;
     if (library.profile === null) return;
     if (mode === "search" && query.trim() === "") return;
+    const current = (): boolean =>
+      listingRuns.isCurrent(token) && revision === privacy.revision && visibility.sourceAllowed(sourceId);
     busy = true;
     error = null;
     loginUrl = null;
     try {
       const provider = providerFor(library.profile.providers, sourceId);
       const result = await listing(provider, next);
-      if (revision !== privacy.revision || !visibility.sourceAllowed(sourceId)) return;
+      if (!current()) return;
       items = next === 1 ? result.items : [...items, ...result.items];
       hasNext = result.hasNext;
       page = next;
     } catch (e) {
+      // A superseded request's failure is not this screen's error: the reader has already asked
+      // another source, and its banner would be about a title they cannot see.
+      if (!current()) return;
       error = e instanceof Error ? e.message : String(e);
       // A source that wants a login says so with a 401 and the page to open; anything else is a
       // failure to show as it is, without offering a login that would not help.
       if (needsLogin(e)) loginUrl = e.loginUrl ?? "";
     } finally {
-      busy = false;
+      // Only the newest run owns `busy`: an older one finishing must not clear the spinner the
+      // newer one is still waiting under.
+      if (current()) busy = false;
     }
   }
 

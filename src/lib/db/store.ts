@@ -137,6 +137,21 @@ export interface DownloadRow {
   error?: string;
 }
 
+/**
+ * One stored page, as the index knows it.
+ *
+ * `bytes` is the size of the image, recorded when it was written, so a reconcile can total a
+ * chapter's weight without opening a single page. `blob` is only present on rows written before the
+ * bytes moved to their own store.
+ */
+export interface DownloadPageMeta {
+  id: string;
+  chapterId: string;
+  index: number;
+  bytes?: number;
+  blob?: Blob;
+}
+
 export interface SourceMappingRow {
   seriesId: string;
   provider: string;
@@ -178,7 +193,20 @@ interface PagesRow {
  * `pageCount` is read once at import so a chapter row can say how long a book is without opening
  * the archive again. Nothing here is decoded: pages are produced on demand by `lib/files`.
  */
-export interface BookRow {
+export interface BookRow extends BookMetadata {
+  /**
+   * The file itself, when this app copied it into the library.
+   *
+   * Absent for a row that points at a file another app owns (`location`): those bytes stay where
+   * Mihon put them and are read on demand, which is the whole point of indexing a download folder
+   * rather than importing it. It is absent too in the `books` store itself: the bytes live in
+   * `bookFiles`, and `getBook` puts them back.
+   */
+  blob?: Blob;
+}
+
+/** A book as the shelf knows it: everything but the file. */
+export interface BookMetadata {
   seriesId: string;
   chapterId: string;
   /** The file's own name, shown when a title is ambiguous. */
@@ -186,14 +214,6 @@ export interface BookRow {
   kind: "cbz" | "cbr" | "pdf";
   pageCount: number;
   bytes: number;
-  /**
-   * The file itself, when this app copied it into the library.
-   *
-   * Absent for a row that points at a file another app owns (`location`): those bytes stay where
-   * Mihon put them and are read on demand, which is the whole point of indexing a download folder
-   * rather than importing it.
-   */
-  blob?: Blob;
   /** Where the pages really live, when they are not ours. */
   location?: BookLocation;
   addedAt: number;
@@ -580,9 +600,16 @@ export class LibraryStore {
     const row = await this.db.get<DownloadRow>("downloads", fromChapterId);
     if (row === undefined) return;
     await this.db.put("downloads", { ...row, chapterId: toChapterId } as unknown as Record<string, unknown>);
-    for (const page of await this.db.all<{ id: string; chapterId: string; index: number; blob: Blob }>("downloadPages")) {
-      if (page.chapterId !== fromChapterId) continue;
-      await this.db.put("downloadPages", { ...page, id: `${toChapterId}#${page.index}`, chapterId: toChapterId });
+    // Only this chapter's keys are read: the old shape walked every page on the device to find the
+    // ones that belonged to it.
+    for (const page of await this.downloadPageMeta(fromChapterId)) {
+      const id = `${toChapterId}#${page.index}`;
+      await this.db.put("downloadPages", { ...page, id, chapterId: toChapterId });
+      const bytes = await this.db.get<{ id: string; blob: Blob }>("downloadPageData", page.id);
+      if (bytes !== undefined) {
+        await this.db.put("downloadPageData", { id, blob: bytes.blob });
+        await this.db.remove("downloadPageData", page.id);
+      }
       await this.db.remove("downloadPages", page.id);
     }
     await this.db.remove("downloads", fromChapterId);
@@ -627,29 +654,74 @@ export class LibraryStore {
 
   async removeDownload(chapterId: string): Promise<void> {
     await this.db.remove("downloads", chapterId);
-    for (const page of await this.listDownloadPages(chapterId)) {
-      await this.db.remove("downloadPages", `${chapterId}#${page.index}`);
+    for (const page of await this.downloadPageMeta(chapterId)) {
+      await this.db.remove("downloadPages", page.id);
+      await this.db.remove("downloadPageData", page.id);
     }
   }
 
-  async listDownloadPages(chapterId: string): Promise<Array<{ index: number; blob: Blob }>> {
-    const rows = await this.db.all<{ id: string; chapterId: string; index: number; blob: Blob }>("downloadPages");
-    return rows.filter((row) => row.chapterId === chapterId).map(({ index, blob }) => ({ index, blob }));
+  /**
+   * One chapter's page rows, without their image bytes.
+   *
+   * This is what a reconcile and a "how many pages are really here" check needs: index, chapter and
+   * size. It reads one chapter's keys, not the whole download folder.
+   */
+  async downloadPageMeta(chapterId: string): Promise<DownloadPageMeta[]> {
+    return this.db.prefix<DownloadPageMeta>("downloadPages", `${chapterId}#`);
+  }
+
+  /** Every page row on the device, metadata only — the launch reconcile's read (#STAB-09). */
+  async allDownloadPageMeta(): Promise<DownloadPageMeta[]> {
+    return this.db.all<DownloadPageMeta>("downloadPages");
   }
 
   /**
-   * Every stored page row, in one read.
+   * One chapter's pages, with the bytes.
    *
-   * A launch has to reconcile every download against the pages that really exist, and asking per
-   * chapter would be one IndexedDB pass per row. The result is also how bytes are recounted after
-   * an interrupted run: the row's own `bytes` is only as honest as its last write.
+   * The reader's path. The metadata rows say which indexes exist, so a chapter whose fourth page
+   * failed still reports four pages rather than three, and each blob is fetched by its own key.
    */
-  async allDownloadPages(): Promise<Array<{ id: string; chapterId: string; index: number; blob: Blob }>> {
-    return this.db.all<{ id: string; chapterId: string; index: number; blob: Blob }>("downloadPages");
+  async listDownloadPages(chapterId: string): Promise<Array<{ index: number; blob: Blob }>> {
+    const rows = await this.downloadPageMeta(chapterId);
+    const pages = await Promise.all(
+      rows.map(async (row) => {
+        if (row.blob !== undefined) return { index: row.index, blob: row.blob }; // row from before the split
+        const bytes = await this.db.get<{ id: string; blob: Blob }>("downloadPageData", row.id);
+        return bytes === undefined ? null : { index: row.index, blob: bytes.blob };
+      }),
+    );
+    return pages.filter((page): page is { index: number; blob: Blob } => page !== null);
   }
 
+  /**
+   * Every stored page row, with its bytes.
+   *
+   * Nothing on a hot path uses this any more — the reconcile reads `allDownloadPageMeta` and the
+   * reader asks per chapter — but a caller that genuinely wants every image still can.
+   */
+  async allDownloadPages(): Promise<Array<{ id: string; chapterId: string; index: number; blob: Blob }>> {
+    const rows = await this.db.all<DownloadPageMeta & { blob?: Blob }>("downloadPages");
+    const pages = await Promise.all(
+      rows.map(async (row) => {
+        if (row.blob !== undefined) return { id: row.id, chapterId: row.chapterId, index: row.index, blob: row.blob };
+        const bytes = await this.db.get<{ id: string; blob: Blob }>("downloadPageData", row.id);
+        return bytes === undefined
+          ? null
+          : { id: row.id, chapterId: row.chapterId, index: row.index, blob: bytes.blob };
+      }),
+    );
+    return pages.filter((page): page is { id: string; chapterId: string; index: number; blob: Blob } => page !== null);
+  }
+
+  /** Store one page: the bytes in their own row, the description in the index. */
   async putDownloadPage(row: { id: string; chapterId: string; index: number; blob: Blob }): Promise<void> {
-    await this.db.put("downloadPages", { ...row } as unknown as Record<string, unknown>);
+    await this.db.put("downloadPages", {
+      id: row.id,
+      chapterId: row.chapterId,
+      index: row.index,
+      bytes: row.blob.size,
+    });
+    await this.db.put("downloadPageData", { id: row.id, blob: row.blob });
   }
 
   // ---- categories: hidden + pinned -----------------------------------------
@@ -779,19 +851,56 @@ export class LibraryStore {
    * import so the chapter row can say how long the book is without opening it again.
    */
   async putBook(book: BookRow): Promise<void> {
-    await this.db.put("books", book as unknown as Record<string, unknown>);
+    // The file and its description are two rows on purpose: listing a shelf asks "what is here and
+    // how big is it", and the answer must not carry 300 MB of CBZ through the IPC bridge to say so.
+    // The bytes live in `bookFiles`, keyed by the same series id, and are read only when a page of
+    // that book is actually requested.
+    const { blob, ...metadata } = book;
+    await this.db.put("books", metadata as unknown as Record<string, unknown>);
+    if (blob !== undefined) {
+      await this.db.put("bookFiles", { seriesId: book.seriesId, blob });
+    } else {
+      // A row that points at a file another app owns has no bytes of ours to keep.
+      await this.db.remove("bookFiles", book.seriesId);
+    }
   }
 
   async getBook(seriesId: string): Promise<BookRow | undefined> {
-    return this.db.get<BookRow>("books", seriesId);
+    const row = await this.db.get<BookRow>("books", seriesId);
+    if (row === undefined) return undefined;
+    // Rows written before the split carry their own `blob`; newer ones keep it in `bookFiles`.
+    if (row.blob !== undefined) return row;
+    const bytes = await this.db.get<{ seriesId: string; blob: Blob }>("bookFiles", seriesId);
+    return bytes === undefined ? row : { ...row, blob: bytes.blob };
+  }
+
+  /**
+   * What is on the shelf, without the comic files.
+   *
+   * This is the call for statistics, import checks and "do I already have this title": it never
+   * reads a byte of a CBZ. `getBook` is the call that needs the file.
+   */
+  async listBookMetadata(): Promise<BookMetadata[]> {
+    const rows = await this.db.all<BookRow & { blob?: Blob }>("books");
+    // A row from before the split still has its file inline; drop it here rather than pretend the
+    // read was free, and let the next write move it.
+    return rows.map(({ blob: _blob, ...row }) => row);
   }
 
   async listBooks(): Promise<BookRow[]> {
-    return this.db.all<BookRow>("books");
+    const rows = await this.db.all<BookRow>("books");
+    return Promise.all(
+      rows.map(async (row) => {
+        if (row.blob !== undefined) return row;
+        const bytes = await this.db.get<{ seriesId: string; blob: Blob }>("bookFiles", row.seriesId);
+        return bytes === undefined ? row : { ...row, blob: bytes.blob };
+      }),
+    );
   }
 
   async removeBook(seriesId: string): Promise<void> {
     await this.db.remove("books", seriesId);
+    await this.db.remove("bookFiles", seriesId);
   }
 
   /** A cached source search answer, so a repeated query paints before the network does. */

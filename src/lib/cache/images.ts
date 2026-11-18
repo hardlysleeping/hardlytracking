@@ -5,8 +5,10 @@
  * should still show the shelf. The rule from HardlyReader's cache carries over — the *list* is data
  * and is never evicted; only *copies* are, and the ceiling is a number the user chose.
  *
- * Storage is the app's own database (`imageCache` store: key, blob, bytes, at, usedAt), so it
- * travels with the same open/close lifecycle as everything else and works in a packaged build.
+ * Storage is the app's own database: an `imageCache` row (key, bytes, at, usedAt) per picture and
+ * its bytes in `imageCacheData` under the same key. The two are separate because they are written
+ * for different reasons — a hit rewrites `usedAt` every time a cover is drawn, and that must not
+ * re-encode a megabyte of JPEG to say "seen just now".
  * Reads return an object URL; the raw URL is the fallback when the cache is off, full, or the fetch
  * failed — a cover that cannot be cached must still be a cover.
  */
@@ -21,10 +23,17 @@ import {
 
 interface ImageRow {
   key: string;
-  blob: Blob;
+  /** Absent on rows written since the bytes moved to `imageCacheData`. */
+  blob?: Blob;
   bytes: number;
   at: number;
   usedAt: number;
+}
+
+/** The bytes for one cached picture, keyed like its row. */
+interface ImageBytes {
+  key: string;
+  blob: Blob;
 }
 
 const MAX_IMAGE_BYTES = 12 * 1024 * 1024;
@@ -141,8 +150,9 @@ export class ImageCache {
     const task = (async (): Promise<string> => {
       try {
         const row = await this.db!.get<ImageRow>("imageCache", url);
-        if (row !== undefined) {
-          const objectUrl = URL.createObjectURL(row.blob);
+        const bytes = row === undefined ? undefined : await this.bytesOf(row);
+        if (bytes !== undefined) {
+          const objectUrl = URL.createObjectURL(bytes);
           this.urls.set(url, objectUrl);
           this.trimLive();
           void this.touch(url);
@@ -158,10 +168,7 @@ export class ImageCache {
         if (blob.size === 0 || blob.size > MAX_IMAGE_BYTES) return url;
         // With the cache switched off the bytes live for this session only: same object URL, same
         // trimming, no row on disk.
-        if (this.policy.cacheImages) {
-          const now = Date.now();
-          await this.db!.put("imageCache", { key: url, blob, bytes: blob.size, at: now, usedAt: now } as unknown as Record<string, unknown>);
-        }
+        if (this.policy.cacheImages) await this.keep(url, blob);
         const objectUrl = URL.createObjectURL(blob);
         this.urls.set(url, objectUrl);
         this.trimLive();
@@ -191,10 +198,23 @@ export class ImageCache {
     this.urls.delete(key);
     this.urls.set(key, objectUrl);
     this.trimLive();
-    const now = Date.now();
-    await this.db.put("imageCache", { key, blob, bytes: blob.size, at: now, usedAt: now } as unknown as Record<string, unknown>);
+    await this.keep(key, blob);
     void this.prune();
     return true;
+  }
+
+  /** Write one picture: its description in the index, its bytes beside it. */
+  private async keep(key: string, blob: Blob): Promise<void> {
+    const now = Date.now();
+    await this.db!.put("imageCache", { key, bytes: blob.size, at: now, usedAt: now } as unknown as Record<string, unknown>);
+    await this.db!.put("imageCacheData", { key, blob });
+  }
+
+  /** The bytes for a row, from where they are: beside it (new rows) or inside it (old ones). */
+  private async bytesOf(row: ImageRow): Promise<Blob | undefined> {
+    if (row.blob !== undefined) return row.blob;
+    const bytes = await this.db!.get<ImageBytes>("imageCacheData", row.key);
+    return bytes?.blob;
   }
 
   /** The object URL for a stored picture, or the key back when nothing is stored under it. */
@@ -204,7 +224,9 @@ export class ImageCache {
     if (this.db === null) return key;
     const row = await this.db.get<ImageRow>("imageCache", key);
     if (row === undefined) return key;
-    const objectUrl = URL.createObjectURL(row.blob);
+    const bytes = await this.bytesOf(row);
+    if (bytes === undefined) return key;
+    const objectUrl = URL.createObjectURL(bytes);
     this.urls.set(key, objectUrl);
     this.trimLive();
     void this.touch(key);
@@ -221,11 +243,20 @@ export class ImageCache {
     for (const url of urls.slice(0, Math.max(1, batch))) void this.resolve(url);
   }
 
+  /**
+   * Record that a picture was drawn.
+   *
+   * A metadata write and nothing else: the row is rewritten without its bytes, so marking a cover
+   * "seen just now" costs one small document rather than a re-encoded megabyte. It used to read the
+   * row — blob included — and put it back on every hit, which is a base64 encode per visible cover
+   * per scroll.
+   */
   private async touch(url: string): Promise<void> {
     if (this.db === null) return;
     const row = await this.db.get<ImageRow>("imageCache", url);
     if (row === undefined) return;
-    await this.db.put("imageCache", { ...row, usedAt: Date.now() } as unknown as Record<string, unknown>);
+    const { blob: _blob, ...metadata } = row;
+    await this.db.put("imageCache", { ...metadata, usedAt: Date.now() } as unknown as Record<string, unknown>);
   }
 
   /** Enforce the ceiling. Never touches anything pinned; reports what it removed. */
@@ -273,6 +304,7 @@ export class ImageCache {
         this.urls.delete(key);
       }
       await this.db.remove("imageCache", key);
+      await this.db.remove("imageCacheData", key);
     }
     return { removed: doomed.length, freed };
   }
@@ -285,6 +317,7 @@ export class ImageCache {
     for (const row of rows) {
       freed += row.bytes;
       await this.db.remove("imageCache", row.key);
+      await this.db.remove("imageCacheData", row.key);
     }
     for (const url of this.urls.values()) URL.revokeObjectURL(url);
     for (const url of this.retiring) URL.revokeObjectURL(url);

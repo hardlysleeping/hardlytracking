@@ -14,25 +14,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { ImageCache } from "../../src/lib/cache/images.ts";
+import { memoryDatabase } from "../../src/lib/db/open.ts";
 
 function memoryDb() {
-  const rows = new Map();
-  return {
-    rows,
-    async all() {
-      return [...rows.values()];
-    },
-    async get(_store, key) {
-      return rows.get(key);
-    },
-    async put(_store, value) {
-      rows.set(value.key, value);
-    },
-    async remove(_store, key) {
-      rows.delete(key);
-      return true;
-    },
-  };
+  // The real engine: bytes live in `imageCacheData`, the row that is touched lives in `imageCache`.
+  return memoryDatabase();
 }
 
 function fakeBlob(bytes = 2048, type = "image/png") {
@@ -138,7 +124,8 @@ test("clearing the cache releases both the live and the retiring URLs", async ()
     cache.attach(db, { cacheImages: true, limitBytes: 256 * 1024 * 1024 });
     await fill(cache, 165);
     await cache.clear();
-    assert.equal(db.rows.size, 0);
+    assert.equal((await db.all("imageCache")).length, 0);
+    assert.equal((await db.all("imageCacheData")).length, 0);
     assert.ok(revoked.length >= 163, "every URL this session minted is revoked");
   });
 });

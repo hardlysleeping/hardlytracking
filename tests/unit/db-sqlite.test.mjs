@@ -15,19 +15,22 @@ import { join } from "node:path";
 const { SqliteDatabase } = await import("../../src/lib/db/sqlite.ts");
 
 /**
- * `$1, $2, …` (sqlx, the plugin) translated to node:sqlite's positional `?`. Every statement in the
- * engine names each argument once, in order, which is what makes the substitution faithful.
+ * `$1, $2, …` (sqlx, the plugin) translated to node:sqlite's positional `?`. The arguments are
+ * re-ordered by the order their `$n` appears, so a statement that names the same argument twice
+ * (`substr(key, 1, length($2)) = $2`) binds it twice rather than shifting every later argument.
  */
 function connector(directory) {
   return async (name) => {
     const db = new DatabaseSync(join(directory, name));
-    const bind = (query) => db.prepare(query.replace(/\$\d+/g, "?"));
+    const order = (query) => [...query.matchAll(/\$(\d+)/g)].map((match) => Number(match[1]) - 1);
+    const bind = (query, values = []) => db.prepare(query.replace(/\$\d+/g, "?")).all(...order(query).map((at) => values[at]));
+    const run = (query, values = []) => db.prepare(query.replace(/\$\d+/g, "?")).run(...order(query).map((at) => values[at]));
     return {
       async execute(query, values = []) {
-        bind(query).run(...values);
+        run(query, values);
       },
       async select(query, values = []) {
-        return bind(query).all(...values);
+        return bind(query, values);
       },
       async close() {
         db.close();

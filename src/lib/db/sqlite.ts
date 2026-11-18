@@ -182,6 +182,20 @@ export class SqliteDatabase implements Database {
     return rows.map((row) => fromWire(JSON.parse(row.doc)) as T);
   }
 
+  /**
+   * The rows whose key starts with `prefix`.
+   *
+   * `substr(key, 1, length($2)) = $2` rather than `LIKE $2 || '%'`: a chapter id may contain `%` or
+   * `_`, which `LIKE` would treat as wildcards and quietly match another chapter's pages.
+   */
+  async prefix<T>(store: StoreName, prefix: string): Promise<T[]> {
+    const rows = await this.db.select<Array<{ doc: string }>>(
+      "SELECT doc FROM records WHERE store = $1 AND substr(key, 1, length($2)) = $2",
+      [store, prefix],
+    );
+    return rows.map((row) => fromWire(JSON.parse(row.doc)) as T);
+  }
+
   remove(store: StoreName, key: string): Promise<void> {
     return this.write(async () => {
       await this.db.execute("DELETE FROM records WHERE store = $1 AND key = $2", [store, key]);

@@ -82,8 +82,11 @@ export function createLocalProvider(store: LibraryStore): SourceProvider {
       nativeId(chapterId, "local");
       // A book the user picked off their own disk: its pages are produced from the file on demand,
       // never unpacked up front. Anything else local is a chapter we already hold as page blobs.
-      const books = await store.listBooks();
-      const book = books.find((row) => row.chapterId === chapterId);
+      // The shelf's metadata says which book this chapter belongs to; only the matching file is
+      // read, instead of every comic the device holds.
+      const books = await store.listBookMetadata();
+      const listed = books.find((row) => row.chapterId === chapterId);
+      const book = listed === undefined ? undefined : await store.getBook(listed.seriesId);
       if (book === undefined) return store.getPages(chapterId);
       const comic = await bookComic(book);
       return Array.from({ length: comic.pageCount }, (_, index) => ({

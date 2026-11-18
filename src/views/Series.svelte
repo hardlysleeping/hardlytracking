@@ -21,6 +21,7 @@
   import { go, pathTo } from "../lib/nav";
   import { startReading } from "../state/reader-pane.svelte";
   import { flipOrder, orderChapters, orderLabel, type ChapterOrder } from "../lib/chapter-order";
+  import { SELECTION_SETTLE_MS, settleSelection } from "../lib/selection";
   import { chapterTitle } from "../lib/titles";
 
   interface Props {
@@ -50,6 +51,12 @@
 
   $effect(() => {
     void load(seriesId);
+    // Leaving the pane invalidates whatever it still has in flight: the generation is what every
+    // `current()` check compares against, so an answer that arrives after the pane is gone is
+    // dropped instead of writing into a screen nobody is looking at.
+    return () => {
+      loadGeneration += 1;
+    };
   });
 
   let loadGeneration = 0;
@@ -80,6 +87,11 @@
         position = rememberedPosition ?? null;
         busy = false;
       }
+      // The remote half waits for the selection to settle when this page is a pane. A burst of
+      // taps is one decision, and only the title it settles on is worth a round trip — the stored
+      // row above has already answered the finger. A full page skips the wait: opening a series is
+      // a decision, not a gesture, and 150 ms of nothing would just be a slower screen.
+      if (!(await settleSelection(embedded ? SELECTION_SETTLE_MS : 0, current))) return;
       // Through the library, not the provider: a migrated title asks the source its mapping names,
       // which is not the one its id was born on.
       const fresh = await library.details(id);

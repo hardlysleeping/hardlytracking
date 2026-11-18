@@ -125,6 +125,18 @@ export const MAX_DETAIL_WIDTH = 520;
 export const MIN_READER_WIDTH = 420;
 export const MIN_SIDEBAR_WIDTH = 200;
 
+/**
+ * Where the seams start, and where a double-click puts them back.
+ *
+ * The shelf takes a little more than half, which is what "a shelf with a panel beside it" looks like;
+ * the detail pane's own default leaves the series column a little less than half of the room the
+ * shelf leaves it. Named here so the layout, the drag and the reset cannot disagree about the number
+ * a divider returns to.
+ */
+export const DEFAULT_SPLIT_RATIO = 0.58;
+export const DEFAULT_SHELF_SHARE3 = 0.58;
+export const DEFAULT_SERIES_SHARE = 0.4;
+
 /** Cover widths. `comfortable` is the tablet default; `compact` is for very large libraries. */
 export const DENSITIES: Record<Density, number> = { compact: 88, comfortable: 112, large: 148 };
 
@@ -332,7 +344,7 @@ export function libraryLayout(width: number, height: number, options: LayoutOpti
   const floorShare = gridSpace > 0 ? minGrid / gridSpace : 0.5;
   const ceilingShare = gridSpace > 0 ? 1 - MIN_DETAIL_WIDTH / gridSpace : 0.5;
   const given = options.splitRatio;
-  const asked = typeof given === "number" && Number.isFinite(given) ? given : 0.58;
+  const asked = typeof given === "number" && Number.isFinite(given) ? given : DEFAULT_SPLIT_RATIO;
   const ratio = Math.min(Math.max(asked, floorShare), Math.max(floorShare, ceilingShare));
   /*
    * Three panes are the shelf, the series and the chapter — the shape HardlyReader ships, one
@@ -352,9 +364,9 @@ export function libraryLayout(width: number, height: number, options: LayoutOpti
    * room to move at any window wide enough to hold three at all.
    */
   const given3 = options.splitRatio3;
-  const shelfShare3 = typeof given3 === "number" && Number.isFinite(given3) ? Math.min(Math.max(given3, 0), 1) : 0.58;
+  const shelfShare3 = typeof given3 === "number" && Number.isFinite(given3) ? Math.min(Math.max(given3, 0), 1) : DEFAULT_SHELF_SHARE3;
   const givenDetail = options.detailShare;
-  const seriesShare = typeof givenDetail === "number" && Number.isFinite(givenDetail) ? Math.min(Math.max(givenDetail, 0), 1) : 0.4;
+  const seriesShare = typeof givenDetail === "number" && Number.isFinite(givenDetail) ? Math.min(Math.max(givenDetail, 0), 1) : DEFAULT_SERIES_SHARE;
   const slack = three ? gridSpace - minGrid - MIN_DETAIL_WIDTH - MIN_READER_WIDTH : 0;
   const shelfWidth = !wanted
     ? gridSpace

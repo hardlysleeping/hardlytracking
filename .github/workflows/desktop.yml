@@ -40,6 +40,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # A release built from files that disagree about the version is wrong in a way nothing else
+      # notices: the artefact is named from package.json and the bundle is stamped from
+      # tauri.conf.json, so both look right and the release is not.
+      - name: Versions agree
+        run: node scripts/check-versions.mjs
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22
