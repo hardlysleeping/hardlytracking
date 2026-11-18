@@ -46,6 +46,9 @@ services:
   # piece of this stack that can execute a Mihon extension at all.
   dalvik:
     image: mextension-server:local
+    # A stable name: scripts, docs and `docker exec` refer to this host by it, and a compose project
+    # name would otherwise rename it to `hardlytracking-dalvik-1` on every `up`.
+    container_name: ht-dalvik
     environment:
       - TZ=America/Los_Angeles
     # One core: an extension host is a burst of work per page request, and an unbounded JVM here

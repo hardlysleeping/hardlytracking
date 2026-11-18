@@ -18,7 +18,7 @@
   import { deviceId } from "../lib/sync/device";
   import type { SyncDocument } from "../lib/sync/document";
   import { applyDocument } from "../lib/sync/apply";
-  import { outcomeSentence, summarizeImport, type ImportSummary } from "../lib/backup/report";
+  import { outcomeSentence, plural, summarizeImport, type ImportSummary } from "../lib/backup/report";
   import { readBackupFile } from "../lib/backup/read";
   import { EXPORT_FORMATS, exportDocument, type ExportKind } from "../lib/backup/export";
   import { RepositoryError } from "../lib/extensions/repository";
@@ -71,7 +71,7 @@
       anchor.download = file.filename;
       anchor.click();
       URL.revokeObjectURL(url);
-      notice = `${file.filename} — ${doc.series.length} series, ${doc.chapters.length} chapters, ${doc.categories.length} categories, ${doc.sessions.length} sessions`;
+      notice = `${file.filename} — ${plural(doc.series.length, "series", "series")}, ${plural(doc.chapters.length, "chapter")}, ${plural(doc.categories.length, "category", "categories")}, ${plural(doc.sessions.length, "session")}`;
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
     } finally {
@@ -130,7 +130,7 @@
       await library.refreshLibrary();
       await categories.load(store);
       applied = { doc, summary, message: outcomeSentence(summary, result) };
-      notice = `${chosen.name} — ${result.series} series, ${result.chapters} chapters, ${result.progress} chapter progress, ${result.positions} resume positions, ${result.read} read marks.`;
+      notice = `${chosen.name} — ${plural(result.series, "series", "series")}, ${plural(result.chapters, "chapter")}, ${plural(result.progress, "progress row")}, ${plural(result.positions, "resume position")}, ${plural(result.read, "read mark")}.`;
       pending = null;
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
@@ -233,12 +233,12 @@
             </ul>
           {/if}
           <div class="chips" aria-label="What the file holds">
-            <span class="chip static">{pending.summary.series} series</span>
-            <span class="chip static">{pending.summary.chapters} chapters</span>
-            <span class="chip static">{pending.summary.categories} categories</span>
-            <span class="chip static">{pending.summary.sessions} sessions</span>
-            {#if pending.summary.progress > 0}<span class="chip static">{pending.summary.progress} chapter progress</span>{/if}
-            {#if pending.summary.repos > 0}<span class="chip static">{pending.summary.repos} repositories</span>{/if}
+            <span class="chip static">{plural(pending.summary.series, "series", "series")}</span>
+            <span class="chip static">{plural(pending.summary.chapters, "chapter")}</span>
+            <span class="chip static">{plural(pending.summary.categories, "category", "categories")}</span>
+            <span class="chip static">{plural(pending.summary.sessions, "session")}</span>
+            {#if pending.summary.progress > 0}<span class="chip static">{plural(pending.summary.progress, "progress row")}</span>{/if}
+            {#if pending.summary.repos > 0}<span class="chip static">{plural(pending.summary.repos, "repository", "repositories")}</span>{/if}
           </div>
           <p>{pending.summary.sentence}</p>
 
