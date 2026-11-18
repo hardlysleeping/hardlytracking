@@ -101,7 +101,8 @@ The embedded runtime is **not ours**: `plugins/mihon-runtime/ios` starts a JVM w
 `MExtensionServer.jar` (upstream, MPL-2.0) and talks to it over JNI; the `/dalvik` routes are served by
 that jar. So `filtersManga` needed no native change — the pinned builds already carry the reader that
 applies a `filterList` back (`MihonInvoker.convertFilterList`, present in `ios-runtime-v9`,
-`ios-runtime-v10` and the v1.0.9 Linux jar this repo pins; checked with `javap` on each). What was
+`ios-runtime-v10`, `ios-runtime-v11` and the v1.1.1 Linux jar this repo pins; checked with `javap` on
+each). What was
 missing was on this side: a mapper, and the plumbing that sends a choice with the search.
 
 ### What it answers (measured: MangaDex, pinned jar)

@@ -6,7 +6,7 @@
 #
 # Three public artefacts are pinned by SHA-256 and verified before use:
 #
-#   MExtensionServer.jar      the server itself (MPL-2.0, kodjodevf/M-Extension-Server, ios-runtime-v9)
+#   MExtensionServer.jar      the server itself (MPL-2.0, kodjodevf/M-Extension-Server, ios-runtime-v11)
 #   OpenJDK.xcframework.zip   a device-only OpenJDK Zero build (1Selxo/Mangatan, embedded-openjdk-ios13-v16)
 #   java_bundle-device.zip    that build's Java home: modules image, cacerts, security config, tzdb
 #
@@ -25,8 +25,8 @@ SERVER_JAR="${CACHE_DIR}/MExtensionServer-ios.jar"
 OPENJDK_ZIP="${CACHE_DIR}/OpenJDK.xcframework.zip"
 JAVA_BUNDLE_ZIP="${CACHE_DIR}/java_bundle-device.zip"
 
-SERVER_URL="https://github.com/kodjodevf/M-Extension-Server/releases/download/ios-runtime-v9/MExtensionServer-ios.jar"
-SERVER_SHA256="b4ae2e7979c7d2e4ba729137f5a482283e20a8c9b7a63bfc735050fc84a53195"
+SERVER_URL="https://github.com/kodjodevf/M-Extension-Server/releases/download/ios-runtime-v11/MExtensionServer-ios.jar"
+SERVER_SHA256="45fd42052750e70663e19ad45669c9cd591df8c89acfcda9a0b15ddd07df57da"
 OPENJDK_URL="https://github.com/1Selxo/Mangatan/releases/download/embedded-openjdk-ios13-v16/OpenJDK.xcframework.zip"
 OPENJDK_SHA256="f21681caae40e508647e7f18c9082f27fa9aa67ee7f1376725eae528fa2d38cb"
 JAVA_BUNDLE_URL="https://github.com/1Selxo/Mangatan/releases/download/embedded-openjdk-ios13-v16/java_bundle-device.zip"

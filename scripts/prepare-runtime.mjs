@@ -33,11 +33,19 @@ const RUNTIME = join(ROOT, "src-tauri", "runtime");
 const JAR = join(RUNTIME, "runner.jar");
 const JRE = join(RUNTIME, "jre");
 
-/** Pinned release. Changing either means re-checking the jar's hash below. */
-const VERSION = "v1.0.9";
-const JAR_NAME = "MExtensionServer-v1.0.9-r1.jar";
+/**
+ * Pinned release. Changing either means re-checking the jar's hash below.
+ *
+ * v1.0.9 was six weeks older than the live Keiyoushi index, whose extensions are all built against
+ * extension-lib 1.6. On that jar a real APK installs and lists its sources, then every network call
+ * dies with `VerifyError: Bad type on operand stack` in extension-lib's shared okhttp interceptor —
+ * measured 3/3 runs, two extensions, both v1.0.9 builds. v1.1.1 is the release that made the same
+ * two extensions pass install → popular → details → chapters → pages.
+ */
+const VERSION = "v1.1.1";
+const JAR_NAME = "MExtensionServer-v1.1.1-r1.jar";
 /** The jar inside every platform bundle is the same file; this is its hash. */
-const JAR_SHA256 = "806519b4bab85ae17b2b41fe944e79184ef66b9db5182042300da311d956930f";
+const JAR_SHA256 = "b5cdb25b13a9b7146eb8e6f7539dc407e913e77e8f7b1534642287afdbf14f40";
 
 /** Release asset per platform. The bundles differ only in the JRE they carry. */
 const ASSETS = {
@@ -116,7 +124,10 @@ async function main() {
 
   const asset = ASSETS[key];
   const url = `https://github.com/kodjodevf/M-Extension-Server/releases/download/${VERSION}/${asset}`;
-  const archive = join(CACHE, asset);
+  // The version is part of the cache name. Keyed by asset name alone, a pin bump reused the old
+  // archive and failed with "no MExtensionServer-<new>-r1.jar in <asset>" — the hash check could not
+  // see it, because the wrong bundle was never unpacked.
+  const archive = join(CACHE, `${VERSION}-${asset}`);
   console.log(`extension host: ${asset} (${VERSION})`);
   const bytes = existsSync(archive) ? readFileSync(archive) : await download(url, archive);
   if (bytes.length < 1024 * 1024) {

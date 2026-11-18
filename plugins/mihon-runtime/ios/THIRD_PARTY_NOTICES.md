@@ -6,7 +6,7 @@ SHA-256, and the pod embeds the result in the app.
 
 | Artefact | Source | Licence |
 |---|---|---|
-| `MExtensionServer.jar` | [kodjodevf/M-Extension-Server](https://github.com/kodjodevf/M-Extension-Server) release `ios-runtime-v9` | Mozilla Public License 2.0 |
+| `MExtensionServer.jar` | [kodjodevf/M-Extension-Server](https://github.com/kodjodevf/M-Extension-Server) release `ios-runtime-v11` | Mozilla Public License 2.0 |
 | `OpenJDK.xcframework` + `java_bundle-device.zip` | [1Selxo/Mangatan](https://github.com/1Selxo/Mangatan) release `embedded-openjdk-ios13-v16` | GPL-2.0 with the Classpath Exception (OpenJDK) |
 
 The ObjC++ bridge, the pod, the build script, the framework's `Info.plist`, the exports shim and the

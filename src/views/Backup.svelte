@@ -130,7 +130,7 @@
       await library.refreshLibrary();
       await categories.load(store);
       applied = { doc, summary, message: outcomeSentence(summary, result) };
-      notice = `${chosen.name} — ${result.series} series, ${result.chapters} chapters, ${result.positions} positions, ${result.read} read marks.`;
+      notice = `${chosen.name} — ${result.series} series, ${result.chapters} chapters, ${result.progress} chapter progress, ${result.positions} resume positions, ${result.read} read marks.`;
       pending = null;
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
@@ -237,7 +237,7 @@
             <span class="chip static">{pending.summary.chapters} chapters</span>
             <span class="chip static">{pending.summary.categories} categories</span>
             <span class="chip static">{pending.summary.sessions} sessions</span>
-            {#if pending.summary.progress > 0}<span class="chip static">{pending.summary.progress} positions</span>{/if}
+            {#if pending.summary.progress > 0}<span class="chip static">{pending.summary.progress} chapter progress</span>{/if}
             {#if pending.summary.repos > 0}<span class="chip static">{pending.summary.repos} repositories</span>{/if}
           </div>
           <p>{pending.summary.sentence}</p>

@@ -31,7 +31,7 @@ that knows a native runtime exists, and it answers `null` on every build that ha
 | `plugins/mihon-runtime/ios/PrepareEmbeddedRuntime.sh` | **ours**: downloads the pinned JVM + server jar, checks SHA-256, links the device slice, assembles the Java home |
 | `plugins/mihon-runtime/ios/RuntimeSources/` | **ours**: framework `Info.plist`, exports shim, simulator stub, two `java.util.logging` stubs |
 | `plugins/mihon-runtime/ios/Frameworks/`, `Runtime/` | **not committed** (git-ignored): built by the script, hundreds of megabytes |
-| `MExtensionServer.jar` | **not ours**: M-Extension-Server, MPL-2.0, release `ios-runtime-v9` |
+| `MExtensionServer.jar` | **not ours**: M-Extension-Server, MPL-2.0, release `ios-runtime-v11` |
 | `OpenJDK.xcframework` + `java_bundle-device.zip` | **not ours**: OpenJDK Zero build, release `embedded-openjdk-ios13-v16` |
 
 Licences and why nothing upstream was copied are in `plugins/mihon-runtime/ios/THIRD_PARTY_NOTICES.md`. The
@@ -48,8 +48,8 @@ be added here at all.
 
 That is why a source's own filters work on the iPhone with no ObjC++ change: `MExtensionServer.jar`
 implements `filtersManga` **and** reads a `filterList` back (`MihonInvoker.convertFilterList`). The
-pinned `ios-runtime-v9` release has both, as does the Linux jar pinned for the desktop and the HT-Server
-(`plugins/mihon-runtime/linux/runner.jar`). Pinning a different release must keep `convertFilterList`
+pinned `ios-runtime-v11` release has both, as does the Linux jar pinned for the desktop and the HT-Server
+(`plugins/mihon-runtime/linux/runner.jar`, v1.1.1). Pinning a different release must keep `convertFilterList`
 in `MihonInvoker` — the app cannot ask (no capability flag advertises it), so an older jar would draw a
 Filters sheet whose Apply changes nothing. `docs/source-filters.md` has the shapes and the measurements.
 
