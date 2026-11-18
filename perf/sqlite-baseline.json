@@ -1,6 +1,6 @@
 {
   "card": "TEST-03 (#29)",
-  "measuredAt": "2026-11-18T00:39:07.061Z",
+  "measuredAt": "2026-11-18T00:49:43.761Z",
   "engine": "src/lib/db/sqlite.ts over node:sqlite",
   "note": "The SQL, the JSON documents and the base64 blobs are the desktop engine's own. node:sqlite stands in for @tauri-apps/plugin-sql as the transport, so the plugin's IPC hop is not part of these numbers.",
   "environment": {
@@ -27,70 +27,70 @@
     "chaptersTotal": 48000
   },
   "database": {
-    "bytes": 56811520,
+    "bytes": 62124032,
     "files": [
       "perf-library.db",
       "perf-library.db-wal",
       "perf-library.db-shm"
     ]
   },
-  "buildMs": 4486,
+  "buildMs": 6378,
   "measurements": {
     "coldOpen": {
-      "p50": 180.045,
-      "p95": 196.727,
-      "max": 196.727,
-      "min": 171.494,
+      "p50": 200.668,
+      "p95": 220.392,
+      "max": 220.392,
+      "min": 186.946,
       "runs": 15
     },
     "paneSelection": {
-      "p50": 132.197,
-      "p95": 145.416,
-      "max": 145.416,
-      "min": 126.872,
+      "p50": 0.092,
+      "p95": 0.162,
+      "max": 0.162,
+      "min": 0.088,
       "runs": 15
     },
     "seriesSelection": {
-      "p50": 127.541,
-      "p95": 136.519,
-      "max": 136.519,
-      "min": 124.962,
+      "p50": 0.28,
+      "p95": 0.392,
+      "max": 0.392,
+      "min": 0.242,
       "runs": 15
     },
     "scrollP95": {
-      "p50": 0.005,
-      "p95": 0.013,
-      "max": 0.156,
+      "p50": 0.006,
+      "p95": 0.014,
+      "max": 0.169,
       "frames": 120,
       "rendered": 35
     },
     "readerPage1": {
-      "p50": 1.753,
-      "p95": 3.029,
-      "max": 3.029,
-      "min": 1.7,
+      "p50": 3.22,
+      "p95": 4.706,
+      "max": 4.706,
+      "min": 3.1,
       "runs": 15
     },
     "coverCold": {
-      "p50": 0.151,
-      "p95": 0.242,
-      "max": 0.242,
-      "min": 0.137,
+      "p50": 0.246,
+      "p95": 0.401,
+      "max": 0.401,
+      "min": 0.164,
       "runs": 10
     },
     "breakdown": {
       "paneRowOnly": {
-        "p50": 0.024,
-        "p95": 0.039,
-        "max": 0.039,
-        "min": 0.022,
+        "p50": 0.021,
+        "p95": 0.063,
+        "max": 0.063,
+        "min": 0.018,
         "runs": 15
       },
       "paneChaptersOnly": {
-        "p50": 126.726,
-        "p95": 139.968,
-        "max": 139.968,
-        "min": 122.03,
+        "p50": 0.06,
+        "p95": 0.07,
+        "max": 0.07,
+        "min": 0.058,
         "runs": 15
       }
     }

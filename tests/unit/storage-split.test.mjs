@@ -46,6 +46,10 @@ function spyDatabase() {
         touched.push(`prefix ${store}`);
         return db.prefix(store, prefix);
       },
+      byOwner: (store, owner) => {
+        touched.push(`byOwner ${store}`);
+        return db.byOwner(store, owner);
+      },
       remove: (store, key) => {
         touched.push(`remove ${store}`);
         return db.remove(store, key);

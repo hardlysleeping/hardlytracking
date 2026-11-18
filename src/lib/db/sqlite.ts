@@ -19,7 +19,7 @@
  *   `JSON.stringify(blob)` is `{}` — silently writing empty rows. The plugin's values cross IPC as
  *   JSON, so binary cannot ride alongside; it is encoded, tagged, and rebuilt on the way out.
  */
-import { keyPathOf, type Database, type StoreName } from "./open";
+import { keyPathOf, ownerPathOf, ownerStores, OWNER_INDEX, type Database, type StoreName } from "./open";
 
 /** The file inside the app's data directory. */
 export const LOCAL_DATABASE_FILE = "hardlytracking.db";
@@ -62,8 +62,48 @@ const CREATE = `CREATE TABLE IF NOT EXISTS records (
   store TEXT NOT NULL,
   key TEXT NOT NULL,
   doc TEXT NOT NULL,
+  owner TEXT,
   PRIMARY KEY (store, key)
 )`;
+
+/**
+ * The owner column, for a library written before it existed.
+ *
+ * `owner` is a projection of a field inside the document (a chapter's `seriesId`), so it can always
+ * be rebuilt from the row: one `UPDATE` with `json_extract` fills 48 000 rows inside SQLite instead
+ * of parsing them in JavaScript. A very old or unusual SQLite build without the JSON functions gets
+ * the same result one row at a time — slower, once, and only on the path where it is needed.
+ */
+async function ensureOwnerColumn(db: SqlDatabase): Promise<void> {
+  const columns = await db.select<Array<{ name: string }>>("PRAGMA table_info(records)");
+  if (!columns.some((column) => column.name === OWNER_INDEX)) {
+    await db.execute(`ALTER TABLE records ADD COLUMN ${OWNER_INDEX} TEXT`);
+  }
+  await db.execute(`CREATE INDEX IF NOT EXISTS records_owner ON records (store, ${OWNER_INDEX})`);
+  for (const [store, field] of ownerStores()) {
+    try {
+      await db.execute(
+        `UPDATE records SET ${OWNER_INDEX} = json_extract(doc, '$."${field}"')
+         WHERE store = $1 AND ${OWNER_INDEX} IS NULL`,
+        [store],
+      );
+    } catch {
+      const rows = await db.select<Array<{ key: string; doc: string }>>(
+        `SELECT key, doc FROM records WHERE store = $1 AND ${OWNER_INDEX} IS NULL`,
+        [store],
+      );
+      for (const row of rows) {
+        const owner = (JSON.parse(row.doc) as Record<string, unknown>)[field];
+        if (typeof owner !== "string") continue;
+        await db.execute(`UPDATE records SET ${OWNER_INDEX} = $3 WHERE store = $1 AND key = $2`, [
+          store,
+          row.key,
+          owner,
+        ]);
+      }
+    }
+  }
+}
 
 /** Marks a binary value on the wire. A document cannot contain this key by accident. */
 const BLOB = "__hardlytracking_blob__";
@@ -139,6 +179,7 @@ export class SqliteDatabase implements Database {
   static async open(name = LOCAL_DATABASE_FILE, connect: SqlConnector = connectPlugin): Promise<SqliteDatabase> {
     const db = await connect(name);
     await db.execute(CREATE);
+    await ensureOwnerColumn(db);
     return new SqliteDatabase(db);
   }
 
@@ -170,9 +211,14 @@ export class SqliteDatabase implements Database {
         throw new Error(`a ${store} row has no ${keyPathOf(store)} to key it by`);
       }
       const doc = JSON.stringify(await toWire(value));
+      // The owner is written from the row being written, in the same statement as the document,
+      // so an updated row cannot keep a stale one.
+      const ownerField = ownerPathOf(store);
+      const owner = ownerField === undefined ? null : value[ownerField];
       await this.db.execute(
-        "INSERT INTO records (store, key, doc) VALUES ($1, $2, $3) ON CONFLICT(store, key) DO UPDATE SET doc = excluded.doc",
-        [store, key, doc],
+        `INSERT INTO records (store, key, doc, ${OWNER_INDEX}) VALUES ($1, $2, $3, $4)
+         ON CONFLICT(store, key) DO UPDATE SET doc = excluded.doc, ${OWNER_INDEX} = excluded.${OWNER_INDEX}`,
+        [store, key, doc, typeof owner === "string" ? owner : null],
       );
     });
   }
@@ -192,6 +238,16 @@ export class SqliteDatabase implements Database {
     const rows = await this.db.select<Array<{ doc: string }>>(
       "SELECT doc FROM records WHERE store = $1 AND substr(key, 1, length($2)) = $2",
       [store, prefix],
+    );
+    return rows.map((row) => fromWire(JSON.parse(row.doc)) as T);
+  }
+
+  /** One series' chapters, from the indexed column: a lookup, not a pass over the library. */
+  async byOwner<T>(store: StoreName, owner: string): Promise<T[]> {
+    if (ownerPathOf(store) === undefined) throw new Error(`${store} rows have no owner to read by`);
+    const rows = await this.db.select<Array<{ doc: string }>>(
+      `SELECT doc FROM records WHERE store = $1 AND ${OWNER_INDEX} = $2`,
+      [store, owner],
     );
     return rows.map((row) => fromWire(JSON.parse(row.doc)) as T);
   }

@@ -176,7 +176,7 @@ export interface SourceMappingRow {
 }
 
 interface ChapterRow extends Chapter {
-  /** Present so `all("chapters")` can be filtered without an index. */
+  /** The row's own key. `seriesId` (inherited) is what `byOwner` indexes on. */
   id: string;
 }
 
@@ -280,11 +280,10 @@ export class LibraryStore {
   }
 
   async listChapters(seriesId: string): Promise<Chapter[]> {
-    const rows = await this.db.all<ChapterRow>("chapters");
-    return rows
-      .filter((c) => c.seriesId === seriesId)
-      .sort((a, b) => b.number - a.number)
-      .map(({ ...chapter }) => chapter);
+    // One series, not the whole store: `byOwner` is an index in both engines, so opening a title
+    // costs that title rather than every chapter on the device.
+    const rows = await this.db.byOwner<ChapterRow>("chapters", seriesId);
+    return rows.sort((a, b) => b.number - a.number).map(({ ...chapter }) => chapter);
   }
 
   /**

@@ -99,6 +99,31 @@ export function keyPathOf(store: StoreName): string {
   return KEY_PATH[store];
 }
 
+/**
+ * The field that says which row a store's rows belong to, where that is not the key.
+ *
+ * A chapter is keyed by its own id and carries `seriesId`, so "this series' chapters" was a whole
+ * store read plus a filter — 48 000 rows and 129 ms per pane pick on a large library, paid again for
+ * every title opened. A projection of that field is what both engines can answer cheaply from:
+ * IndexedDB an index on the store, SQLite a column in the same row, in the same statement as the
+ * document. Neither can drift, because both are derived from the row that is being written.
+ */
+const OWNER_PATH: Partial<Record<StoreName, string>> = {
+  chapters: "seriesId",
+};
+
+/** The index's name in IndexedDB and SQLite's column both use this word. */
+export const OWNER_INDEX = "owner";
+
+export function ownerPathOf(store: StoreName): string | undefined {
+  return OWNER_PATH[store];
+}
+
+/** Every store that has an owner field, for the engine that has to create and fill it. */
+export function ownerStores(): Array<[StoreName, string]> {
+  return Object.entries(OWNER_PATH) as Array<[StoreName, string]>;
+}
+
 export interface Database {
   get<T>(store: StoreName, key: string): Promise<T | undefined>;
   put(store: StoreName, value: Record<string, unknown>): Promise<void>;
@@ -112,12 +137,22 @@ export interface Database {
    * pages must cost one chapter, not the whole download folder.
    */
   prefix<T>(store: StoreName, prefix: string): Promise<T[]>;
+  /**
+   * Every row of `store` whose owner field equals `owner`, without reading the rest.
+   *
+   * The counterpart to `prefix` for stores whose owner is a field rather than the key: a chapter's
+   * series. It is what keeps opening a title proportional to that title instead of to the library.
+   * Throws for a store that has no owner field — the question has no answer there, and a silent
+   * `[]` would read as "this series has no chapters".
+   */
+  byOwner<T>(store: StoreName, owner: string): Promise<T[]>;
   remove(store: StoreName, key: string): Promise<void>;
 }
 
 const DB_NAME = "hardlytracking";
-// 17: the bytes stores (`bookFiles`, `downloadPageData`, `imageCacheData`) — see `STORES`.
-const DB_VERSION = 17;
+// 18: the `owner` index — see `byOwner`, and 17: the bytes stores (`bookFiles`, `downloadPageData`,
+// `imageCacheData`) — see `STORES`.
+const DB_VERSION = 18;
 
 function wrap<T>(request: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -152,16 +187,23 @@ function openIndexedDb(): Promise<Database> {
       const db = request.result;
       for (const name of STORES) {
         const keyPath = KEY_PATH[name];
+        let store: IDBObjectStore | undefined;
         if (db.objectStoreNames.contains(name)) {
           // A store whose key path changed cannot be keyed correctly, so it is rebuilt rather
           // than left to fail on the first write (that is what `DataError: key path did not
           // yield a value` meant for `extensions`). The row shape changed with the key, so the
           // old rows are unreadable anyway.
-          const existing = request.transaction?.objectStore(name).keyPath;
-          if (existing === keyPath) continue;
-          db.deleteObjectStore(name);
+          const existing = request.transaction?.objectStore(name);
+          if (existing !== undefined && existing.keyPath === keyPath) store = existing;
+          else db.deleteObjectStore(name);
         }
-        db.createObjectStore(name, { keyPath });
+        store ??= db.createObjectStore(name, { keyPath });
+        // The owner index is added to an existing store in place: its rows already carry the
+        // field, and IndexedDB fills the index from them as it is created, so no migration pass.
+        const ownerPath = OWNER_PATH[name];
+        if (ownerPath !== undefined && !store.indexNames.contains(OWNER_INDEX)) {
+          store.createIndex(OWNER_INDEX, ownerPath);
+        }
       }
     };
     request.onsuccess = () => resolve(request.result);
@@ -186,6 +228,13 @@ function openIndexedDb(): Promise<Database> {
             IDBKeyRange.bound(prefix, `${prefix}\uffff`),
           ) as IDBRequest<T[]>,
         ),
+      byOwner: <T,>(store: StoreName, owner: string) => {
+        const ownerPath = ownerPathOf(store);
+        if (ownerPath === undefined) {
+          return Promise.reject(new Error(`${store} rows have no owner to read by`));
+        }
+        return wrap<T[]>(tx(store, "readonly").index(OWNER_INDEX).getAll(owner) as IDBRequest<T[]>);
+      },
       remove: (store: StoreName, key: string) => wrap(tx(store, "readwrite").delete(key)).then(() => undefined),
     };
   });
@@ -223,6 +272,12 @@ export function memoryDatabase(): Database {
     },
     async prefix<T,>(store: StoreName, prefix: string) {
       return [...table(store).entries()].filter(([key]) => key.startsWith(prefix)).map(([, value]) => value) as T[];
+    },
+    async byOwner<T,>(store: StoreName, owner: string) {
+      const ownerPath = ownerPathOf(store);
+      // The double answers the same question the engines do, and refuses the same one they refuse.
+      if (ownerPath === undefined) throw new Error(`${store} rows have no owner to read by`);
+      return [...table(store).values()].filter((value) => value[ownerPath] === owner) as T[];
     },
     async remove(store: StoreName, key: string) {
       table(store).delete(key);

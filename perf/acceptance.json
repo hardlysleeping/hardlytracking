@@ -1,6 +1,6 @@
 {
   "card": "TEST-04 (#30)",
-  "measuredAt": "2026-11-18T00:38:53.210Z",
+  "measuredAt": "2026-11-18T00:49:33.873Z",
   "environment": {
     "node": "v22.23.4",
     "platform": "linux x64",
@@ -23,31 +23,31 @@
     {
       "name": "cold Library open",
       "requirement": "< 1500 ms",
-      "measured": "180.045 ms (p95 196.727)",
+      "measured": "200.668 ms (p95 220.392)",
       "pass": true
     },
     {
       "name": "pane selection",
       "requirement": "< 400 ms p95",
-      "measured": "145.416 ms",
+      "measured": "0.162 ms",
       "pass": true
     },
     {
       "name": "series selection",
       "requirement": "< 400 ms p95",
-      "measured": "136.519 ms",
+      "measured": "0.392 ms",
       "pass": true
     },
     {
       "name": "reader first page (device copy)",
       "requirement": "< 200 ms p95",
-      "measured": "3.029 ms",
+      "measured": "4.706 ms",
       "pass": true
     },
     {
       "name": "no multi-second freeze (storage)",
       "requirement": "< 1000 ms worst case",
-      "measured": "196.7 ms",
+      "measured": "220.4 ms",
       "pass": true
     },
     {
@@ -113,11 +113,11 @@
   "fixtures": {
     "sqlite": {
       "code": 0,
-      "tail": "\ncold open (open + boot reads)         180.04 ms\npane selection (row + chapters)       132.20 ms\n  ↳ the series row alone                0.02 ms\n  ↳ the chapter list alone            126.73 ms\nscroll frame, p50 (data half)           0.01 ms\nscroll frame, p95 (data half)           0.01 ms\nseries selection (details + list)     127.54 ms\nreader page 1 (device copy)             1.75 ms\ncover, cold (row + bytes)               0.15 ms\n\nwrote /var/home/bazzite/apps/hardlytracking/perf/sqlite-baseline.json"
+      "tail": "\ncold open (open + boot reads)         200.67 ms\npane selection (row + chapters)         0.09 ms\n  ↳ the series row alone                0.02 ms\n  ↳ the chapter list alone              0.06 ms\nscroll frame, p50 (data half)           0.01 ms\nscroll frame, p95 (data half)           0.01 ms\nseries selection (details + list)       0.28 ms\nreader page 1 (device copy)             3.22 ms\ncover, cold (row + bytes)               0.25 ms\n\nwrote /var/home/bazzite/apps/hardlytracking/perf/sqlite-baseline.json"
     },
     "reader": {
       "code": 0,
-      "tail": "# pass 16\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 4194.879831"
+      "tail": "# pass 16\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 5162.707393"
     },
     "bench": {},
     "panes": {
@@ -131,7 +131,7 @@
   },
   "storage": {
     "card": "TEST-03 (#29)",
-    "measuredAt": "2026-11-18T00:39:07.061Z",
+    "measuredAt": "2026-11-18T00:49:43.761Z",
     "engine": "src/lib/db/sqlite.ts over node:sqlite",
     "note": "The SQL, the JSON documents and the base64 blobs are the desktop engine's own. node:sqlite stands in for @tauri-apps/plugin-sql as the transport, so the plugin's IPC hop is not part of these numbers.",
     "environment": {
@@ -158,80 +158,80 @@
       "chaptersTotal": 48000
     },
     "database": {
-      "bytes": 56811520,
+      "bytes": 62124032,
       "files": [
         "perf-library.db",
         "perf-library.db-wal",
         "perf-library.db-shm"
       ]
     },
-    "buildMs": 4486,
+    "buildMs": 6378,
     "measurements": {
       "coldOpen": {
-        "p50": 180.045,
-        "p95": 196.727,
-        "max": 196.727,
-        "min": 171.494,
+        "p50": 200.668,
+        "p95": 220.392,
+        "max": 220.392,
+        "min": 186.946,
         "runs": 15
       },
       "paneSelection": {
-        "p50": 132.197,
-        "p95": 145.416,
-        "max": 145.416,
-        "min": 126.872,
+        "p50": 0.092,
+        "p95": 0.162,
+        "max": 0.162,
+        "min": 0.088,
         "runs": 15
       },
       "seriesSelection": {
-        "p50": 127.541,
-        "p95": 136.519,
-        "max": 136.519,
-        "min": 124.962,
+        "p50": 0.28,
+        "p95": 0.392,
+        "max": 0.392,
+        "min": 0.242,
         "runs": 15
       },
       "scrollP95": {
-        "p50": 0.005,
-        "p95": 0.013,
-        "max": 0.156,
+        "p50": 0.006,
+        "p95": 0.014,
+        "max": 0.169,
         "frames": 120,
         "rendered": 35
       },
       "readerPage1": {
-        "p50": 1.753,
-        "p95": 3.029,
-        "max": 3.029,
-        "min": 1.7,
+        "p50": 3.22,
+        "p95": 4.706,
+        "max": 4.706,
+        "min": 3.1,
         "runs": 15
       },
       "coverCold": {
-        "p50": 0.151,
-        "p95": 0.242,
-        "max": 0.242,
-        "min": 0.137,
+        "p50": 0.246,
+        "p95": 0.401,
+        "max": 0.401,
+        "min": 0.164,
         "runs": 10
       },
       "breakdown": {
         "paneRowOnly": {
-          "p50": 0.024,
-          "p95": 0.039,
-          "max": 0.039,
-          "min": 0.022,
+          "p50": 0.021,
+          "p95": 0.063,
+          "max": 0.063,
+          "min": 0.018,
           "runs": 15
         },
         "paneChaptersOnly": {
-          "p50": 126.726,
-          "p95": 139.968,
-          "max": 139.968,
-          "min": 122.03,
+          "p50": 0.06,
+          "p95": 0.07,
+          "max": 0.07,
+          "min": 0.058,
           "runs": 15
         }
       }
     }
   },
-  "base": "http://localhost:35245",
+  "base": "http://localhost:45321",
   "bench": {
-    "fps": 60.71766286768788,
-    "firstPaintMs": 88.20000000018626,
-    "p95FrameMs": 16.799999999999727,
+    "fps": 60.63316932558584,
+    "firstPaintMs": 113.5,
+    "p95FrameMs": 16.700000000000273,
     "worstFrameMs": 16.800000000000182,
     "frames": 122
   },
