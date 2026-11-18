@@ -70,6 +70,11 @@ Then attach it to both download slots, because the build service cannot write th
 the file it built, so a silent upload failure fails the run). Use it when Codemagic itself is
 unavailable, and say which one produced the artefact.
 
+`scripts/ipa.sh` is all of the above in one command: it dispatches, waits, downloads with the token and
+a cookie jar, reads the bundle (version, plugin registration, both frameworks, unsigned) and leaves the
+file at `/tmp/HardlyTracking-unsigned.ipa`; `--release` also updates `~/IPA` and both download slots,
+and `--build <id>` re-runs the verify-and-fetch half against a build that already exists.
+
 Check the version and build inside the bundle — unpacking `Payload/App.app/Info.plist` is enough:
 
     unzip -q -o ~/IPA/HardlyTracking-unsigned.ipa 'Payload/*.app/Info.plist' -d /tmp/check
