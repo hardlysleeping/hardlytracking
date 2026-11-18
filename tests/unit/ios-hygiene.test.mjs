@@ -32,6 +32,8 @@ const PBXPROJ = join(root, "ios", "App", "App.xcodeproj", "project.pbxproj");
 const PODFILE = join(root, "ios", "App", "Podfile");
 const PODSPEC = join(root, "plugins", "mihon-runtime", "MihonRuntime.podspec");
 const WORKFLOW = join(root, ".github", "workflows", "ios-ipa.yml");
+/** The primary iOS build. `ios-ipa.yml` is the fallback, so both carry the same build assertions. */
+const CODEMAGIC = join(root, "codemagic.yaml");
 
 const info = readPlist(readFileSync(INFO_PLIST, "utf8"));
 const pbxproj = readFileSync(PBXPROJ, "utf8");
@@ -187,4 +189,23 @@ test("the workflow puts the IPA on a release, not just in the run", () => {
   assert.match(workflow, /HardlyTracking_\$\{VERSION\}_unsigned\.ipa/, "the asset name does not follow the other releases");
   // The verification is the API's answer, so a silent upload failure cannot pass.
   assert.match(workflow, /select\(\.name == "HardlyTracking-unsigned\.ipa"\) \| \.size/);
+});
+
+test("the Codemagic workflow builds the same unsigned bundle the fallback does", () => {
+  const yaml = readFileSync(CODEMAGIC, "utf8");
+  // Codemagic is the build service that actually gets a macOS machine here; GitHub's arm64 pool
+  // refused to allocate one four times in a row on 0.7.16. The workflow id is what
+  // `POST /builds {"workflowId": …}` names, so a rename without this test is a dispatch that 404s.
+  assert.match(yaml, /^  ios-unsigned:/m, "the workflow the API dispatches is not in codemagic.yaml");
+  assert.match(yaml, /instance_type: mac_mini_m2/, "the build no longer targets a macOS instance");
+  // The same two facts the GitHub workflow checks, because a plugin that compiles but is never
+  // registered reads on device as "the runtime does not start", with nothing in the log.
+  assert.match(yaml, /packageClassList/, "the Codemagic build does not check plugin registration");
+  assert.match(yaml, /\[ "\$\(printf '%s\\n%s\\n' 18\.0 "\$SDK"/, "the Codemagic build does not assert the SDK floor");
+  // And what must be inside the bundle it publishes.
+  assert.match(yaml, /MinimumOSVersion/, "the built bundle is not checked for its deployment target");
+  assert.match(yaml, /MExtensionServer\.jar/, "the built bundle is not checked for the extension runtime");
+  assert.match(yaml, /zip -qry .*HardlyTracking-unsigned\.ipa"? Payload/, "the artifact is not a payload zip");
+  // No Rust: this shell is Capacitor, and the leftover Tauri step cost two minutes a build.
+  assert.doesNotMatch(yaml, /rustup|src-tauri/, "a Rust step or Tauri path is back in the iOS build");
 });

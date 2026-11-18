@@ -35,24 +35,42 @@ Two things that job will not do:
 - **It publishes whatever the legs produced**, so a leg that was cancelled for reasons outside the build
   (see §5) leaves the release missing that platform rather than failing loudly.
 
-## 3. The IPA is a separate run, but it publishes itself
+## 3. Build the IPA on Codemagic, then attach it
 
-`ios-ipa.yml` is `workflow_dispatch` only, because macOS minutes are not free. It uploads the IPA to
-**both** the stable `ios-0.1.0` download and the release for the version it just built, so a tag plus
-one dispatch produces a downloadable IPA with no hand step:
+**Codemagic is the iOS build service; `ios-ipa.yml` is the fallback.** The API token lives at
+`~/.config/codemagic/token` (never printed) and the app is registered against this repo, so a tag needs
+no GitHub macOS runner:
 
-    gh workflow run ios-ipa.yml --ref v0.7.16 -f ref=v0.7.16
+    TOKEN=$(cat ~/.config/codemagic/token)
+    curl -sS -X POST https://api.codemagic.io/builds \
+      -H "X-Auth-Token: $TOKEN" -H 'Content-Type: application/json' \
+      --data '{"appId":"6aefa30ff9882de26d15662e","workflowId":"ios-unsigned","tag":"v0.7.16"}'
 
-The upload is a build step (`gh release upload … --clobber`) and it verifies itself by asking the
-releases API for the asset size, so a silent failure fails the run. It used to be manual: 0.5.1
-shipped with no IPA at all, 0.5.2 and 0.5.3 were fixed up by hand, and 0.7.13–0.7.15 each needed it
-too. Keep a copy locally as well, because `~/IPA/HardlyTracking-unsigned.ipa` is what gets sideloaded:
+That returns a `buildId`; `GET https://api.codemagic.io/builds/<buildId>` gives the status, the commit
+and the `artefacts[]` URL. The commit it reports is the **annotated tag object** (`git rev-parse
+v0.7.16`), not the release commit — compare it with `git rev-parse 'v0.7.16^{}'` before believing the
+right code was built. Codemagic's `mac_mini_m2` pool is what keeps this off GitHub's macOS queue, which
+refused to hand out a runner four times in a row on 0.7.16 while Codemagic built the same tag.
 
-    gh run download <run-id> -n HardlyTracking-unsigned-ipa -D /tmp/ipa
-    cp /tmp/ipa/HardlyTracking-unsigned.ipa ~/IPA/HardlyTracking-unsigned.ipa
+Download needs the token **and** a cookie jar, or a bare `curl` saves a small `FORBIDDEN` JSON with an
+`.ipa` name:
 
-`scripts/ipa.sh` does the dispatch, the watch and the copy in one command. Check the version and build
-inside the bundle — unpacking `Payload/App.app/Info.plist` is enough:
+    curl -fL -b /tmp/cm.jar -c /tmp/cm.jar -H "X-Auth-Token: $TOKEN" '<artefact-url>' \
+      -o /tmp/HardlyTracking-unsigned.ipa
+
+Then attach it to both download slots, because the build service cannot write this repo's releases:
+
+    gh release upload ios-0.1.0 /tmp/HardlyTracking-unsigned.ipa --clobber
+    cp /tmp/HardlyTracking-unsigned.ipa "/tmp/HardlyTracking_${VERSION}_unsigned.ipa"
+    gh release upload "v$VERSION" "/tmp/HardlyTracking_${VERSION}_unsigned.ipa" --clobber
+    cp /tmp/HardlyTracking-unsigned.ipa ~/IPA/HardlyTracking-unsigned.ipa
+
+`ios-ipa.yml` is the fallback: `workflow_dispatch` only, and it now uploads to the same two slots itself
+(`gh release upload … --clobber`, then it asks the releases API for the asset size and compares it with
+the file it built, so a silent upload failure fails the run). Use it when Codemagic itself is
+unavailable, and say which one produced the artefact.
+
+Check the version and build inside the bundle — unpacking `Payload/App.app/Info.plist` is enough:
 
     unzip -q -o ~/IPA/HardlyTracking-unsigned.ipa 'Payload/*.app/Info.plist' -d /tmp/check
     python3 -c "import plistlib,glob; d=plistlib.load(open(glob.glob('/tmp/check/Payload/*.app/Info.plist')[0],'rb')); print(d['CFBundleShortVersionString'], d['CFBundleVersion'])"

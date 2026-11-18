@@ -7,24 +7,13 @@ workflows:
       node: 22
       java: 21
       xcode: latest
-      vars:
-        CARGO_TERM_COLOR: always
+    # The shell is Capacitor, not Tauri: there is no Rust in this build. The Rust step and cargo caches
+    # that used to live here were inherited from the desktop app and cost two minutes a build, plus one
+    # more network dependency that could fail on its own.
     cache:
       cache_paths:
-        - ~/.cargo
-        - $HOME/.rustup
-        - $HOME/Library/Caches/tauri
-        - $CM_BUILD_DIR/src-tauri/target
+        - ~/.cocoapods
     scripts:
-      - name: Rust toolchain
-        script: |
-          set -euo pipefail
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
-          source "$HOME/.cargo/env"
-          rustup target add aarch64-apple-ios
-          rustc -V
-          cargo -V
-          xcodebuild -version
       - name: Install dependencies and build web app
         script: |
           set -euo pipefail
