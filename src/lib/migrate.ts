@@ -328,6 +328,25 @@ export function describeMigration(plan: MigrationPlan, facts: MigrationFacts, pa
  * `mihon` ids carry no source id (`mihon:12` is a manga, not a source), so they answer `null` — a
  * mapping invented from nothing would be worse than an absent one.
  */
+/**
+ * A source id as a mapping row stores it.
+ *
+ * Extensions list sources in the app's namespaced form (`dalvik:src:123`), while a mapping records
+ * the bare id (`123`) — the form `sourceKeyOfMapping` turns back into a mark key. Handing a *source*
+ * id to `mappingFromId`, which reads *series* ids, answered `"src"`: a mapping that named no source,
+ * so hiding the old source stopped hiding the title that had been migrated off it.
+ */
+export function mappingSourceId(sourceId: string): string {
+  for (const kind of ["dalvik", "htserver", "mihon"]) {
+    const prefix = `${kind}:`;
+    if (!sourceId.startsWith(prefix)) continue;
+    const native = sourceId.slice(prefix.length);
+    return native.startsWith("src:") ? native.slice("src:".length) : native;
+  }
+  // Komga names a library (`komga:<server>:<library>`) and Archive is one source: both keep the id.
+  return sourceId;
+}
+
 export function mappingFromId(seriesId: string, packageId?: string): { provider: string; sourceId: string; remoteSeriesId: string; packageId?: string } | null {
   const at = seriesId.indexOf(":");
   if (at < 1) return null;

@@ -8,9 +8,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-const { planMigration, alignChapters, describeMigration, furthestProgress, mappingFromId } = await import(
+const { planMigration, alignChapters, describeMigration, furthestProgress, mappingFromId, mappingSourceId } = await import(
   "../../src/lib/migrate.ts"
 );
+const { sourceKeyOfMapping } = await import("../../src/lib/marks.ts");
 
 const chapter = (id, number, extra = {}) => ({
   id,
@@ -241,4 +242,18 @@ test("a mapping is derived from the id, and never invented for mihon", () => {
     sourceId: "book-1",
     remoteSeriesId: "komga:book-1",
   });
+});
+
+test("a source id is stored the way a mapping names it, not with its namespace", async () => {
+  // `mappingFromId` reads *series* ids; handing it a *source* id answered "src", so the mapping
+  // named no source — hiding the old source stopped hiding the title migrated off it.
+  assert.equal(mappingSourceId("dalvik:src:123"), "123");
+  assert.equal(mappingSourceId("htserver:src:7"), "7");
+  assert.equal(mappingSourceId("mihon:src:9"), "9");
+  // A whole-server provider is its own source: the id is already the key.
+  assert.equal(mappingSourceId("komga:home:manga"), "komga:home:manga");
+  assert.equal(mappingSourceId("archive"), "archive");
+  assert.equal(mappingSourceId("local:src:library"), "local:src:library");
+  // And the round trip is what a mark key is built from.
+  assert.equal(sourceKeyOfMapping("dalvik", mappingSourceId("dalvik:src:123")), "dalvik:src:123");
 });

@@ -42,7 +42,7 @@ import { sourceMarks } from "./state/source-marks.svelte";
   import { destinationOf } from "./lib/destinations";
   import { parseRoute, go } from "./lib/nav";
   import { noteRoute } from "./lib/reader-origin";
-  import { isFetchableRepo, registerProtocolHandler, repoFromLocation } from "./lib/deep-link";
+  import { isFetchableRepo, registerProtocolHandler, repoFromLocation, withoutLinkPayload } from "./lib/deep-link";
   import { softwareHref, softwareRefFromLocation, watchSoftwareLinks } from "./lib/software";
   import { pairFromLocation, setHostToken, setRemoteHost } from "./lib/host";
 
@@ -113,11 +113,65 @@ import { sourceMarks } from "./state/source-marks.svelte";
   );
 
   /**
+   * The preferences and marks that live in the library's store, read whenever that store appears.
+   *
+   * An effect on the profile rather than a block after the first `open()`: a failed boot has a
+   * "Try again", and a retry that reopened the library without these turned every switch into a
+   * write to nothing — silently — and left the first-run gate closed for good.
+   */
+  let loadedStore: unknown = null;
+  $effect(() => {
+    const store = library.profile?.store;
+    if (store === undefined) {
+      loadedStore = null;
+      return;
+    }
+    if (loadedStore === store) return;
+    loadedStore = store;
+    void Promise.all([
+      categories.load(store),
+      sourceMarks.load(store),
+      settings.load(store),
+      downloads.load(),
+    ]);
+  });
+
+  /**
    * An install link opened this app: `?repo=…`, `#/extensions?repo=…`, or a packaged build handing us
    * `mihon://extension-store?url=…`. The repository is remembered here and consumed by the Extensions
    * screen, which is where adding one belongs.
    */
   let pendingRepo = $state<string | null>(null);
+
+  /**
+   * Was this launch opened *by* a link rather than by tapping the icon?
+   *
+   * The welcome screen sits above every route, so a first launch that arrived with a destination —
+   * a package page (`/source?repo=…&id=…`, `mihon://…`) or an install link (`?repo=…`) — had the
+   * thing it was opened for replaced by three doors, and the doors navigate away from it. Read
+   * synchronously, before the first render, because the gate is decided on that render and the URL
+   * is rewritten to `#/software/…` in `onMount`.
+   *
+   * Only this launch is skipped: `welcomed` is not written, so an ordinary next launch still shows
+   * the first-run screen. The screen is a start, not a gate.
+   */
+  const arrivedByLink: boolean = (() => {
+    if (softwareRefFromLocation(location.href) !== null) return true;
+    const repo = repoFromLocation(location.href);
+    return repo !== null && isFetchableRepo(repo);
+  })();
+
+  /**
+   * Take an install link's payload out of the address bar, wherever it sits.
+   *
+   * `?repo=…` / `?url=…` is an instruction to propose that repository once, not a permanent part of
+   * the address. Left in place, every later hash change reads it again as a fresh install link and
+   * pulls the person back to Extensions — and `go("/extensions")` on an address that already says
+   * Extensions is no hash change at all, so the screen kept the previous route.
+   */
+  function stripLinkPayload(): void {
+    history.replaceState(null, "", withoutLinkPayload(location.href));
+  }
 
   onMount(() => {
     // A pairing link points this device at a desktop that serves the runtime, and carries its token.
@@ -135,6 +189,9 @@ import { sourceMarks } from "./state/source-marks.svelte";
       readRoute();
     } else if (requested !== null && isFetchableRepo(requested)) {
       pendingRepo = requested;
+      // Consume the payload: `?repo=…` stays in the address bar forever otherwise, and every later
+      // hash change would be read as the same install link and pulled back to Extensions.
+      stripLinkPayload();
       go("/extensions");
     }
 
@@ -155,22 +212,23 @@ import { sourceMarks } from "./state/source-marks.svelte";
       // An in-app `#/extensions?repo=…` — a package page pointing at a repository this app has not
       // added — proposes the same panel a cold boot does, instead of parsing as an unknown route.
       const wantedRepo = repoFromLocation(location.href);
-      if (wantedRepo !== null && isFetchableRepo(wantedRepo)) {
+      if (wantedRepo !== null && isFetchableRepo(wantedRepo) && pendingRepo !== wantedRepo) {
         pendingRepo = wantedRepo;
         go("/extensions");
         return;
       }
+      // The same link again, or one already consumed: there is nothing new to propose, so the route
+      // is read. `go("/extensions")` twice is no hash change at all, and the screen used to stay on
+      // the previous route while the address bar said Extensions.
+      if (wantedRepo !== null && isFetchableRepo(wantedRepo)) stripLinkPayload();
       readRoute();
     };
     addEventListener("hashchange", onHash);
-    // Categories and preferences are read once, with the library: a series deep link and the
-    // reader both need them before a view mounts, so no view owns this.
-    void (async () => {
-      await library.open();
-      const store = library.profile?.store;
-      if (store === undefined) return;
-      await Promise.all([categories.load(store), sourceMarks.load(store), settings.load(store), downloads.load()]);
-    })();
+    // Categories and preferences belong to the store, so they are read when it exists — not once
+    // after the first `open()`. "Try again" after a failed boot reopens the library, and a one-shot
+    // read left every preference writing nowhere (and the first-run gate never opening) with no
+    // word said about it.
+    void library.open();
     return () => {
       removeEventListener("hashchange", onHash);
       stopViewport();
@@ -185,7 +243,7 @@ import { sourceMarks } from "./state/source-marks.svelte";
   not `library.ready`: a preference that has not loaded yet must not flash the welcome at someone who
   dismissed it months ago.
 -->
-{#if settings.ready && !settings.welcomed}
+{#if settings.ready && !settings.welcomed && !arrivedByLink}
   <Welcome />
 {:else if route.name === "read" && route.id !== null && route.chapterId !== null}
   <ReaderGate seriesId={route.id} chapterId={route.chapterId} />

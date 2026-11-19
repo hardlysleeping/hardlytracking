@@ -4,6 +4,7 @@ import {
   isFetchableRepo,
   repoFromLocation,
   repoFromQuery,
+  withoutLinkPayload,
 } from "../../src/lib/deep-link.ts";
 import { candidateIndexUrls, parseInstallLink } from "../../src/lib/extensions/repository.ts";
 
@@ -59,4 +60,26 @@ test("only http(s) repositories are fetchable", () => {
   assert.equal(isFetchableRepo("mihon://extension-store?url=x"), false);
   assert.equal(isFetchableRepo("file:///etc/passwd"), false);
   assert.equal(isFetchableRepo("not a url"), false);
+});
+
+test("an install link is consumed once, not kept in the address bar", () => {
+  // Left in place, `repoFromLocation` re-reads it on every hash change and pulls the person back to
+  // Extensions — and the first arrival never moved at all, because `go("/extensions")` on an address
+  // that already says `#/extensions?repo=…` is no hash change.
+  const quoted = "http://127.0.0.1:8460/?repo=" + encodeURIComponent(PB) + "#/extensions";
+  // The result is what `history.replaceState` takes: same origin, path + query + hash.
+  assert.equal(withoutLinkPayload(quoted), "/#/extensions");
+  assert.equal(withoutLinkPayload("http://127.0.0.1:8460/#/extensions?repo=" + encodeURIComponent(PB)), "/#/extensions");
+  // `url` is the same payload under its other name.
+  assert.equal(withoutLinkPayload("http://x.test/?url=" + encodeURIComponent(PB)), "/");
+
+  // Everything that is not the payload stays where it was.
+  assert.equal(
+    withoutLinkPayload("http://x.test/?pair=abc&repo=" + encodeURIComponent(PB) + "#/extensions?tab=available"),
+    "/?pair=abc#/extensions?tab=available",
+  );
+  // An address with no link is returned unchanged, and the result never parses as a link again.
+  assert.equal(withoutLinkPayload("http://x.test/#/library"), "/#/library");
+  assert.equal(repoFromLocation(withoutLinkPayload(quoted)), null);
+  assert.equal(repoFromLocation(withoutLinkPayload("http://x.test/#/extensions?repo=" + encodeURIComponent(PB))), null);
 });

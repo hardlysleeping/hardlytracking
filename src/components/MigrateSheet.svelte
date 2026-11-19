@@ -14,7 +14,7 @@
   import { providerLabel } from "../api/source";
   import { library, type MigrationPreview } from "../state/library.svelte";
   import { sourceKeyOf, sourceKeyOfMapping } from "../lib/marks";
-  import { mappingFromId, type MigrationTarget } from "../lib/migrate";
+  import { mappingSourceId, type MigrationTarget } from "../lib/migrate";
   import { seriesLabel } from "../lib/titles";
   import { languageLabel } from "../lib/language";
   import Cover from "./Cover.svelte";
@@ -32,6 +32,8 @@
   /** How many sources and results are drawn at once — a 2 351-source repo is a list, not a wall. */
   const SOURCE_LIMIT = 120;
   const RESULT_LIMIT = 12;
+  /** How much of the result list is drawn; a search asks for a fresh `RESULT_LIMIT` at a time. */
+  let limit = $state(RESULT_LIMIT);
 
   let step = $state<"source" | "series" | "confirm">("source");
   let sourceQuery = $state("");
@@ -108,6 +110,7 @@
     }
     searching = true;
     notice = "";
+    limit = RESULT_LIMIT;
     try {
       // The title being moved is never its own destination: a source's own search can list it (the
       // device source lists everything the device holds), and picking it would only be refused.
@@ -129,6 +132,11 @@
     preview = null;
     try {
       preview = await library.previewMigration(series.id, targetOf(candidate));
+    } catch (problem) {
+      // With no preview the confirm step drew "Nothing to show." and disabled Migrate, which looked
+      // like a judgement about the title rather than a failure to ask.
+      notice = `${target.name} could not be checked: ${problem instanceof Error ? problem.message : String(problem)}`;
+      step = "series";
     } finally {
       previewing = false;
     }
@@ -138,9 +146,9 @@
     const source = target;
     return {
       provider: candidate.provider,
-      // The same derivation a mapping row uses, so the source this title lands on is named the way
-      // every other mapping names it.
-      sourceId: source === null ? "" : (mappingFromId(source.id)?.sourceId ?? ""),
+      // A source's id is namespaced (`dalvik:src:123`); a mapping records the bare id, so the source
+      // this title lands on is named the way every other mapping names it.
+      sourceId: source === null ? "" : mappingSourceId(source.id),
       seriesId: candidate.id,
       title: candidate.title,
       sourceName: source?.name ?? providerLabel(candidate.provider),
@@ -211,7 +219,7 @@
       </div>
 
       <div class="list">
-        {#each results.slice(0, RESULT_LIMIT) as result (result.id)}
+        {#each results.slice(0, limit) as result (result.id)}
           <button class="row pick" onclick={() => void chooseSeries(result)}>
             <span class="thumb"><Cover series={result} size="row" /></span>
             <span class="words">
@@ -221,6 +229,14 @@
           </button>
         {/each}
       </div>
+
+      {#if results.length > limit}
+        <!-- The list is cut to keep the sheet short; without this line twelve rows read as "that is
+             all this source has", and the natural next move is to pick a wrong match. -->
+        <button class="btn ghost more" onclick={() => (limit += RESULT_LIMIT)}>
+          Showing {limit} of {results.length} — show {Math.min(RESULT_LIMIT, results.length - limit)} more
+        </button>
+      {/if}
 
       {#if notice !== ""}<p class="notice" role="status">{notice}</p>{/if}
 

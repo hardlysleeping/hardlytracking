@@ -63,6 +63,15 @@
     <p class="hint">Checking for messages…</p>
   {:else if inbox.status === "failed"}
     <p class="hint">{inbox.reason}</p>
+  {:else if !inbox.available}
+    <!--
+      A build with no account service cannot sign in, so the sign-in paragraph sent the reader to a
+      row that says "Cloud sync is not configured in this build". Say the real thing instead.
+    -->
+    <p class="hint">
+      This build has no account service configured, so there is nowhere for messages to come from.
+      Nothing is wrong with this device — the app was built without one.
+    </p>
   {:else if !inbox.signedIn}
     <p class="hint">
       Messages come with a HardlySyncing account: they are addressed to you, so there has to be an

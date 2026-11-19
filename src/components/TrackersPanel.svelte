@@ -79,6 +79,10 @@
       unregisterTracker("kitsu");
       connected = null;
       notice = "Kitsu disconnected. Your reading marks here are untouched.";
+    } catch (problem) {
+      // The account is still stored, so the card must keep saying Connected — and say why the
+      // button did not take it away, instead of looking like a tap that was ignored.
+      error = problem instanceof Error ? problem.message : String(problem);
     } finally {
       busy = false;
     }

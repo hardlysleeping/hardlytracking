@@ -111,6 +111,15 @@
   </header>
 
   {#if error}<p class="banner">{error}</p>{/if}
+  {#if checked && library.updatesFailed > 0}
+    <!--
+      A skipped title is not a quiet title. Without this line an outage and a slow week drew the
+      same sentence.
+    -->
+    <p class="banner quiet" role="status">
+      {library.updatesFailed} of {asked} {asked === 1 ? "title" : "titles"} could not be reached, so this list is not everything their sources have.
+    </p>
+  {/if}
 
   {#if library.library.length === 0}
     <div class="blank">
@@ -124,8 +133,10 @@
     <p class="empty">
       {#if rows.length > 0}
         Nothing to show. {rows.length} new {rows.length === 1 ? "chapter belongs" : "chapters belong"} to titles you have hidden.
+      {:else if asked > 0 && library.updatesFailed >= asked}
+        No source answered, so nothing was proved new or absent. Check again when the host is back.
       {:else}
-        Nothing new. {asked} titles checked, and none of their sources returned a dated chapter.
+        Nothing new. {asked - library.updatesFailed} titles checked, and none of their sources returned a dated chapter.
       {/if}
     </p>
   {:else}
@@ -144,13 +155,15 @@
                     {#if row.chapter.read}· read{/if}
                   </span>
                 </div>
+                <!-- Queued counts as taken: without it the arrow stayed enabled and unchanged for
+                     the whole download, which read as a tap that did nothing. -->
                 <button
                   class="btn ghost icon"
                   aria-label={`Download ${row.chapter.name}`}
-                  disabled={downloads.isDownloaded(row.chapter.id)}
+                  disabled={downloads.isDownloaded(row.chapter.id) || downloads.inQueue(row.chapter.id)}
                   onclick={() => downloads.enqueue(row.seriesId, row.chapter)}
                 >
-                  {downloads.isDownloaded(row.chapter.id) ? "⤓" : "↓"}
+                  {downloads.isDownloaded(row.chapter.id) ? "⤓" : downloads.inQueue(row.chapter.id) ? "…" : "↓"}
                 </button>
                 <button class="btn" onclick={() => go(pathTo("read", row.seriesId, row.chapter.id))}>Read</button>
               </div>

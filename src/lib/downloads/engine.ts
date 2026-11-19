@@ -102,6 +102,14 @@ export class DownloadEngine {
   private pending: Promise<void> | null = null;
   /** Chapters the user cancelled while they were running; checked between pages. */
   private readonly cancelled = new Set<string>();
+  /**
+   * Chapters deleted while they were downloading.
+   *
+   * A running chapter is in neither `rows` nor `queue` (the run takes it out of the queue), so a
+   * delete that looked at those two lists left it alone — and its own write a moment later put the
+   * chapter back, taking the space the confirmation promised to free.
+   */
+  private readonly removed = new Set<string>();
   /** Object URLs handed to the reader, so deleting a chapter frees them. */
   private readonly urls = new Map<string, LocalChapter>();
 
@@ -246,6 +254,10 @@ export class DownloadEngine {
    * All three, or the bytes stay on the device after the screen says they are gone.
    */
   async remove(chapterId: string): Promise<void> {
+    // A running chapter is in neither list below, so it is named here: cancelled between pages and
+    // remembered, so the settle that follows deletes it instead of writing a `partial` row back.
+    this.removed.add(chapterId);
+    this.cancel(chapterId);
     this.invalidate(chapterId);
     this.host.queue = this.host.queue.filter((item) => item.chapterId !== chapterId);
     await this.deps.store.removeDownload(chapterId);
@@ -254,11 +266,17 @@ export class DownloadEngine {
   }
 
   async removeSeries(seriesId: string): Promise<void> {
+    const running = this.host.active !== null && this.host.active.seriesId === seriesId ? [this.host.active.chapterId] : [];
     const chapters = new Set<string>([
+      ...running,
       ...this.host.rows.filter((row) => row.seriesId === seriesId).map((row) => row.chapterId),
       ...this.host.queue.filter((item) => item.seriesId === seriesId).map((item) => item.chapterId),
     ]);
     if (chapters.size === 0) return;
+    for (const chapterId of running) {
+      this.removed.add(chapterId);
+      this.cancel(chapterId);
+    }
     this.host.queue = this.host.queue.filter((item) => item.seriesId !== seriesId);
     for (const chapterId of chapters) {
       this.invalidate(chapterId);
@@ -454,6 +472,12 @@ export class DownloadEngine {
    */
   private async settle(item: QueueItem, error: unknown): Promise<void> {
     const store = this.deps.store;
+    // Deleted while it was running: what arrived is not this chapter any more, so nothing is
+    // recorded — no `partial` row, no pages, nothing to appear again.
+    if (this.removed.delete(item.chapterId)) {
+      await store.removeDownload(item.chapterId);
+      return;
+    }
     const cancelled = error instanceof Cancelled;
     const message = cancelled ? "cancelled" : error instanceof Error ? error.message : String(error);
     const pages = await store.listDownloadPages(item.chapterId);

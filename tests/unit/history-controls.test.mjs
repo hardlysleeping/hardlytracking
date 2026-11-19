@@ -1,11 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { createServer } from 'vite';
 import { memoryDatabase } from '../../src/lib/db/open.ts';
 import { LibraryStore } from '../../src/lib/db/store.ts';
 import { historySwipe, selectedHistoryIds, toggleHistoryPin, historyGroups, PINNED_GROUP } from '../../src/lib/history-controls.ts';
 import { DESTINATIONS, destinationOf, backHref } from '../../src/lib/destinations.ts';
 import { parseRoute } from '../../src/lib/nav.ts';
+
+const historyView = readFileSync(new URL('../../src/views/History.svelte', import.meta.url), 'utf8');
 
 // Every write in this suite targets a new memory database. No browser profile or real history.
 test('selected removals delete only requested chapter logs and sessions, with sync tombstones', async () => {
@@ -182,4 +185,21 @@ test('a source marked incognito leaves no history or sessions, but progress and 
     await library.remember('dalvik:1:x', 'after', 2, 10);
     assert.equal((await store.listHistory()).some(r => r.chapterId === 'after'), true);
   } finally { await vite.close(); }
+});
+
+test('the history header counts the log, not the page of it', async () => {
+  const store = new LibraryStore(memoryDatabase());
+  for (let index = 0; index < 3; index += 1) await store.recordHistory('s', `c${index}`, 1000 + index);
+  assert.equal((await store.listHistory(2)).length, 2, 'the list is capped');
+  assert.equal(await store.countHistory(), 3, 'the cap is not the total');
+  assert.match(historyView, /store\.countHistory\(\)/, 'the page counts the rows it was given');
+  assert.match(historyView, /total > rows\.length/, 'the list stops at 200 and does not say so');
+});
+
+test('a failed history read is not an empty log, and a clear refreshes the list behind it', () => {
+  const load = historyView.slice(historyView.indexOf('async function load()'), historyView.indexOf('async function load()') + 2400);
+  assert.match(load, /catch \(problem\)/, 'a rejected read drew "Nothing read yet"');
+  assert.match(load, /error = problem instanceof Error/, 'the failure is not named');
+  assert.match(historyView, /void library\.historyClearedAt/, 'clearing history left the list and its count stale');
+  assert.match(historyView, /hidden by a privacy mark now/, 'a removal that deletes nothing closed the sheet as if it worked');
 });

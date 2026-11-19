@@ -162,9 +162,14 @@ import { probeWebdav } from "../api/webdav";
 
   async function uninstall(row: (typeof library.extensions)[number]): Promise<void> {
     busy = row.extensionId;
+    error = null;
     try {
       await library.uninstallExtension(row.extensionId);
       removing = null;
+    } catch (problem) {
+      // Still installed: keeping the confirmation up with the reason beats closing it as if the
+      // removal had worked.
+      error = problem instanceof Error ? problem.message : String(problem);
     } finally {
       busy = null;
     }
@@ -442,10 +447,16 @@ import { probeWebdav } from "../api/webdav";
   }
 
   async function remove(url: string): Promise<void> {
-    await library.removeRepository(url);
-    if (activeRepo === url) {
-      activeRepo = null;
-      entries = [];
+    error = null;
+    try {
+      await library.removeRepository(url);
+      if (activeRepo === url) {
+        activeRepo = null;
+        entries = [];
+      }
+    } catch (problem) {
+      // The pinned repository is the one this can refuse, and the refusal is the point.
+      error = problem instanceof Error ? problem.message : String(problem);
     }
   }
 

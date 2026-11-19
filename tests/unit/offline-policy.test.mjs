@@ -102,3 +102,15 @@ test("the panel says what the switches do, and that turning them off deletes not
   assert.match(flat(panel), /onclick=\{\(\) => void keepNow\(\)\}/);
   assert.match(flat(panel), /aria-pressed=\{chosen\.has\(category\.id\)\}/);
 });
+
+test("a title whose source is down does not end the pass, and the panel says what it reached", () => {
+  const keep = flat(downloads.slice(downloads.indexOf("async keepLibraryOffline("), downloads.indexOf("cancel(chapterId")));
+  // The throw used to escape the loop: every title after the failing one was never attempted, and
+  // the count of what had already been queued was lost with it.
+  assert.match(keep, /try \{/);
+  assert.match(keep, /failed \+= 1/);
+  assert.match(keep, /return \{ queued, titles, failed \}/);
+  // Both halves are reported: what was queued, and what could not be asked.
+  assert.match(flat(panel), /Queued \$\{result\.queued\} issue/);
+  assert.match(flat(panel), /could not be reached/);
+});

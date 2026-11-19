@@ -40,6 +40,8 @@
   let chapters = $state<Chapter[]>([]);
   let saved = $state(false);
   let busy = $state(true);
+  /** What the source did not receive, when a mark-read only landed on this device. */
+  let notice = $state<string | null>(null);
   let error = $state<string | null>(null);
   let position = $state<{ chapterId: string; page: number } | null>(null);
 
@@ -138,12 +140,25 @@
     const list = chapters.filter((chapter) => {
       if (onlyUnread && chapter.read) return false;
       if (onlyDownloaded && !downloads.isDownloaded(chapter.id)) return false;
-      if (needle !== "" && !chapter.name.toLowerCase().includes(needle)) return false;
+      // The row is labelled `chapterTitle()`, which invents "Chapter 12" for a nameless chapter —
+      // so the number on the row has to be findable by typing it.
+      if (needle !== "" && !chapterTitle(chapter).toLowerCase().includes(needle)) return false;
       return true;
     });
     // Always sorted, never "trust the host's order" — that is what made the toggle look dead.
     return orderChapters(list, order);
   });
+
+  /**
+   * The chapter a series starts at, in sequence — the same one for "Start reading" and the hero's
+   * download button, whatever order the host happened to send. Both used raw `chapters[0]` and
+   * `chapters[at the end]`, so on an ascending host one opened the newest chapter while the other
+   * fetched the oldest.
+   */
+  const opening = $derived(orderChapters(chapters, "oldest")[0] ?? null);
+
+  /** The listed chapters a bulk download would actually queue. */
+  const downloadable = $derived(shown.filter((chapter) => !downloads.isDownloaded(chapter.id) && !downloads.inQueue(chapter.id)));
 
   const unread = $derived(chapters.filter((chapter) => !chapter.read).length);
   /**
@@ -224,8 +239,18 @@
       await store.setRead(chapter.id, read);
     } else {
       const provider = providerFor(library.profile!.providers, chapter.id);
-      await provider.setRead(chapter.id, read).catch(() => {});
+      // The local write is what draws the ✓, and it is still worth making when the source is down —
+      // but a ✓ the source never heard about has to say so, or it survives every reload as a lie.
+      let reached = true;
+      try {
+        await provider.setRead(chapter.id, read);
+      } catch {
+        reached = false;
+      }
       await store.setRead(chapter.id, read);
+      if (!reached) {
+        notice = `${chapterTitle(chapter)} ${read ? "is marked read" : "is marked unread"} on this device only — the source did not answer, so it still has the old state.`;
+      }
     }
     chapters = chapters.map((row) => (row.id === chapter.id ? { ...row, read } : row));
     chapterMenu = null;
@@ -321,6 +346,7 @@
 
   {#if error}<p class="banner">{error}</p>{/if}
   {#if shareNote}<p class="banner note" role="status" data-share-note>{shareNote}</p>{/if}
+  {#if notice}<p class="banner note" role="status" data-mark-note>{notice}</p>{/if}
   {#if busy && series === null}<p class="empty">Loading…</p>{/if}
 
   {#if series}
@@ -335,8 +361,8 @@
             <button class="btn primary wide" onclick={() => startReading(seriesId, next.id, embedded)}>
               Continue · {chapterTitle(next)}{position ? ` · p.${position.page + 1}` : ""}
             </button>
-          {:else if chapters.length > 0}
-            <button class="btn primary wide" onclick={() => startReading(seriesId, chapters[chapters.length - 1].id, embedded)}>Start reading</button>
+          {:else if opening !== null}
+            <button class="btn primary wide" onclick={() => startReading(seriesId, opening.id, embedded)}>Start reading</button>
           {/if}
           <div class="pair">
             <!-- In the library or not is the glyph and its tone: four cells alone, four cells with
@@ -359,13 +385,13 @@
                 </svg>
               {/if}
             </button>
-            {#if chapters.length > 0}
+            {#if opening !== null}
               <button
                 class="btn icon"
-                aria-label={`Download ${chapterTitle(chapters[0])}`}
+                aria-label={`Download ${chapterTitle(opening)}`}
                 title="Download"
-                disabled={downloads.inQueue(chapters[0].id)}
-                onclick={() => downloads.enqueue(seriesId, chapters[0])}
+                disabled={downloads.inQueue(opening.id)}
+                onclick={() => downloads.enqueue(seriesId, opening)}
               >
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v10M8 10l4 4 4-4M5 20h14" /></svg>
               </button>
@@ -530,8 +556,12 @@
       <button class="menu-item" onclick={() => void toggleSaved()}>Add to library</button>
     {/if}
     <button class="menu-item" disabled={busy || unread === 0} onclick={() => void markAll()}>Mark all chapters read</button>
-    <button class="menu-item" onclick={() => downloads.enqueueMany(seriesId, shown.filter((c) => !downloads.isDownloaded(c.id)))}>
-      Download {shown.length} listed chapters
+    <!--
+      The count is what would actually be queued. `enqueueMany` skips chapters already here or
+      already queued, so a label of `shown.length` promised a tap that could do nothing at all.
+    -->
+    <button class="menu-item" disabled={downloadable.length === 0} onclick={() => downloads.enqueueMany(seriesId, downloadable)}>
+      {downloadable.length === 0 ? "Every listed chapter is already here" : `Download ${downloadable.length} listed chapter${downloadable.length === 1 ? "" : "s"}`}
     </button>
     <button class="menu-item" onclick={() => void downloads.removeSeries(seriesId)}>Delete downloads</button>
     {#if saved}

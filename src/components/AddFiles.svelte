@@ -33,8 +33,15 @@
      * *is* the screen.
      */
     showButtons?: boolean;
+    /**
+     * Called after an import that added at least one comic.
+     *
+     * The welcome screen is a gate, so its own "Add comic files" door has to open it: picking files
+     * used to import them behind a first-run sheet that only the skip button could dismiss.
+     */
+    onimport?: () => void;
   }
-  let { look = "ghost", label = "Add files", showButtons = true }: Props = $props();
+  let { look = "ghost", label = "Add files", showButtons = true, onimport }: Props = $props();
 
   let busy = $state(false);
   let note = $state<string | null>(null);
@@ -160,6 +167,7 @@
       }
       if (result.errors.length > 0) bits.push(result.errors.join(" · "));
       note = bits.join(" · ") || "Nothing to add";
+      if (result.added > 0) onimport?.();
     } catch (error) {
       note = error instanceof Error ? error.message : String(error);
     } finally {
@@ -188,7 +196,7 @@
     class="btn {look}"
     disabled={busy}
     title="Every comic inside a folder, subfolders included"
-    onclick={() => folderInput?.click()}
+    onclick={() => void pickFolder()}
   >
     Add folder
   </button>

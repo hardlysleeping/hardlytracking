@@ -264,3 +264,25 @@ test("a software detail link opens and installs nothing", () => {
     for (const line of calls) assert.match(line, /onclick=/, `${action} is only ever a tap`);
   }
 });
+
+test("a link that opens a first run is not replaced by the welcome screen", () => {
+  // The welcome sits above every route, so a first launch opened by a package link showed three
+  // doors instead — and every door navigates away from the page the link named. The gate asks
+  // whether this launch arrived from a link, and the answer is read before the first render (the
+  // URL is rewritten to `#/software/…` in `onMount`).
+  const app = read("src/App.svelte");
+  assert.match(
+    app,
+    /\{#if settings\.ready && !settings\.welcomed && !arrivedByLink\}/,
+    "the welcome gate ignores how the app was opened",
+  );
+  const start = app.indexOf("const arrivedByLink");
+  assert.ok(start >= 0, "nothing decides whether this launch came from a link");
+  const end = app.indexOf("onMount(", start);
+  const decision = app.slice(start, end);
+  assert.match(decision, /softwareRefFromLocation\(location\.href\)/, "a package link does not count");
+  assert.match(decision, /repoFromLocation\(location\.href\)/, "an install link does not count");
+  assert.match(decision, /isFetchableRepo\(/, "an unfetchable install link still counts");
+  // It is a start, not a gate: skipping it once must not mark the person as welcomed.
+  assert.doesNotMatch(decision, /welcomed\s*=|set\("welcomed"/, "the link launch writes the first-run flag");
+});

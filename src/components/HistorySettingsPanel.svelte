@@ -12,6 +12,8 @@
 
   let clearing = $state<"all" | "range" | null>(null);
   let cleared = $state<string | null>(null);
+  let failed = $state<string | null>(null);
+  let pruned = $state<string | null>(null);
 
   const RETENTION_PRESETS = [0, 30, 90, 180, 365];
   const RANGES = [
@@ -34,15 +36,40 @@
     return start.getTime() - daysAgo * 86_400_000;
   }
 
+  /**
+   * Changing the retention setting deletes what is already past it — that is what the setting means.
+   * It used to do so silently; now it says how much went, so a log that shrinks has an explanation.
+   */
+  async function prune(days: number): Promise<void> {
+    cleared = null;
+    failed = null;
+    pruned = null;
+    const removed = await library.pruneSessions();
+    pruned =
+      days <= 0
+        ? "Keeping everything."
+        : removed === 0
+          ? `Nothing older than ${days} days was recorded.`
+          : `Removed ${removed} session${removed === 1 ? "" : "s"} older than ${days} days.`;
+  }
+
   async function clearNow(): Promise<void> {
     const range =
       clearing === "range" && rangeChoice !== "all"
         ? { since: midnight(rangeChoice === "today" ? 0 : Number(rangeChoice)) }
         : {};
-    const removed = await library.clearHistory(range);
     const scope = clearing === "all" || (clearing === "range" && rangeChoice === "all") ? "all history" : RANGES.find((r) => r.id === rangeChoice)?.label.toLowerCase() ?? "history";
-    cleared = `Deleted ${removed.sessions} session${removed.sessions === 1 ? "" : "s"} and ${removed.history} history entr${removed.history === 1 ? "y" : "ies"} from ${scope}. Progress and read marks were not touched.`;
-    clearing = null;
+    failed = null;
+    cleared = null;
+    try {
+      const removed = await library.clearHistory(range);
+      cleared = `Deleted ${removed.sessions} session${removed.sessions === 1 ? "" : "s"} and ${removed.history} history entr${removed.history === 1 ? "y" : "ies"} from ${scope}. Progress and read marks were not touched.`;
+      clearing = null;
+    } catch (problem) {
+      // Nothing was proved deleted, so the confirmation stays up — with the reason. Silence here
+      // read as a tap that did nothing at all.
+      failed = `Could not delete ${scope}: ${problem instanceof Error ? problem.message : String(problem)}`;
+    }
   }
 </script>
 
@@ -65,7 +92,7 @@
         } else {
           retentionChoice = value;
           settings.set("historyRetentionDays", Number(value));
-          void library.pruneSessions();
+          void prune(Number(value));
         }
       }}
     >
@@ -90,7 +117,7 @@
           const days = Math.max(1, Math.min(3650, Number(event.currentTarget.value) || 30));
           customDays = days;
           settings.set("historyRetentionDays", days);
-          void library.pruneSessions();
+          void prune(days);
         }}
       />
     </label>
@@ -143,6 +170,12 @@
   {/if}
   {#if cleared !== null}
     <p class="hint">{cleared}</p>
+  {/if}
+  {#if pruned !== null}
+    <p class="hint" role="status">{pruned}</p>
+  {/if}
+  {#if failed !== null}
+    <p class="hint" role="alert">{failed}</p>
   {/if}
 </div>
 

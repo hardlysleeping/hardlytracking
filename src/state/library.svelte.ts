@@ -45,6 +45,7 @@ import { applyMigration, type AppliedMigration } from "../lib/migrate-apply";
 import {
   describeMigration,
   mappingFromId,
+  mappingSourceId,
   planMigration,
   type MigrationFacts,
   type MigrationPlan,
@@ -185,6 +186,14 @@ class LibraryState {
   stopOpenedFiles: (() => void) | null = null;
   /** Repositories the user added, oldest first. */
   repos = $state<RepoRow[]>([]);
+  /**
+   * How many titles the last Updates check could not reach.
+   *
+   * `refreshUpdates` skips a title whose source fails, which is right — one dead source must not
+   * empty the screen — but an all-failed refresh then looked exactly like "nothing new". The count is
+   * what lets the screen say which one it is.
+   */
+  updatesFailed = $state(0);
   /** Indexes read this session, by repository URL — one fetch per repository per run. */
   private indexes = new Map<string, ExtensionEntry[]>();
 
@@ -589,6 +598,18 @@ class LibraryState {
     this.repos = await this.profile.store.listRepos();
     this.indexes.set(repository.url, repository.extensions);
     return repository;
+  }
+
+  /**
+   * Re-list the repositories the store holds.
+   *
+   * A restore writes repository rows straight through the store (`lib/sync/apply.ts`), so the list
+   * this app draws from has to be read again — otherwise the repositories a backup carried are
+   * invisible in Extensions until the next launch.
+   */
+  async reloadRepositories(): Promise<void> {
+    if (this.profile === null) return;
+    this.repos = await this.profile.store.listRepos();
   }
 
   async removeRepository(url: string): Promise<void> {
@@ -1065,14 +1086,20 @@ class LibraryState {
   /**
    * Apply the retention preference. Runs at launch and when the setting changes — no background
    * service, because the app is the only thing that ever needs to be right about this.
+   *
+   * Returns how many sessions it removed, so the control that changed the setting can say what it
+   * did instead of quietly deleting history.
    */
-  async pruneSessions(): Promise<void> {
+  async pruneSessions(): Promise<number> {
     const store = this.profile?.store;
-    if (store === undefined) return;
+    if (store === undefined) return 0;
     try {
-      await store.pruneSessions(settings.historyRetentionDays);
+      const removed = await store.pruneSessions(settings.historyRetentionDays);
+      if (removed > 0) this.historyClearedAt = Date.now();
+      return removed;
     } catch {
       /* retention is housekeeping */
+      return 0;
     }
   }
 
@@ -1271,7 +1298,14 @@ class LibraryState {
     const preview = await this.previewMigration(seriesId, target);
     if (!preview.ok) return preview;
 
-    const packageId = this.extensions.find((extension) => extension.sources.some((source) => source.id === target.sourceId))?.packageId;
+    // A source's listed id is namespaced (`dalvik:src:123`) and a target names the bare id a mapping
+    // stores, so the two are compared in the bare form — comparing them raw never matched, and the
+    // migration lost the package it needed to name.
+    const packageId = this.extensions.find((extension) =>
+      extension.sources.some(
+        (source) => source.id.startsWith(`${target.provider}:`) && mappingSourceId(source.id) === target.sourceId,
+      ),
+    )?.packageId;
     try {
       // The sequence lives in `lib/migrate-apply.ts`: one clock, one order, and a test that can run
       // it against a memory database without a view or a provider.
@@ -1299,6 +1333,7 @@ class LibraryState {
     if (this.profile === null) return [];
     const queue = this.library.slice(0, limit);
     const rows: UpdateRow[] = [];
+    let failed = 0;
     const worker = async (): Promise<void> => {
       for (;;) {
         const series = queue.shift();
@@ -1309,11 +1344,14 @@ class LibraryState {
             rows.push({ seriesId: series.id, title: series.title, cover: series.cover, chapter });
           }
         } catch {
-          // One source down is one title missing from the list, not an empty screen.
+          // One source down is one title missing from the list, not an empty screen — and it is
+          // counted, so "nothing new" can be told apart from "nothing answered".
+          failed += 1;
         }
       }
     };
     await Promise.all([worker(), worker(), worker(), worker()]);
+    this.updatesFailed = failed;
     return rows.sort((a, b) => (b.chapter.uploadedAt ?? 0) - (a.chapter.uploadedAt ?? 0));
   }
 

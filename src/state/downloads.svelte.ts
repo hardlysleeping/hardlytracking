@@ -147,17 +147,25 @@ class Downloads implements DownloadHost {
    * "keep the library offline" button, not a sync of the whole shelf. It returns what it did so the
    * screen can say so instead of leaving a tap unanswered.
    */
-  async keepLibraryOffline(): Promise<{ queued: number; titles: number }> {
-    if (library.profile === null) return { queued: 0, titles: 0 };
+  async keepLibraryOffline(): Promise<{ queued: number; titles: number; failed: number }> {
+    if (library.profile === null) return { queued: 0, titles: 0, failed: 0 };
     let queued = 0;
     let titles = 0;
+    // A title whose source is down is one title missing, not the end of the pass: the throw used to
+    // escape the loop, so every title after it was never attempted and the count of what had already
+    // been queued was lost with it.
+    let failed = 0;
     for (const row of library.library) {
       if (!shouldKeepTitle({ keepOnAdd: false, keepCategories: settings.keepCategories }, row, "reconcile")) continue;
-      const result = await this.fetchSeries(row.id, "new");
-      queued += result.queued;
-      titles += result.queued > 0 ? 1 : 0;
+      try {
+        const result = await this.fetchSeries(row.id, "new");
+        queued += result.queued;
+        titles += result.queued > 0 ? 1 : 0;
+      } catch {
+        failed += 1;
+      }
     }
-    return { queued, titles };
+    return { queued, titles, failed };
   }
 
   cancel(chapterId: string): void {

@@ -62,6 +62,9 @@ export const LINK_SENT =
 export const CHECKOUT_OPENED =
   "Checkout is open in your browser — come back here when it is done and HardlySyncing will be waiting.";
 
+/** Long enough for a slow phone network, short enough that a dead socket is reported, not waited on. */
+const SYNC_TIMEOUT_MS = 8000;
+
 /** The two plan names the service knows. Prices are Stripe's and never appear here. */
 export type PlanKey = "monthly" | "yearly";
 
@@ -165,6 +168,8 @@ export interface SyncAccountOptions {
   readonly billingBase?: string;
   /** Which shell this build is in. Read from the globals when not given. */
   readonly shell?: Shell;
+  /** How long one read may take before it is abandoned. Injected by the suite. */
+  readonly timeoutMs?: number;
 }
 
 /**
@@ -180,6 +185,13 @@ export class SyncAccount {
   private readonly account: Account;
   private readonly call: typeof fetch;
   private readonly base: string;
+  /**
+   * How long one request may take.
+   *
+   * `fetch` has no timeout of its own, so a stalled connection left the Sync panel reading its old
+   * answer for as long as the socket lived — indistinguishable from a hang, with no way to retry.
+   */
+  private readonly timeoutMs: number;
   /** Which shell this is, and therefore whether there is a shop at all. */
   readonly shell: Shell;
   readonly shop: Shop;
@@ -196,7 +208,19 @@ export class SyncAccount {
       redirectTo: options.redirectTo ?? null,
     });
     this.call = options.fetch ?? fetch;
+    this.timeoutMs = options.timeoutMs ?? SYNC_TIMEOUT_MS;
     this.base = (options.billingBase ?? billingUrl()).replace(/\/+$/, "");
+  }
+
+  /** One request, abandoned after `timeoutMs` so a stalled socket is an answer, not a wait. */
+  private async ask(url: string, init: RequestInit): Promise<Response> {
+    const stop = new AbortController();
+    const timer = setTimeout(() => stop.abort(), this.timeoutMs);
+    try {
+      return await this.call(url, { ...init, signal: stop.signal });
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   /** The session this device already has, or null. Never a request for a new one. */
@@ -234,7 +258,7 @@ export class SyncAccount {
     const query = `select=cloud_sync,expires_at&user_id=eq.${encodeURIComponent(session.userId)}&limit=1`;
     let response: Response;
     try {
-      response = await this.call(`${this.settings.url}/rest/v1/entitlements?${query}`, {
+      response = await this.ask(`${this.settings.url}/rest/v1/entitlements?${query}`, {
         method: "GET",
         headers: {
           apikey: this.settings.anonKey,
@@ -280,7 +304,7 @@ export class SyncAccount {
 
     let response: Response;
     try {
-      response = await this.call(`${this.base}/checkout`, {
+      response = await this.ask(`${this.base}/checkout`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

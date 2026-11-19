@@ -46,6 +46,8 @@
   }
 
   let rows = $state<Row[]>([]);
+  /** How many entries the log holds. The list is capped, so it cannot be `rows.length`. */
+  let total = $state(0);
   let loading = $state(true);
   let selecting = $state(false);
   let selected = $state<Set<string>>(new Set());
@@ -97,6 +99,12 @@
     try {
       // Privacy marks may have changed while the confirmation was open.
       const ids = pending.filter((id) => shown.some((row) => row.chapterId === id));
+      // Every selected row is hidden by a privacy mark now, so there is nothing here to delete.
+      // Saying so is the difference between a tap that worked and one that closed the sheet.
+      if (ids.length === 0) {
+        error = "Those entries are hidden by a privacy mark now — unhide the source to remove them.";
+        return;
+      }
       await library.removeHistoryEntries(ids);
       const removed = new Set(ids);
       rows = rows.filter((row) => !removed.has(row.chapterId));
@@ -184,6 +192,9 @@
   }
 
   $effect(() => {
+    // Cleared, pruned or partly deleted elsewhere — the settings panel does all three — so the list
+    // reads again instead of keeping rows and a count that no longer exist.
+    void library.historyClearedAt;
     void load();
   });
 
@@ -191,15 +202,19 @@
     const store = library.profile?.store;
     if (store === undefined) return;
     loading = true;
+    error = null;
     try {
-      const [history, series, positions, allChapters, mappings] = await Promise.all([
+      const [history, series, positions, allChapters, mappings, count] = await Promise.all([
         store.listHistory(200),
         store.listSeries(),
         store.listPositions(),
         store.listAllChapters(),
         // A `mihon:` title's source is only knowable from its mapping.
         store.listMappings(),
+        // The list is capped, so the page cannot count what it did not ask for.
+        store.countHistory(),
       ]);
+      total = count;
       // The whole mapping, not just the source id: a migrated title is governed by the source it
     // reads from now, and only the mapping knows which one that is.
     mappedSource = new Map(mappings.map((row) => [row.seriesId, { provider: row.provider, sourceId: row.sourceId }]));
@@ -217,6 +232,11 @@
         page: positionOf.get(row.chapterId) ?? 0,
         chapterName: chapterLabel(chapterNames.get(row.chapterId)),
       }));
+    } catch (problem) {
+      // A failed read is not an empty log. The rows keep what they had and the page says what
+      // happened, instead of drawing "Nothing read yet" over a log that is still there.
+      error = problem instanceof Error ? problem.message : String(problem);
+      return;
     } finally {
       loading = false;
     }
@@ -454,6 +474,11 @@
       </aside>
     {/if}
     </div>
+    {#if total > rows.length}
+      <!-- The list asks for the newest 200 so a long log does not become a thousand rows; saying
+           so is the difference between "this is your history" and "this is the first page". -->
+      <p class="hint truncation">Showing the newest {rows.length} of {total} entries.</p>
+    {/if}
   {/if}
 </section>
 

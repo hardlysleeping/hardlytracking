@@ -508,3 +508,34 @@ test("the search box matches the series as well as the chapter", () => {
   assert.ok(!matchesDownloadQuery("vinland", "Berserk", "Chapter 1"));
   assert.ok(matchesDownloadQuery("berserk", undefined, "Berserk chapter 3"), "a missing title is not a match killer");
 });
+
+test("a chapter deleted while it is downloading stays deleted", async () => {
+  // The confirmation promises to free the chapters it names. A running chapter is in neither `rows`
+  // nor `queue` — the run takes it out of the queue before starting — so a delete that looked only
+  // at those two lists left it alone, and its own write a moment later put the chapter and its pages
+  // back, taking the space the dialog said it had reclaimed.
+  const store = new LibraryStore(memoryDatabase());
+  const host = { rows: [], queue: [], active: null, error: null };
+  let release;
+  const gate = new Promise((resolve) => (release = resolve));
+  const engine = new DownloadEngine(host, {
+    store,
+    pages: async () => {
+      await gate; // still downloading while the delete happens
+      return [page(0), page(1)];
+    },
+    fetchBlob: async () => new Blob([new Uint8Array(10)]),
+  });
+  engine.enqueueMany("s1", [chapter("ch1", 1)]);
+  for (let attempt = 0; attempt < 50 && host.active === null; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  assert.equal(host.active.chapterId, "ch1", "nothing was downloading");
+
+  await engine.removeSeries("s1");
+  release();
+  await engine.whenIdle();
+
+  assert.deepEqual(await store.listDownloads(), [], "the deleted chapter came back");
+  assert.deepEqual(await store.downloadPageMeta("ch1"), [], "its pages were left behind");
+});

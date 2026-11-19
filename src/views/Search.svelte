@@ -533,6 +533,13 @@
     }),
   );
   const split = $derived(layout.mode === "split");
+
+  // "Read" hands the chapter to the pane only while this screen is actually drawing one: a narrow
+  // window degrades to a single column, and the tap used to write into a pane that was not there.
+  $effect(() => {
+    if (!split) return;
+    return readerPane.showsPane();
+  });
   const openChapter = $derived(readerPane.open);
 </script>
 

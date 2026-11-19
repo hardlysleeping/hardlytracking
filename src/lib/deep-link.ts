@@ -80,6 +80,37 @@ export function isFetchableRepo(url: string): boolean {
 }
 
 /**
+ * The same address with an install link's payload taken out.
+ *
+ * A link is an instruction to propose one repository, once. `repoFromLocation` reads both the query
+ * and the hash, so a payload left in the address bar is read again on every later hash change and
+ * pulls the person back to Extensions from wherever they navigate. It also breaks the first
+ * arrival: `go("/extensions")` on an address that already says `#/extensions?repo=…` is no hash
+ * change at all, so the screen keeps the previous route while the bar says Extensions.
+ *
+ * Returns the path, query and hash — the same-origin form `history.replaceState` takes.
+ */
+export function withoutLinkPayload(href: string): string {
+  let url: URL;
+  try {
+    url = new URL(href);
+  } catch {
+    return href;
+  }
+  // Only an address this app is loaded from can be rewritten in place; anything else is left alone.
+  if (url.protocol !== "http:" && url.protocol !== "https:") return href;
+  for (const key of PAYLOAD_KEYS) url.searchParams.delete(key);
+  if (url.hash.includes("?")) {
+    const at = url.hash.indexOf("?");
+    const query = new URLSearchParams(url.hash.slice(at + 1));
+    for (const key of PAYLOAD_KEYS) query.delete(key);
+    const rest = query.toString();
+    url.hash = rest === "" ? url.hash.slice(0, at) : `${url.hash.slice(0, at)}?${rest}`;
+  }
+  return `${url.pathname}${url.search}${url.hash}`;
+}
+
+/**
  * Register `web+mihon://` with the browser, so a link using it opens this app in a tab.
  *
  * Browsers only allow `web+` schemes from a page, and they require the handler URL to be on this

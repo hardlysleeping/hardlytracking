@@ -51,14 +51,31 @@
   let note = $state("");
   /** False until the first look at this device's session has finished. */
   let ready = $state(false);
+  /** A re-read of the row is out, so the button says so instead of keeping the old answer. */
+  let checking = $state(false);
 
-  /** Who this device is, and what the server says about them. No cache. */
+  /**
+   * Who this device is, and what the server says about them. No cache.
+   *
+   * `busy` covers the two reads, so "Check" is disabled while one is out instead of offering a
+   * second tap, and the row says "Checking…" rather than keeping the previous answer with no sign
+   * that anything is happening. It is not `busy` for the first look: that one is what `ready` is for.
+   */
   async function refresh(): Promise<void> {
     if (account === null) return;
-    const found = await account.session();
-    session = found === null ? null : { userId: found.userId, email: found.email };
-    entitlementState = found === null ? null : await account.entitlement();
-    ready = true;
+    checking = true;
+    try {
+      const found = await account.session();
+      session = found === null ? null : { userId: found.userId, email: found.email };
+      entitlementState = found === null ? null : await account.entitlement();
+    } catch (cause) {
+      // The read itself never rejects, but the SDK's session can — and an unhandled rejection here
+      // left "Checking…" on screen for good with no way to try again.
+      note = cause instanceof Error ? cause.message : "the account could not be read";
+    } finally {
+      checking = false;
+      ready = true;
+    }
   }
 
   $effect(() => {
@@ -133,13 +150,13 @@
           {busy ? "Sending…" : sent ? "Send another link" : "Email me a link"}
         </button>
         {#if sent}
-          <button class="chip" disabled={busy} onclick={() => void refresh()}>I've opened it</button>
+          <button class="chip" disabled={busy || checking} onclick={() => void refresh()}>I've opened it</button>
         {/if}
       </div>
     {:else}
       <div class="row">
         <span>
-          {#if entitlementState === null}
+          {#if checking || entitlementState === null}
             Checking…
           {:else if entitlementState.state === "active"}
             Active{#if entitlementState.expiresAt !== null}<em class="sub">Paid to {until(entitlementState.expiresAt)}</em>{/if}
@@ -150,7 +167,7 @@
           {/if}
           {#if session.email !== ""}<em class="sub">{session.email}</em>{/if}
         </span>
-        <button class="chip" disabled={busy} onclick={() => void refresh()}>Check</button>
+        <button class="chip" disabled={busy || checking} onclick={() => void refresh()}>Check</button>
       </div>
       {#if entitlementState !== null && entitlementState.state !== "active"}
         {#if canBuy}

@@ -82,6 +82,20 @@
   let query = $state("");
   let items = $state<Series[]>([]);
   const visibleItems = $derived(items.filter((row) => visibility.allows(row)));
+  /**
+   * What an empty grid means.
+   *
+   * `visibleItems` drops the titles a privacy mark hides while the screen curtain is on, so a source
+   * that answered completely still drew its empty state — telling the reader the source had nothing
+   * when the truth was that everything it sent was filtered here.
+   */
+  const emptyText = $derived(
+    items.length === 0
+      ? mode === "search"
+        ? "This source found nothing."
+        : "This source returned nothing."
+      : `${items.length} ${items.length === 1 ? "title is" : "titles are"} hidden by your local screen privacy. Unlock from Library to see ${items.length === 1 ? "it" : "them"}.`,
+  );
   const visibleExpanded = $derived(expandedId !== null && visibleItems.some((row) => row.id === expandedId) ? expandedId : null);
   let hasNext = $state(false);
   let page = $state(1);
@@ -433,7 +447,7 @@
     view={settings.libraryView}
     titlePlacement={settings.browseTitle}
     rowStyle={settings.rowStyle}
-    empty={mode === "search" ? "This source found nothing." : "This source returned nothing."}
+    empty={emptyText}
     expandAfter={visibleExpanded}
     expanded={issuePanel}
     onlongpress={(series) => (actions = series)}

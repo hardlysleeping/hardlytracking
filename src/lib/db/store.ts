@@ -514,6 +514,17 @@ export class LibraryStore {
     return rows.sort((a, b) => b.at - a.at).slice(0, limit);
   }
 
+  /**
+   * How many entries the log holds.
+   *
+   * The list is capped (a History page draws what it asks for), so a header that counts the rows it
+   * was given stops at the cap and reads as a total. This is the number that makes "the newest 200
+   * of N" sayable.
+   */
+  async countHistory(): Promise<number> {
+    return (await this.db.all<HistoryRow>("history")).length;
+  }
+
   /** Where the reader was in a series. One row per series, so it is a lookup, not a scan. */
   async setPosition(seriesId: string, chapterId: string, page: number, at = Date.now()): Promise<void> {
     await this.db.put("position", { seriesId, chapterId, page, at } as unknown as Record<string, unknown>);

@@ -21,6 +21,30 @@ class ReaderPane {
     return settings.libraryPane === "split" || settings.libraryPane === "three";
   }
 
+  /**
+   * How many screens are drawing the pane right now.
+   *
+   * `available` is the preference. Browse and Source use the same grid and the same resume tap but
+   * draw no pane at all, and a narrow window degrades a split Library to one column — in both, a
+   * chapter written into the pane had nowhere to appear and the tap did nothing.
+   */
+  private drawn = 0;
+
+  get drawnNow(): boolean {
+    return this.drawn > 0;
+  }
+
+  /** A screen that is drawing the pane says so; the returned function says it stopped. */
+  showsPane(): () => void {
+    this.drawn += 1;
+    let attached = true;
+    return () => {
+      if (!attached) return;
+      attached = false;
+      this.drawn -= 1;
+    };
+  }
+
   show(seriesId: string, chapterId: string): void {
     this.open = { seriesId, chapterId };
   }
@@ -56,7 +80,7 @@ export const readerPane = new ReaderPane();
  * screen: offering it a pane the library is not drawing would be a button that does nothing.
  */
 export function startReading(seriesId: string, chapterId: string, allowPane = true): void {
-  if (allowPane && readerPane.available) {
+  if (allowPane && readerPane.available && readerPane.drawnNow) {
     readerPane.show(seriesId, chapterId);
     return;
   }

@@ -43,3 +43,10 @@ test("a stale answer cannot write rows, an error, or the spinner", () => {
   assert.ok(checks >= 2, `only ${checks} stale check(s): the success path and the catch must both check`);
   assert.match(body, /if \(current\(\)\) busy = false;/, "an older run can still clear the newer run's spinner");
 });
+test("an empty grid says which emptiness it is", () => {
+  // `visibleItems` drops the titles a privacy mark hides while the curtain is on, so a source that
+  // answered completely still drew "This source returned nothing" — a statement about the source
+  // when the truth was about the curtain.
+  assert.match(source, /items\.length === 0[\s\S]{0,320}hidden by your local screen privacy/);
+  assert.match(source, /empty=\{emptyText\}/);
+});

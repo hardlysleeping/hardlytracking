@@ -172,12 +172,24 @@
 
   async function removeRow(row: ManageRow): Promise<void> {
     confirming = null;
-    await downloads.remove(row.chapterId);
+    notice = "";
+    try {
+      await downloads.remove(row.chapterId);
+    } catch (problem) {
+      // The bytes are still here, so the row stays — and the screen says why instead of
+      // looking like a tap that was ignored.
+      notice = `Could not delete ${row.chapterName}: ${problem instanceof Error ? problem.message : String(problem)}`;
+    }
   }
 
   async function removeGroup(seriesId: string): Promise<void> {
     confirmingSeries = null;
-    await downloads.removeSeries(seriesId);
+    notice = "";
+    try {
+      await downloads.removeSeries(seriesId);
+    } catch (problem) {
+      notice = `Could not delete ${titles.get(seriesId) ?? "that series"}: ${problem instanceof Error ? problem.message : String(problem)}`;
+    }
   }
 
   /** Queue a series' chapters: only the unseen ones, or everything that is not already here. */

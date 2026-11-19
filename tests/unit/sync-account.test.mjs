@@ -277,3 +277,27 @@ test("signing out clears this device and touches no row", async () => {
     ["signOut"],
   );
 });
+
+test("a socket that never answers is abandoned, not waited on", async () => {
+  // `fetch` has no timeout of its own: a stalled connection left the panel reading its old answer
+  // for as long as the socket lived. `timeoutMs` is what turns that into a result.
+  let signalled = null;
+  const fetch = (url, init) =>
+    new Promise((resolve, reject) => {
+      signalled = init.signal;
+      // Only the abort ever settles this: the server never answers.
+      init.signal.addEventListener("abort", () => reject(new Error("aborted")));
+    });
+  const account = new SyncAccount({ config: CONFIG, client: fakeClient({ session: SESSION }), fetch, timeoutMs: 20 });
+  const state = await account.entitlement();
+  assert.equal(state.state, "unreachable");
+  assert.match(state.reason, /did not answer/);
+  assert.equal(signalled.aborted, true, "the request was never abandoned");
+});
+
+test("the abort signal is passed and cleared on an ordinary answer", async () => {
+  const { fetch, calls } = stub(() => json([{ cloud_sync: true, expires_at: null }]));
+  const account = new SyncAccount({ config: CONFIG, client: fakeClient({ session: SESSION }), fetch, timeoutMs: 5000 });
+  assert.equal((await account.entitlement()).state, "active");
+  assert.equal(calls[0].init.signal.aborted, false, "a read that answered was already aborted");
+});

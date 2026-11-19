@@ -36,7 +36,7 @@
       <div class="door">
         <p class="door-name">Files on this device</p>
         <p class="door-hint">CBZ, CBR or PDF you bought and downloaded. No server, no network.</p>
-        <AddFiles look="primary" label="Add comic files" />
+        <AddFiles look="primary" label="Add comic files" onimport={() => done()} />
       </div>
 
       <button class="door" onclick={() => done(() => go("/extensions"))}>

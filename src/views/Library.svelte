@@ -182,6 +182,9 @@
   /** The change a "these would be hidden" sheet was already answered for. */
   let hiddenAcknowledged = $state<string | null>(null);
   let busy = $state<string | null>(null);
+  /** The Remove button's second tap: a bulk delete is never one tap. */
+  let confirmingRemove = $state(false);
+  let removeError = $state<string | null>(null);
 
   // ---- the shape of this screen, and the pane that belongs to it -----------------------------
   //
@@ -379,6 +382,10 @@
    * toggle, not a walk through the library again.
    */
   const openChapter = $derived(readerPane.open);
+  // This screen can always draw an opened chapter — as the detail pane in a split, or as the whole
+  // page in one column — so it says so, and "Read" hands the chapter to the pane here rather than
+  // to the reader screen. Browse and Source share the same tap and can draw neither.
+  $effect(() => readerPane.showsPane());
   const chapterOpen = $derived(openChapter !== null);
   /**
    * Two pages with two panes: the shelf steps aside and the gutter falls where the divider was.
@@ -942,6 +949,8 @@
 
   async function bulkRemove(): Promise<void> {
     if (selection === null) return;
+    confirmingRemove = false;
+    removeError = null;
     busy = "Removing…";
     try {
       for (const seriesId of selection) {
@@ -951,6 +960,9 @@
       await library.refreshLibrary();
       await recount();
       selection = null;
+    } catch (problem) {
+      // A throw mid-loop left the rest of the selection in the library with nothing said about it.
+      removeError = `Stopped removing: ${problem instanceof Error ? problem.message : String(problem)}`;
     } finally {
       busy = null;
     }
@@ -1229,13 +1241,22 @@
     <div class="selection" class:pinned={layout.selectionBar === "pinned"} role="toolbar" aria-label="Selection actions">
       <span class="n">{busy ?? `${selection.size} selected`}</span>
       <div class="sacts">
-        <button class="btn ghost" onclick={selectEverything}>Select all {rows.length}</button>
-        <button class="btn ghost" disabled={selection.size === 0} onclick={() => void bulkRead(true)}>Read</button>
-        <button class="btn ghost" disabled={selection.size === 0} onclick={() => void bulkRead(false)}>Unread</button>
-        <button class="btn ghost" disabled={selection.size === 0} onclick={() => { pendingCollections = {}; categoriesOpen = true; }}>Category</button>
-        <button class="btn danger" disabled={selection.size === 0} onclick={() => void bulkRemove()}>Remove</button>
-        <button class="btn ghost" onclick={() => (selection = null)}>Done</button>
+        {#if confirmingRemove}
+          <!-- Two taps, like every other delete: the first one asks, this one removes. -->
+          <button class="btn danger" disabled={selection.size === 0} onclick={() => void bulkRemove()}>
+            Remove {selection.size} from library
+          </button>
+          <button class="btn ghost" onclick={() => (confirmingRemove = false)}>Cancel</button>
+        {:else}
+          <button class="btn ghost" onclick={selectEverything}>Select all {rows.length}</button>
+          <button class="btn ghost" disabled={selection.size === 0} onclick={() => void bulkRead(true)}>Read</button>
+          <button class="btn ghost" disabled={selection.size === 0} onclick={() => void bulkRead(false)}>Unread</button>
+          <button class="btn ghost" disabled={selection.size === 0} onclick={() => { pendingCollections = {}; categoriesOpen = true; }}>Category</button>
+          <button class="btn danger" disabled={selection.size === 0} onclick={() => (confirmingRemove = true)}>Remove</button>
+          <button class="btn ghost" onclick={() => { selection = null; confirmingRemove = false; removeError = null; }}>Done</button>
+        {/if}
       </div>
+      {#if removeError !== null}<p class="hint" role="alert">{removeError}</p>{/if}
     </div>
   {/if}
   {/if}

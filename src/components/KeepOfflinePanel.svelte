@@ -34,10 +34,18 @@
     busy = true;
     try {
       const result = await downloads.keepLibraryOffline();
+      // A partial pass says both halves: what was queued and what could not be asked. Reporting only
+      // the failure threw away the work that had already happened.
+      const unreached =
+        result.failed === 0
+          ? ""
+          : ` ${result.failed} title${result.failed === 1 ? "" : "s"} could not be reached.`;
       note =
         result.queued === 0
-          ? "Everything in those categories is already on this device."
-          : `Queued ${result.queued} issue${result.queued === 1 ? "" : "s"} from ${result.titles} title${result.titles === 1 ? "" : "s"}.`;
+          ? result.failed === 0
+            ? "Everything in those categories is already on this device."
+            : `Nothing new was queued.${unreached}`
+          : `Queued ${result.queued} issue${result.queued === 1 ? "" : "s"} from ${result.titles} title${result.titles === 1 ? "" : "s"}.${unreached}`;
     } catch (error) {
       note = error instanceof Error ? error.message : String(error);
     } finally {

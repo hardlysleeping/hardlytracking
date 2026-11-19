@@ -126,6 +126,7 @@
       // the confirm step does not install anything, but the answer must never be stale.
       const summary = summarizeImport(doc, await store.listExtensions(), await store.listRepos());
       await library.refreshLibrary();
+      await library.reloadRepositories();
       await categories.load(store);
       applied = { doc, summary, message: outcomeSentence(summary, result) };
       notice = `${chosen.name} — ${plural(result.series, "series", "series")}, ${plural(result.chapters, "chapter")}, ${plural(result.progress, "progress row")}, ${plural(result.positions, "resume position")}, ${plural(result.read, "read mark")}.`;
