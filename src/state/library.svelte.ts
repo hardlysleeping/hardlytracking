@@ -634,6 +634,9 @@ class LibraryState {
    */
   async installEntry(entry: ExtensionEntry, repoUrl: string): Promise<InstalledExtension> {
     if (this.profile === null) throw new Error(this.notOpenMessage);
+    // A portable package has no APK to unpack: its bytes are one provider module, and the row says
+    // so. Sending it down the APK path asked the runtime to install a `.js` as an Android package.
+    if (entry.portable !== undefined) return this.installPortableEntry(entry.portable, repoUrl);
     const profile = this.profile;
     await this.ensureExtensionHost();
     if (this.profile !== profile) throw new Error("The library changed before the extension could be installed.");

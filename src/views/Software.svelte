@@ -23,6 +23,7 @@
     type SoftwareFacts,
   } from "../lib/software";
   import { go, pathTo } from "../lib/nav";
+  import { copyText } from "../lib/clipboard";
 
   interface Props {
     /** The Android package id — the thing an extension row and a link both name. */
@@ -43,6 +44,8 @@
   let busy = $state<SoftwareAction | null>(null);
   let confirming = $state(false);
   let copied = $state(false);
+  /** The clipboard had nothing to give: the link is on screen, so the button says so. */
+  let copyRefused = $state(false);
   /** Sixty sources is a list, not a record: twelve is enough to see what it covers. */
   let allSources = $state(false);
 
@@ -217,10 +220,18 @@
     go(`/extensions?repo=${encodeURIComponent(repoUrl)}`);
   }
 
-  function share(): void {
+  /**
+   * Copy the package's link, and say what actually happened.
+   *
+   * The button set `copied = true` before the clipboard was asked, so a refused or absent clipboard
+   * still read "Copied" — with nothing in it. Now the label follows the result, and the link stays
+   * on screen (it is already selectable) when the copy fails.
+   */
+  async function share(): Promise<void> {
     const ref = { pkg, repo: repoUrl };
-    void navigator.clipboard?.writeText(canonicalSoftwareUrl(ref)).catch(() => undefined);
-    copied = true;
+    const result = await copyText(canonicalSoftwareUrl(ref));
+    copied = result.copied;
+    copyRefused = !result.copied;
   }
 
   function sourceHref(id: string): string {
@@ -377,7 +388,10 @@
     <div class="linkrow">
       <span class="label">Link</span>
       <code class="mono selectable">{canonicalSoftwareUrl({ pkg, repo: repoUrl })}</code>
-      <button class="chip small" onclick={() => share()}>{copied ? "Copied" : "Copy"}</button>
+      <button
+        class="chip small"
+        onclick={() => void share()}
+      >{copied ? "Copied" : copyRefused ? "Copy refused — select it" : "Copy"}</button>
     </div>
   {/if}
 </section>

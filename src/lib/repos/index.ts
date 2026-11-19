@@ -138,8 +138,11 @@ export function detectRepoIndex(input: unknown): RepoKind | null {
       return null;
     }
   }
-  // Legacy Mihon indexes are a bare array of entries.
-  if (Array.isArray(input)) return "mihon";
+  // A bare array is either legacy Mihon or this app's own portable list; only the row says which.
+  if (Array.isArray(input)) {
+    const first = input[0];
+    return isRecord(first) && first.runtime === "portable-js" ? "portable" : "mihon";
+  }
   if (!isRecord(input)) return null;
   // Ours, checked before the Mihon branches: the wrapper is the same `extensionList` shape, and
   // only the entry's runtime tells them apart.

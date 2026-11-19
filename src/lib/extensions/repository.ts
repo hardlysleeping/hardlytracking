@@ -17,6 +17,8 @@
  * origin: repository indexes live on one host and APKs redirect to another.
  */
 import { parseIndex, type ExtensionEntry, type ExtensionIndex } from "./index";
+import { portableIndex } from "./portable";
+import { detectRepoIndex } from "../repos/index";
 import { apiUrl, hasLocalServer, withToken } from "../host";
 import { RUNTIME_DEADLINE_MS, deadlined } from "../deadline";
 
@@ -188,7 +190,10 @@ export async function loadRepository(input: string, options: LoadOptions = {}): 
       continue;
     }
 
-    const index: ExtensionIndex = parseIndex(raw, indexUrl);
+    // A portable index is seeded by this app's own publisher: its rows have no APK, and `parseIndex`
+    // drops every one of them. Reading it by its shape is what makes the pinned repository work.
+    const index: ExtensionIndex =
+      detectRepoIndex(raw) === "portable" ? portableIndex(raw, indexUrl) : parseIndex(raw, indexUrl);
     if (index.extensions.length === 0) {
       // An empty index is a valid answer, but not a useful repository; say so rather than
       // registering a repository with nothing in it.

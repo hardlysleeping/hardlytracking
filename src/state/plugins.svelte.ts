@@ -85,12 +85,14 @@ class PluginState {
    * not with `window.confirm`, so the prompt can list what each permission means.
    */
   async install(bytes: Uint8Array): Promise<InstallOutcome | null> {
-    if (this.manager === null) return null;
+    if (this.#refuseWhenClosed()) return null;
+    const manager = this.manager;
+    if (manager === null) return null;
     this.busy = true;
     this.error = "";
     this.notice = "";
     try {
-      const outcome = await this.manager.install({
+      const outcome = await manager.install({
         bytes,
         appVersion: appVersion(),
         platform: platform(),
@@ -118,23 +120,40 @@ class PluginState {
     }
   }
 
+  /**
+   * A manager that does not exist is not a silent success.
+   *
+   * These four actions are reachable before the library has opened (the manager is attached then),
+   * and `manager?.enable(id)` answered "nothing happened" while the screen showed a switch that
+   * moved. One sentence says why, and the screen can show it.
+   */
+  #refuseWhenClosed(): boolean {
+    if (this.manager !== null) return false;
+    this.error = "Plugins need an open library. Open your library and try again.";
+    return true;
+  }
+
   async enable(id: string): Promise<void> {
+    if (this.#refuseWhenClosed()) return;
     await this.manager?.enable(id);
     await this.reload();
   }
 
   async disable(id: string): Promise<void> {
+    if (this.#refuseWhenClosed()) return;
     await this.manager?.disable(id);
     await this.reload();
   }
 
   async uninstall(id: string): Promise<void> {
+    if (this.#refuseWhenClosed()) return;
     await this.manager?.uninstall(id);
     await this.reload();
   }
 
   /** Runs one plugin action from a menu. */
   invoke(pluginId: string, actionId: string): void {
+    if (this.#refuseWhenClosed()) return;
     this.manager?.invoke(pluginId, actionId);
   }
 

@@ -20,6 +20,7 @@
   import MigrateSheet from "../components/MigrateSheet.svelte";
   import TrackerCard from "../components/TrackerCard.svelte";
   import { highestReadChapter } from "../lib/trackers/local";
+  import { copyText } from "../lib/clipboard";
   import { go, pathTo } from "../lib/nav";
   import { startReading } from "../state/reader-pane.svelte";
   import { flipOrder, orderChapters, orderLabel, type ChapterOrder } from "../lib/chapter-order";
@@ -49,6 +50,9 @@
 
   let expanded = $state(false);
   let menuOpen = $state(false);
+  /** The answer to "Copy link": a copy, or the address the clipboard refused. */
+  let shareNote = $state<string | null>(null);
+  let shareNoteTimer: ReturnType<typeof setTimeout> | null = null;
   let chapterMenu = $state<Chapter | null>(null);
   /** The title the migration sheet is about; `null` closes it. */
   let migrating = $state<Series | null>(null);
@@ -273,11 +277,21 @@
     }
   }
 
-  function share(): void {
+  /**
+   * Copy this title's address.
+   *
+   * The old version fired `navigator.clipboard?.writeText(...).catch(() => {})` and closed the menu:
+   * where the clipboard was missing or refused, the reader got no link and no answer. `copyText`
+   * reports what happened, and a failure shows the address itself so it can still be selected.
+   */
+  async function share(): Promise<void> {
     if (series === null) return;
     const url = `${location.origin}${location.pathname}#${pathTo("series", series.id)}`;
-    void navigator.clipboard?.writeText(url).catch(() => {});
     menuOpen = false;
+    const result = await copyText(url);
+    shareNote = result.copied ? "Link copied." : `Could not reach the clipboard here. The link is ${url}`;
+    if (shareNoteTimer !== null) clearTimeout(shareNoteTimer);
+    shareNoteTimer = result.copied ? setTimeout(() => (shareNote = null), 3000) : null;
   }
 
   function when(chapter: Chapter): string {
@@ -306,6 +320,7 @@
   </header>
 
   {#if error}<p class="banner">{error}</p>{/if}
+  {#if shareNote}<p class="banner note" role="status" data-share-note>{shareNote}</p>{/if}
   {#if busy && series === null}<p class="empty">Loading…</p>{/if}
 
   {#if series}
@@ -522,7 +537,7 @@
     {#if saved}
       <button class="menu-item" onclick={() => { menuOpen = false; migrating = series; }}>Migrate to another source</button>
     {/if}
-    <button class="menu-item" onclick={share}>Copy link to this series</button>
+    <button class="menu-item" onclick={() => void share()}>Copy link to this series</button>
   </div>
 </Sheet>
 

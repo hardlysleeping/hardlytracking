@@ -48,6 +48,8 @@ import { probeWebdav } from "../api/webdav";
   let section = $state<"installed" | "available" | "repositories">("installed");
 
   let repoUrl = $state("");
+  /** The Check button was pressed with nothing in the field. */
+  let emptySubmit = $state(false);
   let adding = $state(false);
   /**
    * A repository that has been read but not added: what the confirmation panel is about.
@@ -344,7 +346,13 @@ import { probeWebdav } from "../api/webdav";
   /** Read a repository index without storing anything, and show what it is. */
   async function inspect(url: string): Promise<void> {
     const target = url.trim();
-    if (target === "") return;
+    if (target === "") {
+      // The button used to do nothing at all on an empty field, which reads as a broken button.
+      emptySubmit = true;
+      error = null;
+      return;
+    }
+    emptySubmit = false;
     adding = true;
     error = null;
     notice = null;
@@ -983,7 +991,11 @@ import { probeWebdav } from "../api/webdav";
       {:else if collapsed}
         <!-- Folded by its own repository chip: the names above are the whole section. -->
       {:else if entries.length === 0}
-        <p class="empty">Pick a repository above to read its index.</p>
+        <p class="empty">
+          {activeRepo === null
+            ? "Pick a repository above to read its index."
+            : "This repository lists no extensions this build can install."}
+        </p>
       {:else}
         <p class="summary">
           {matched.length === 0 ? "No match" : `${matched.length} extension${matched.length === 1 ? "" : "s"}`}{matched.length > shown.length ? ` · showing ${shown.length}` : ""}
@@ -1072,6 +1084,9 @@ import { probeWebdav } from "../api/webdav";
         spellcheck="false"
       />
       <button class="btn primary" type="submit" disabled={adding}>{adding ? "Reading…" : "Check repository"}</button>
+      {#if emptySubmit}
+        <p class="empty" role="status">Paste the repository's own URL, or its Install link, first.</p>
+      {/if}
     </form>
 
     {#if library.repos.length === 0}

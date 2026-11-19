@@ -734,9 +734,9 @@
       {#if blocks.length === 0}
         <p class="empty">
           {#if chosen.size === 0}
-            No sources selected. Open Filter above and tick the ones you want — each answers on its own.
+            No sources selected. Tick one in the Sources list above — each answers on its own.
           {:else if settings.searchPinnedOnly && chosen.size === pinned.length && pinned.every((source) => chosen.has(source.id))}
-            Searching your {pinned.length} pinned source{pinned.length === 1 ? "" : "s"}. Pin more, or open Filter to widen it.
+            Searching your {pinned.length} pinned source{pinned.length === 1 ? "" : "s"}. Pin more, or tick more sources above to widen it.
           {:else}
             {chosen.size} of {sources.length} sources selected. Type a title and press Search.
           {/if}

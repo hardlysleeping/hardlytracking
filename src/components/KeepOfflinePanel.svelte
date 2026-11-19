@@ -25,6 +25,12 @@
   }
 
   async function keepNow(): Promise<void> {
+    // No categories chosen used to answer "Everything in those categories is already on this
+    // device", which is true of nothing: there were no categories. Ask for the choice instead.
+    if (settings.keepCategories.length === 0) {
+      note = "Pick at least one category above. Until one is chosen there is nothing to fetch — or turn on “Keep new titles offline” so a title is fetched the moment it is added.";
+      return;
+    }
     busy = true;
     try {
       const result = await downloads.keepLibraryOffline();

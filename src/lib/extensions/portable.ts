@@ -19,6 +19,7 @@
  *    like any other unreadable row — one broken entry must never empty a repository.
  */
 import { PROVIDER_KINDS, type ProviderKind } from "../../api/source";
+import type { ExtensionEntry } from "./index";
 import { absoluteUrl, isRecord, type RepoEntry, type RepoIndex } from "../repos/index";
 
 /** The only runtime this module describes. Mihon APKs go to the dalvik host, not here. */
@@ -147,7 +148,8 @@ export function parsePortableManifest(entry: unknown, base: string): PortableMan
  * Both a bare array and `{extensionList: {extensions: []}}` are accepted, because the app's own
  * publisher writes the first while every other index writes the second.
  */
-export function parsePortableRepo(raw: unknown, base: string): RepoIndex {
+/** The rows of a portable index, with unreadable ones dropped. Throws when the shape is wrong. */
+export function parsePortableManifests(raw: unknown, base: string): PortableManifest[] {
   const list = Array.isArray(raw)
     ? raw
     : isRecord(raw) && isRecord(raw.extensionList) && Array.isArray(raw.extensionList.extensions)
@@ -156,16 +158,28 @@ export function parsePortableRepo(raw: unknown, base: string): RepoIndex {
   if (list === null) {
     throw new PortablePackageError("not a portable extension index: expected an array or extensionList.extensions");
   }
-  const entries: RepoEntry[] = [];
+  const manifests: PortableManifest[] = [];
   for (const item of list) {
-    let manifest: PortableManifest;
     try {
-      manifest = parsePortableManifest(item, base);
+      manifests.push(parsePortableManifest(item, base));
     } catch (error) {
       // One unreadable row is one extension missing from the store, never an empty repository.
       if (error instanceof PortablePackageError) continue;
       throw error;
     }
+  }
+  return manifests;
+}
+
+/** The name the index declares, or the one this app calls packages of its own shape. */
+export function portableIndexName(raw: unknown): string {
+  return isRecord(raw) && typeof raw.name === "string" && raw.name !== "" ? raw.name : "Portable extensions";
+}
+
+export function parsePortableRepo(raw: unknown, base: string): RepoIndex {
+  const manifests = parsePortableManifests(raw, base);
+  const entries: RepoEntry[] = [];
+  for (const manifest of [...manifests]) {
     const entry: RepoEntry = {
       kind: "portable",
       id: manifest.id,
@@ -188,6 +202,38 @@ export function parsePortableRepo(raw: unknown, base: string): RepoIndex {
     if (manifest.minAppVersion !== undefined) entry.minHostVersion = manifest.minAppVersion;
     entries.push(entry);
   }
-  const name = isRecord(raw) && typeof raw.name === "string" && raw.name !== "" ? raw.name : "Portable extensions";
-  return { kind: "portable", name, entries };
+  return { kind: "portable", name: portableIndexName(raw), entries };
+}
+
+/**
+ * A portable index as the Extensions store rows it.
+ *
+ * The store's row is `ExtensionEntry`, which is a Mihon-shaped record: a package name, a version, a
+ * package URL, sources. A portable package fits every one of those fields (`provider.js` is its
+ * package URL), so the same list, the same Install button and the same update path work — provided
+ * the manifest travels with the row, which is why `portable` is carried on it.
+ */
+export function portableIndex(raw: unknown, base: string): { name: string; extensions: ExtensionEntry[] } {
+  const manifests = parsePortableManifests(raw, base);
+  const extensions: ExtensionEntry[] = manifests.map((manifest) => {
+    const entry: ExtensionEntry = {
+      name: manifest.name,
+      pkg: manifest.id,
+      version: manifest.version,
+      versionCode: manifest.versionCode,
+      lib: `portable ${manifest.hostApi}`,
+      // The bytes this "APK URL" names are the provider module; the install path reads `portable`.
+      apkUrl: manifest.entryUrl,
+      contentWarning: "UNKNOWN",
+      sources: manifest.sources.map((source, at) => ({
+        id: String(at),
+        name: source.name ?? manifest.name,
+        lang: source.lang,
+      })),
+      portable: manifest,
+    };
+    if (manifest.iconUrl !== undefined) entry.iconUrl = manifest.iconUrl;
+    return entry;
+  });
+  return { name: portableIndexName(raw), extensions };
 }

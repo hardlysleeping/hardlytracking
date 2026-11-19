@@ -26,6 +26,8 @@
   import { MARGIN_CHOICES, NAV_CORNER_CHOICES } from "../lib/view-options";
   import { DESTINATIONS } from "../lib/destinations";
   import { DEFAULT_BOTTOM_NAV, moveItem, toggleItem } from "../lib/nav-order";
+  import { wakeLockAvailable } from "../lib/wake-lock";
+  import { copyText } from "../lib/clipboard";
   import BottomBar from "../components/BottomBar.svelte";
   import { CPU_LEVELS, describeLevel } from "../lib/performance";
 import { CONTENT_LEVELS, type ContentLevel } from "../lib/content/levels";
@@ -111,6 +113,8 @@ import PrivacyPanel from "../components/PrivacyPanel.svelte";
    * of room", and it is labelled as such rather than presented as free disk space.
    */
   let space = $state<{ used: number; quota: number } | null>(null);
+  /** True once the estimate has been asked for, so "no answer" stops reading as "still reading". */
+  let spaceRead = $state(false);
   let searchCache = $state<{ rows: number; bytes: number } | null>(null);
   let spaceNote = $state<string | null>(null);
 
@@ -123,6 +127,7 @@ import PrivacyPanel from "../components/PrivacyPanel.svelte";
     } catch {
       space = null;
     }
+    spaceRead = true;
     if (library.profile !== null) searchCache = await library.profile.store.searchCacheSize();
   }
 
@@ -148,6 +153,8 @@ import PrivacyPanel from "../components/PrivacyPanel.svelte";
   let token = $state(hostToken());
   let hostValue = $state(remoteHost());
   let copied = $state(false);
+  /** The clipboard refused: the link is on screen, so the button says so instead of doing nothing. */
+  let copyRefused = $state(false);
 
   onMount(() => {
     void hostInfo().then((value) => (info = value));
@@ -163,18 +170,17 @@ import PrivacyPanel from "../components/PrivacyPanel.svelte";
   });
 
   const pluginCount = $derived(plugins.list.length);
+  /** A shell without the Screen Wake Lock API cannot honour the switch, so it says so. */
+  const wakeLockSupported = wakeLockAvailable();
 
   const link = $derived(info === null ? null : pairingLink(info, token));
 
   async function copyLink(): Promise<void> {
     if (link === null) return;
-    try {
-      await navigator.clipboard.writeText(link);
-      copied = true;
-      setTimeout(() => (copied = false), 1500);
-    } catch {
-      copied = false;
-    }
+    const result = await copyText(link);
+    copied = result.copied;
+    copyRefused = !result.copied;
+    if (result.copied) setTimeout(() => (copied = false), 1500);
   }
   /** The age gate is shown, not applied: choosing Adult asks before it shows anything. */
   let ageGate = $state(false);
@@ -416,6 +422,11 @@ import PrivacyPanel from "../components/PrivacyPanel.svelte";
         <option value="paged">Paged</option>
         <option value="ltr">Left → right</option>
         <option value="rtl">Right → left</option>
+        <!-- Two pages at once only exists in a split layout; offering it elsewhere would be a
+             choice that changes nothing. Same rule as the reader's own mode chips. -->
+        {#if settings.libraryPane !== "single"}
+          <option value="duo">Two pages</option>
+        {/if}
       </select>
     </label>
     <label class="row">
@@ -436,8 +447,29 @@ import PrivacyPanel from "../components/PrivacyPanel.svelte";
       <input type="checkbox" checked={settings.tapZones} onchange={(event) => settings.set("tapZones", event.currentTarget.checked)} />
     </label>
     <label class="row">
-      <span>Keep the screen awake</span>
-      <input type="checkbox" checked={settings.keepAwake} onchange={(event) => settings.set("keepAwake", event.currentTarget.checked)} />
+      <span>
+        Continue to the next unread chapter
+        <em class="sub">Marking a chapter read points Continue at the next unread one. Off, it stays where you left it.</em>
+      </span>
+      <input
+        type="checkbox"
+        checked={settings.continueAfterFinish === "next-unread"}
+        onchange={(event) => settings.set("continueAfterFinish", event.currentTarget.checked ? "next-unread" : "hold")}
+      />
+    </label>
+    <label class="row">
+      <span>
+        Keep the screen awake
+        {#if !wakeLockSupported}
+          <em class="sub">This device does not let the app hold the screen on, so the switch has no effect here.</em>
+        {/if}
+      </span>
+      <input
+        type="checkbox"
+        checked={settings.keepAwake}
+        disabled={!wakeLockSupported}
+        onchange={(event) => settings.set("keepAwake", event.currentTarget.checked)}
+      />
     </label>
   </details>
 
@@ -460,7 +492,7 @@ import PrivacyPanel from "../components/PrivacyPanel.svelte";
     {:else if link !== null}
       <div class="row">
         <span>Open on your phone<em class="sub">{link}</em></span>
-        <button class="chip" onclick={() => void copyLink()}>{copied ? "Copied" : "Copy"}</button>
+        <button class="chip" onclick={() => void copyLink()}>{copied ? "Copied" : copyRefused ? "Copy refused — select it" : "Copy"}</button>
       </div>
       {#if info.tokenRequired && token === ""}
         <p class="hint">That link has no token yet — put the server's <code>HARDLYTRACKING_TOKEN</code> on the HT-Server card in Extensions so the phone can call the runtime.</p>
@@ -484,7 +516,15 @@ import PrivacyPanel from "../components/PrivacyPanel.svelte";
     <summary><h2>Storage</h2></summary>
     <div class="space">
       <div class="spaceline">
-        <span>{space === null ? "Reading this device's storage…" : `${formatBytes(space.used)} used of ${formatBytes(space.quota)} this app may use`}</span>
+        <span>
+          {#if space !== null}
+            {formatBytes(space.used)} used of {formatBytes(space.quota)} this app may use
+          {:else if spaceRead}
+            This build does not report how much room it may use. Downloads still stop when the device is full.
+          {:else}
+            Reading this device's storage…
+          {/if}
+        </span>
         <span class="muted">{space === null ? "" : `${Math.round(spacePercent)}%`}</span>
       </div>
       <div class="spacebar" aria-hidden="true"><i class={spaceTone} style={`width:${spacePercent}%`}></i></div>

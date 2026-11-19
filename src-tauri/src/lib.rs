@@ -5,6 +5,7 @@
 //! browser and the phone run.
 
 mod runtime;
+mod save;
 
 use tauri::Manager;
 
@@ -18,6 +19,8 @@ pub fn run() {
             runtime::mihon_runtime_start,
             runtime::mihon_runtime_status,
             runtime::mihon_runtime_stop,
+            // Saving a file the page asked for: a webview has no downloads of its own.
+            save::save_file,
         ])
         .build(tauri::generate_context!())
         .expect("the app configuration is invalid")

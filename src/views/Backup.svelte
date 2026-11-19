@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { describeSaved, saveFile } from "../lib/files/save";
   /**
    * Backup & restore: one file out, one file in. Free, always.
    *
@@ -65,13 +66,10 @@
       const device = await deviceId(store);
       const doc = $state.snapshot(await documentFromStore(store, { device })) as SyncDocument;
       const file = await exportDocument(doc, kind, { device });
-      const url = URL.createObjectURL(new Blob([file.bytes as BlobPart], { type: file.mime }));
-      const anchor = document.createElement("a");
-      anchor.href = url;
-      anchor.download = file.filename;
-      anchor.click();
-      URL.revokeObjectURL(url);
-      notice = `${file.filename} — ${plural(doc.series.length, "series", "series")}, ${plural(doc.chapters.length, "chapter")}, ${plural(doc.categories.length, "category", "categories")}, ${plural(doc.sessions.length, "session")}`;
+      // Where the file can actually land depends on the shell: a WebView has no downloads at all,
+      // so the blob-and-anchor this used to do reported success with nothing written.
+      const saved = await saveFile(file.filename, file.bytes, file.mime);
+      notice = `${describeSaved(saved)} ${plural(doc.series.length, "series", "series")}, ${plural(doc.chapters.length, "chapter")}, ${plural(doc.categories.length, "category", "categories")}, ${plural(doc.sessions.length, "session")}.`;
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
     } finally {

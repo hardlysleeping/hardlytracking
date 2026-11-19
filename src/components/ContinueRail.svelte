@@ -11,7 +11,7 @@
   import Cover from "./Cover.svelte";
   import Sheet from "./Sheet.svelte";
   import { go, pathTo } from "../lib/nav";
-  import { startReading } from "../state/reader-pane.svelte";
+  import { restartChapter, startReading } from "../state/reader-pane.svelte";
   import { library } from "../state/library.svelte";
   import { downloads } from "../state/downloads.svelte";
   import { settings } from "../state/settings.svelte";
@@ -130,19 +130,36 @@
   {#if menuRow !== null}
     {@const row = menuRow}
     <div class="menu-list">
-      <button class="menu-item" onclick={() => startReading(row.seriesId, row.chapterId)}>
+      <button
+        class="menu-item"
+        onclick={() => {
+          // Read the row before clearing it: `row` is `{@const}` over `menuRow`, so nulling the
+          // sheet first makes the next line throw on a null row.
+          const { seriesId, chapterId } = row;
+          menuRow = null;
+          startReading(seriesId, chapterId);
+        }}
+      >
         <span>Continue · page {row.page + 1}</span>
       </button>
       <button
         class="menu-item"
         onclick={() => {
-          go(pathTo("series", row.seriesId));
+          const { seriesId } = row;
           menuRow = null;
+          go(pathTo("series", seriesId));
         }}
       >
         <span>Open details</span>
       </button>
-      <button class="menu-item" onclick={() => startReading(row.seriesId, row.chapterId)}>
+      <button
+        class="menu-item"
+        onclick={() => {
+          const { seriesId, chapterId } = row;
+          menuRow = null;
+          void restartChapter(seriesId, chapterId);
+        }}
+      >
         <span>Restart chapter</span>
       </button>
       <button class="menu-item" onclick={() => void markRead(row)}><span>Mark chapter read</span></button>

@@ -1,5 +1,6 @@
 import { go, pathTo } from "../lib/nav";
 import { settings } from "./settings.svelte";
+import { library } from "./library.svelte";
 
 /**
  * The chapter being read inside the library, when the library has a pane for it.
@@ -34,6 +35,15 @@ class ReaderPane {
   close(): void {
     this.open = null;
   }
+
+  /**
+   * A counter that says "this chapter was asked for again".
+   *
+   * The reader's load effect depends on `chapterId`, which does not change when the same chapter is
+   * reopened in the same pane. Restarting needs the load to run again, so a restart bumps this and
+   * the reader watches it.
+   */
+  reloads = $state(0);
 }
 
 export const readerPane = new ReaderPane();
@@ -51,4 +61,24 @@ export function startReading(seriesId: string, chapterId: string, allowPane = tr
     return;
   }
   go(pathTo("read", seriesId, chapterId));
+}
+
+/**
+ * Open a chapter at its first page, whatever this device last stopped on.
+ *
+ * "Restart chapter" used to call `startReading`, which is the same call as "Continue" — the reader
+ * loads its saved page, so both walked back to page 40. The saved page is the one thing that has to
+ * go for a restart to mean anything, so it is cleared first, and the reader is told a reload is
+ * wanted (`reloads`) in case the very chapter is already open in a pane: a prop that did not change
+ * would not mount anything.
+ */
+export async function restartChapter(seriesId: string, chapterId: string, allowPane = true): Promise<void> {
+  const store = library.profile?.store;
+  if (store !== undefined) {
+    // Page 0, and the `completed` flag is kept: restarting a chapter is not un-reading it.
+    await store.setProgress(chapterId, 0, 0).catch(() => undefined);
+    await store.setPosition(seriesId, chapterId, 0).catch(() => undefined);
+  }
+  readerPane.reloads += 1;
+  startReading(seriesId, chapterId, allowPane);
 }

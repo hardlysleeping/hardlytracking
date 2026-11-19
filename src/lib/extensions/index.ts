@@ -37,6 +37,15 @@ export interface ExtensionEntry {
   /** `SAFE` / `MIXED` / `NSFW` / `UNKNOWN` — normalised from either format. */
   contentWarning: string;
   sources: ExtensionSource[];
+  /**
+   * The manifest of a portable (JavaScript) package.
+   *
+   * A portable entry has no APK: its "bytes" are one `provider.js` fetched from `entryUrl`. The
+   * install path needs the manifest itself (id, kind, host API, source declarations), so the whole
+   * thing travels with the entry instead of being re-parsed from an index that may have changed
+   * between the tap and the download.
+   */
+  portable?: import("./portable").PortableManifest;
 }
 
 export interface ExtensionIndex {

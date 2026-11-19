@@ -22,7 +22,7 @@
  * The canonical web form is `https://hardlytracking.app/source?repo=…&id=…` — the same page on a
  * device without the app, because the app is a static build that can be served from that host.
  */
-import { ecosystemLabel, ecosystemOf } from "./extensions/proposal";
+import { ecosystemLabel, repositoryEcosystem } from "./extensions/proposal";
 import { updateState, type ExtensionEntry } from "./extensions/index";
 import type { Repository } from "./extensions/repository";
 import { isFetchableRepo } from "./deep-link";
@@ -182,7 +182,7 @@ export function softwareFacts(input: SoftwareInput): SoftwareFacts {
   return {
     pkg: ref.pkg,
     name: entry?.name ?? ((row?.name ?? "").trim() || nameFromPackage(ref.pkg)),
-    ecosystem: input.index === null ? "Extension repository" : ecosystemLabel(ecosystemOf(input.index.indexUrl)),
+    ecosystem: input.index === null ? "Extension repository" : ecosystemLabel(repositoryEcosystem(input.index)),
     version: entry?.version ?? row?.versionName ?? null,
     repository,
     languages: unique(sources.map((source) => source.lang)),

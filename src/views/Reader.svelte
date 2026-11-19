@@ -33,6 +33,8 @@
   import { advancePx, AUTOSCROLL_CURVES, AUTOSCROLL_SPEEDS, progressOf } from "../lib/autoscroll";
   import { ReaderQueue, ReaderTap, readerOrder, type ReaderJob } from "../lib/reader";
   import { currentPage, remember } from "../lib/reader-scroll";
+  import { readerPane } from "../state/reader-pane.svelte";
+  import { createWakeLock, wakeLockAvailable } from "../lib/wake-lock";
 
   interface Props {
     seriesId: string;
@@ -224,6 +226,8 @@
   let partialNotice = $state<string | null>(null);
   /** Set when the page list came from the database because the source did not answer. */
   let storedNotice = $state<string | null>(null);
+  /** A line about a control the runtime could not honour (a fullscreen request it refuses). */
+  let controlNotice = $state<string | null>(null);
 
   let chrome = $state(true);
   let settingsOpen = $state(false);
@@ -505,8 +509,30 @@
   $effect(() => {
     const id = chapterId;
     void seriesId; // A corrected route/profile also owns a distinct load lifecycle.
+    // A restart of the chapter already open in this pane changes nothing else, so the reload
+    // counter is what makes the load run again.
+    void readerPane.reloads;
     if (library.profile !== null) untrack(() => { void load(id); });
     return () => { generation++; loadController?.abort(); queue.cancel(); };
+  });
+
+  /**
+   * Keep the screen on while a chapter is open, when the reader asked for it.
+   *
+   * The lock belongs to the chapter, not to the setting alone: holding it on the shelf would burn a
+   * phone for nothing. `createWakeLock` re-asks on return to the foreground, because the platform
+   * drops the lock whenever the page is hidden.
+   */
+  const wakeLock = createWakeLock();
+  const wakeLockSupported = wakeLockAvailable();
+  $effect(() => {
+    const wanted = settings.keepAwake && pages.length > 0;
+    if (!wanted) {
+      wakeLock.release();
+      return;
+    }
+    wakeLock.hold();
+    return () => wakeLock.release();
   });
 
   /**
@@ -904,8 +930,7 @@
     } else if (key === "k" || key === "K") {
       if (previous !== null) openChapter(previous.id);
     } else if (key === "f" || key === "F") {
-      if (document.fullscreenElement === null) void document.documentElement.requestFullscreen?.();
-      else void document.exitFullscreen?.();
+      void toggleFullscreen();
     } else if (key === "r" || key === "R") {
       void toggleRead();
     } else if (key === "Escape") {
@@ -917,6 +942,31 @@
 
   function mode(next: typeof settings.readerMode): void {
     settings.set("readerMode", next);
+  }
+
+  /**
+   * The F key: fullscreen, or a sentence saying this shell has none.
+   *
+   * A packaged WebView on iOS and inside a desktop window has no Fullscreen API, and the old
+   * `requestFullscreen?.()` swallowed that as a no-op — a key that did nothing with no answer. A
+   * refusal (an unfocused window, a permission policy) is the same case: say it once, carry on.
+   */
+  async function toggleFullscreen(): Promise<void> {
+    if (typeof document === "undefined") return;
+    controlNotice = null;
+    try {
+      if (document.fullscreenElement !== null) {
+        await document.exitFullscreen();
+        return;
+      }
+      if (typeof document.documentElement.requestFullscreen !== "function" || document.fullscreenEnabled === false) {
+        controlNotice = "This build has no fullscreen mode — the reader already fills the window. The F key does nothing here.";
+        return;
+      }
+      await document.documentElement.requestFullscreen();
+    } catch {
+      controlNotice = "Fullscreen was refused by this window. The reader still fills the app.";
+    }
   }
   $effect(() => {
     settings.readerMode; settings.readerFit;
@@ -975,6 +1025,7 @@
   {/if}
   {#if partialNotice}<p class="banner note">{partialNotice}</p>{/if}
   {#if storedNotice}<p class="banner note" data-pages="stored">{storedNotice}</p>{/if}
+  {#if controlNotice}<p class="banner note" role="status" data-control-notice>{controlNotice}</p>{/if}
   {#if busy}<p class="loading">Fetching pages…</p>{/if}
   <!-- A chapter that loaded and produced nothing used to be a blank screen with "—" in the footer:
        no error, no pages, nothing to press. It is the shape of a page list that came back empty —
@@ -1188,8 +1239,18 @@
     <input type="checkbox" checked={settings.tapZones} onchange={(event) => settings.set("tapZones", event.currentTarget.checked)} />
   </label>
   <label class="row">
-    <span>Keep the screen awake</span>
-    <input type="checkbox" checked={settings.keepAwake} onchange={(event) => settings.set("keepAwake", event.currentTarget.checked)} />
+    <span>
+      Keep the screen awake
+      {#if !wakeLockSupported}
+        <small class="hintline">This device does not let the app hold the screen on, so the switch has no effect here.</small>
+      {/if}
+    </span>
+    <input
+      type="checkbox"
+      checked={settings.keepAwake}
+      disabled={!wakeLockSupported}
+      onchange={(event) => settings.set("keepAwake", event.currentTarget.checked)}
+    />
   </label>
   {#if pluginActions.length > 0}
     <!--
@@ -1594,6 +1655,13 @@
     gap: var(--s3);
     min-height: 36px;
     font-size: var(--t-md);
+  }
+
+  .hintline {
+    display: block;
+    margin-top: 2px;
+    font-size: var(--t-xs);
+    color: var(--text-3);
   }
 
   .hint {

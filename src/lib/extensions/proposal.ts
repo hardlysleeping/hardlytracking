@@ -16,7 +16,7 @@ import { THIRD_PARTY_NOTICE } from "./disclosure";
 export { THIRD_PARTY_NOTICE };
 
 /** Which ecosystem's packages an index carries, as far as its filename can honestly say. */
-export type Ecosystem = "mihon" | "paperback" | "unknown";
+export type Ecosystem = "mihon" | "paperback" | "portable" | "unknown";
 
 /**
  * The ecosystem an index belongs to, from its own URL.
@@ -32,10 +32,24 @@ export function ecosystemOf(indexUrl: string): Ecosystem {
   return "unknown";
 }
 
+/**
+ * The ecosystem a repository carries, when its own rows can say so.
+ *
+ * A filename cannot: this app's portable indexes are published as `index.json`, which every name
+ * test calls Mihon. So the rows decide first — a listing whose packages carry a portable manifest is
+ * a JavaScript repository whatever the file is called, and calling it "APK extensions" would
+ * misdescribe what is about to be installed.
+ */
+export function repositoryEcosystem(repository: Pick<Repository, "indexUrl" | "extensions">): Ecosystem {
+  if (repository.extensions.some((entry) => entry.portable !== undefined)) return "portable";
+  return ecosystemOf(repository.indexUrl);
+}
+
 /** How the panel names it, in words rather than in a slug. */
 export function ecosystemLabel(ecosystem: Ecosystem): string {
   if (ecosystem === "mihon") return "Mihon / Keiyoushi · APK extensions";
   if (ecosystem === "paperback") return "Paperback · JavaScript sources";
+  if (ecosystem === "portable") return "Portable · JavaScript sources";
   return "Extension repository";
 }
 
@@ -56,7 +70,7 @@ export interface RepoProposal {
 }
 
 export function proposalOf(repository: Repository): RepoProposal {
-  const ecosystem = ecosystemOf(repository.indexUrl);
+  const ecosystem = repositoryEcosystem(repository);
   return {
     url: repository.url,
     indexUrl: repository.indexUrl,
