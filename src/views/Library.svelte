@@ -428,18 +428,21 @@
     lastRead: Map<string, number>;
     status: Map<string, string>;
     lastUpdated: Map<string, number>;
+    /** Series bound to a tracker. A tracker row is not a source mapping — it is a list entry. */
+    tracked: Set<string>;
   }>({
     unread: new Map(),
     total: new Map(),
     lastRead: new Map(),
     status: new Map(),
     lastUpdated: new Map(),
+    tracked: new Set(),
   });
 
   async function recount(): Promise<void> {
     const store = library.profile?.store;
     if (store === undefined) return;
-    const [chapters, prefs, positions, mappings] = await Promise.all([
+    const [chapters, prefs, positions, mappings, trackerRows] = await Promise.all([
       store.listAllChapters(),
       store.listPrefs(),
       store.listPositions(),
@@ -447,6 +450,8 @@
       // Read here, in the same pass as the counts, so hiding a Suwayomi source works like hiding a
       // dalvik one instead of silently doing nothing.
       store.listMappings(),
+      // The Tracked filter asks about tracker bindings, which only this store knows.
+      store.listTrackers(),
     ]);
     bookSizes = new Map((await store.listBookMetadata()).map((book) => [book.seriesId, book.bytes]));
     // The whole mapping, not just the source id: a migrated title is governed by the source it
@@ -469,6 +474,7 @@
       unread,
       total,
       lastUpdated,
+      tracked: new Set(trackerRows.map((row) => row.seriesId)),
       lastRead: new Map(positions.map((row, index) => [row.seriesId, positions.length - index])),
       status: new Map(
         library.library.filter((row) => row.status !== undefined).map((row) => [row.id, row.status as string]),
@@ -499,6 +505,7 @@
     status: counts.status,
     downloaded,
     lastUpdated: counts.lastUpdated,
+    tracked: counts.tracked,
     // New since the Updates screen was last opened — the mark, not a date, so opening it clears
     // the badge for exactly the titles it showed.
     newUpdates: new Set(
@@ -1197,7 +1204,7 @@
               onnavigate={(id) => readerPane.replace(id)}
             />
           {:else if pickedRow !== null}
-            <SeriesPage seriesId={pickedRow.id} embedded />
+            <SeriesPage seriesId={pickedRow.id} embedded onlibrarychange={() => void recount()} />
           {:else}
             <p class="hint">Pick a title to see it here. The shelf keeps its place.</p>
           {/if}

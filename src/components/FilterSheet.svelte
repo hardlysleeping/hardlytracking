@@ -86,6 +86,25 @@
     </label>
   </div>
 
+  <div class="group" role="radiogroup" aria-label="Tracking">
+    <h3>Tracking</h3>
+    {#each [
+      { id: "any", label: "Any" },
+      { id: "tracked", label: "Tracked" },
+      { id: "untracked", label: "Not tracked" },
+    ] as option (option.id)}
+      <label class="row">
+        <span>{option.label}</span>
+        <input
+          type="radio"
+          name="tracked"
+          checked={draft.tracked === option.id}
+          onchange={() => (draft = { ...draft, tracked: option.id as LibraryFilter["tracked"] })}
+        />
+      </label>
+    {/each}
+  </div>
+
   {#if statuses.length > 0}
     <div class="group">
       <h3>Status</h3>

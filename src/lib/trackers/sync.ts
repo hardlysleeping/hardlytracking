@@ -28,6 +28,29 @@ export function registerTracker(adapter: TrackerSet[TrackerService]): void {
   trackers[adapter.service] = adapter;
 }
 
+/** Is this service ready to answer right now? */
+export function isTrackerConnected(service: TrackerService): boolean {
+  return trackers[service] !== undefined;
+}
+
+/**
+ * Make sure a stored account has an adapter registered, and say whether it does.
+ *
+ * The launch path registers Kitsu after the library opens, so a series page that is already on
+ * screen can beat it by a moment. Asking here closes that gap without every caller knowing which
+ * service needs which import.
+ */
+export async function ensureTracker(store: LibraryStore, service: TrackerService): Promise<boolean> {
+  if (trackers[service] !== undefined) return true;
+  const account = await store.getTrackerAccount(service);
+  if (account === undefined) return false;
+  if (service === "kitsu") {
+    const { registerKitsu } = await import("./kitsu");
+    return registerKitsu(store);
+  }
+  return false;
+}
+
 /**
  * Stop talking to a service, without touching anything already downloaded or read.
  *

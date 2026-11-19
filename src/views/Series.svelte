@@ -18,6 +18,8 @@
   import SourceLink from "../components/SourceLink.svelte";
   import Sheet from "../components/Sheet.svelte";
   import MigrateSheet from "../components/MigrateSheet.svelte";
+  import TrackerCard from "../components/TrackerCard.svelte";
+  import { highestReadChapter } from "../lib/trackers/local";
   import { go, pathTo } from "../lib/nav";
   import { startReading } from "../state/reader-pane.svelte";
   import { flipOrder, orderChapters, orderLabel, type ChapterOrder } from "../lib/chapter-order";
@@ -28,8 +30,10 @@
     seriesId: string;
     /** In a desktop split there is nothing to go back to: the shelf is already beside it. */
     embedded?: boolean;
+    /** A tracker bind or unlink changed what the library can filter on. */
+    onlibrarychange?: () => void;
   }
-  let { seriesId, embedded = false }: Props = $props();
+  let { seriesId, embedded = false, onlibrarychange }: Props = $props();
 
   let series = $state<Series | null>(null);
   let chapters = $state<Chapter[]>([]);
@@ -138,6 +142,13 @@
   });
 
   const unread = $derived(chapters.filter((chapter) => !chapter.read).length);
+  /**
+   * The furthest chapter actually read here.
+   *
+   * A bind seeds the tracker row with this, so a title that is forty chapters in does not start its
+   * service list at chapter one. Unread chapters are not evidence, so they do not count.
+   */
+  const highestRead = $derived(highestReadChapter(chapters));
   const next = $derived(position === null ? null : chapters.find((chapter) => chapter.id === position?.chapterId) ?? null);
 
   /** In flight: the seat spins, and a second tap cannot start a second write. */
@@ -370,6 +381,13 @@
         {/if}
       </div>
     {/if}
+
+    <TrackerCard
+      {seriesId}
+      title={series.title}
+      localChapter={highestRead}
+      onchange={onlibrarychange}
+    />
 
     <section class="chapters">
       <header class="chead">

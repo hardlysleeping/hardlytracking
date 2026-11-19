@@ -157,7 +157,7 @@ export function activeChips(filter: LibraryFilter): FilterChip[] {
   for (const status of filter.statuses) chips.push({ key: STATUS_PREFIX + status, label: status });
   for (const source of filter.sources) chips.push({ key: SOURCE_PREFIX + source, label: source });
   if (filter.tracked === "tracked") chips.push({ key: "tracked", label: "Tracked" });
-  if (filter.tracked === "untracked") chips.push({ key: "tracked", label: "Untracked" });
+  if (filter.tracked === "untracked") chips.push({ key: "tracked", label: "Not tracked" });
   return chips;
 }
 
