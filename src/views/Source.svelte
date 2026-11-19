@@ -167,6 +167,17 @@
     }
   }
 
+  /**
+   * Whether the library has opened yet.
+   *
+   * A route restored on launch (a reload, a phone that was killed with a source open) mounts this
+   * view before `library.open()` has built its providers. `run()` returns early with no profile and
+   * nothing used to ask it again, so the page said "This source returned nothing." and only a
+   * manual Refresh brought the grid back. Read here, outside the `untrack` below, so the effect
+   * depends on it the way it depends on `sourceId`.
+   */
+  const ready = $derived(library.profile !== null);
+
   $effect(() => {
     // A new source resets the grid: keeping the old rows while the next fetch runs is how a
     // screen ends up showing one source's results under another source's name.
@@ -174,8 +185,9 @@
     // Everything below is `untrack`ed on purpose: `run()` reads `mode` and `query` before its first
     // await, and a plain call here would make those reads dependencies of *this* effect — so tapping
     // Latest set the mode, this effect re-ran, and set it back to Popular. The tabs stopped working
-    // and the only thing that moved was nothing. The effect depends on `sourceId` and nothing else.
+    // and the only thing that moved was nothing. The effect depends on `sourceId` and readiness.
     void sourceId;
+    if (!ready) return;
     untrack(() => {
       items = [];
       page = 1;

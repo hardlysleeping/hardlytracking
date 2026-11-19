@@ -390,7 +390,9 @@
       </header>
 
       {#if chapters.length === 0}
-        <p class="empty">This source returned no chapters for this series.</p>
+        <!-- A slow source is not an empty source: Weeb Central takes seconds for its 1 198
+             chapters, and the page used to say "no chapters" for the whole wait. -->
+        <p class="empty">{busy ? "Loading chapters…" : "This source returned no chapters for this series."}</p>
       {:else if shown.length === 0}
         <p class="empty">No chapter matches these filters.</p>
       {:else}
