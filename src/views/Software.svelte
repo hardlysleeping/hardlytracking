@@ -16,14 +16,12 @@
   import { loadRepository, RepositoryError, type Repository } from "../lib/extensions/repository";
   import type { ExtensionEntry } from "../lib/extensions/index";
   import {
-    canonicalSoftwareUrl,
     repoRefusal,
     softwareFacts,
     type SoftwareAction,
     type SoftwareFacts,
   } from "../lib/software";
   import { go, pathTo } from "../lib/nav";
-  import { copyText } from "../lib/clipboard";
 
   interface Props {
     /** The Android package id — the thing an extension row and a link both name. */
@@ -43,9 +41,6 @@
   let notice = $state<string | null>(null);
   let busy = $state<SoftwareAction | null>(null);
   let confirming = $state(false);
-  let copied = $state(false);
-  /** The clipboard had nothing to give: the link is on screen, so the button says so. */
-  let copyRefused = $state(false);
   /** Sixty sources is a list, not a record: twelve is enough to see what it covers. */
   let allSources = $state(false);
 
@@ -220,20 +215,6 @@
     go(`/extensions?repo=${encodeURIComponent(repoUrl)}`);
   }
 
-  /**
-   * Copy the package's link, and say what actually happened.
-   *
-   * The button set `copied = true` before the clipboard was asked, so a refused or absent clipboard
-   * still read "Copied" — with nothing in it. Now the label follows the result, and the link stays
-   * on screen (it is already selectable) when the copy fails.
-   */
-  async function share(): Promise<void> {
-    const ref = { pkg, repo: repoUrl };
-    const result = await copyText(canonicalSoftwareUrl(ref));
-    copied = result.copied;
-    copyRefused = !result.copied;
-  }
-
   function sourceHref(id: string): string {
     return pathTo("source", id.includes(":") ? id : `dalvik:src:${id}`);
   }
@@ -385,14 +366,6 @@
       </dd>
     </dl>
 
-    <div class="linkrow">
-      <span class="label">Link</span>
-      <code class="mono selectable">{canonicalSoftwareUrl({ pkg, repo: repoUrl })}</code>
-      <button
-        class="chip small"
-        onclick={() => void share()}
-      >{copied ? "Copied" : copyRefused ? "Copy refused — select it" : "Copy"}</button>
-    </div>
   {/if}
 </section>
 
@@ -536,30 +509,6 @@
     line-height: 1.55;
     color: var(--text-3);
     max-width: 62ch;
-  }
-
-  .linkrow {
-    display: flex;
-    align-items: center;
-    gap: var(--s2);
-    flex-wrap: wrap;
-    margin-top: var(--s4);
-    padding-top: var(--s3);
-    border-top: 1px solid var(--line);
-    font-size: var(--t-xs);
-    color: var(--text-3);
-  }
-
-  .linkrow .label {
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-  }
-
-  .linkrow code {
-    flex: 1;
-    min-width: 200px;
-    overflow-wrap: anywhere;
-    color: var(--text-2);
   }
 
   .warn {

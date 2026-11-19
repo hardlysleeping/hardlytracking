@@ -196,10 +196,14 @@ test("Restart chapter clears the saved page before it opens the chapter", () => 
   assert.doesNotMatch(rail, /menuRow = null;\s*void restartChapter\(row\./, "the null-row restart is back");
 });
 
-test("the two copy links report what the clipboard did", () => {
+test("the series copy link reports what the clipboard did", () => {
   assert.match(series, /await copyText\(url\)/, "the series page does not use the copy seam");
   assert.match(series, /result\.copied \? "Link copied\."/, "the series page does not report a refusal");
-  assert.match(software, /await copyText\(canonicalSoftwareUrl\(ref\)\)/, "the package page does not use the copy seam");
-  assert.match(software, /copied = result\.copied/, "the package page claims a copy before asking");
-  assert.doesNotMatch(software, /writeText\([^)]*\)\.catch\(\(\) => undefined\)/, "the false-success path is back");
+});
+
+test("the package page offers no link to a host that does not answer", () => {
+  // `https://hardlytracking.app` has never resolved. The row and its Copy button are gone; the
+  // deep-link parser stays, because that is how a link that does exist would arrive.
+  assert.doesNotMatch(software, /canonicalSoftwareUrl/, "the dead canonical link is back on the page");
+  assert.doesNotMatch(software, /class="linkrow"/, "the link row is back");
 });
