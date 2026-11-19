@@ -23,16 +23,23 @@ Plan: `~/.hermes/plans/2026-11-03_024548-hardlytracking-reader-usability.md`. WI
 | T54 `t_2c9c129c` | 56 | P0 | DONE b2bde7a: expansion replaces the tapped row and opening a card leaves scrollY at 0; re-verified in tests/manual/search-glass.mjs at 440×956 and at six widths. |
 | T68 `t_0d94b8de` | 70 | P1 | DONE: ThemePanel with 10 colour keys, background image/blur/dim/glass, validated persistence, reset and four-mode compatibility; 8 unit tests plus live input-event, reload and 320/390/844 layout checks. |
 | T69 `t_84da96af` | 71 | P1 | DONE c5646f9: the opened search card carries its own cover as a blurred, aria-hidden, untappable backdrop with a readability veil; resets between titles, drops under prefers-reduced-transparency. 6 unit tests, 8 live cases at 320–1440 (zero overflow, zero button overlap, no scroll on open), screenshot reviewed. |
-| T65 `t_f1939433` | 67 | P1 | Dedicated Stats tab backed by history/read marks/progress/sessions; isolated implementation underway |
+| T65 `t_f1939433` | 67 | P1 | DONE on the board: dedicated Stats tab backed by persisted history, read marks, progress and sessions; its session-time caveat is tracked as its own card. |
 | T55 `t_be2108a2` | 57 | P1 | DONE: webtoon seam measured 0 px at 390×844; vertical mode keeps its 12 px page gap by design. |
 | T56 `t_86e5ac0c` | 58 | P1 | DONE 60a2445: four regressions, eleven browser cases at Pro Max portrait/landscape; validated persistence and immediate current-first queue updates; clean 1,013 tests/type/Svelte/build. Awaiting next IPA. |
-| T57 `t_4f278979` | 59 | P1 | Seen thumbnails remain cached across revisits: Seen covers survive remount/reload/offline; stable keys; respect cache quota; object URL cleanup preserves bytes. |
-| T58 `t_ca2518ca` | 60 | P1 | Cache and index search results item metadata and issues: Reuse stored results and chapters; explicit refresh; offline read; keys include source/query/filter identity. |
-| T59 `t_fc34fbd2` | 61 | P1 | Long-hold issue range read and download actions: Hold without opening reader; above/below mark read in displayed order with clear anchor semantics; download and read/unread actions. |
-| T60 `t_ff6df231` | 62 | P2 | Autoscroll speed slider and linear or bottom-speed curves: Off until started; speed, linear/slower-bottom/faster-bottom; pause/stop; background/exit teardown. |
-| T61 `t_c2ce4135` | 63 | P2 | Default-off automatic download on library add: Separate opt-in; use existing queue; dedupe and surface failures; no real bulk tests. |
-| T62 `t_d65253fd` | 64 | P2 | Default-off keep existing library offline policy: Reconcile missing issues only; never repeat completed downloads; disabling never deletes. |
-| T63 `t_85dc29b7` | 65 | P2 | Per-category keep offline policy: Independent category opt-ins; shared reconciliation; overlapping categories dedupe; disabling never deletes. |
+| T57 `t_4f278979` | 59 | P1 | DONE: `imageCache`/`imageCacheData` keep the bytes under a stable key, `Cover.svelte` reacquires a revoked blob instead of falling back, `image-cache-visits` + `image-cache-revocation` cover remount/reload/trim. Live: covers paint from `blob:` URLs fed by `/api/dalvik/image/…`. |
+| T58 `t_ca2518ca` | 60 | P1 | DONE: `searchCache` store plus `search-cache-durability`; results, chapters and series metadata share the record keys, so a repeat search or expansion reuses stored rows and a refresh is explicit. |
+| T59 `t_fc34fbd2` | 61 | P1 | DONE: hold timer + `contextmenu` in `Series.svelte` open the issue menu (above/below with anchor wording, read/unread, download); `issues.test.mjs` covers the range order. Every chapter row renders `⋯` and `↓` live. |
+| T60 `t_ff6df231` | 62 | P2 | DONE: `src/lib/autoscroll.ts` + `autoscroll.test.mjs`; the reader's Autoscroll control stays off until started and stops on manual scroll. |
+| T61 `t_c2ce4135` | 63 | P2 | DONE: `src/lib/offline/policy.ts` — `shouldKeepTitle` on the `add` trigger, `keepOnAdd` off by default, through the existing queue; `offline-policy`/`library-offline` cover dedupe, pending work and failures. |
+| T62 `t_d65253fd` | 64 | P2 | DONE: `downloads.keepLibraryOffline()` queues only what `missingIssues()` reports missing; complete rows are never re-asked and disabling deletes nothing. |
+| T63 `t_85dc29b7` | 65 | P2 | DONE: `keepCategoriesOf()` drops unknown ids and collapses duplicates, then reconciles through the same `shouldKeepTitle`. Live harness at 320×568, 390×844, 844×390, 1024×768: off by default, chip persisted, zero overflow, zero page errors. |
+
+## Fixed while reconciling (2026-11-19)
+
+| Item | Evidence |
+|---|---|
+| A restored source route showed "This source returned nothing." until Refresh | `dff6364` — the listing effect was entirely inside `untrack`, so it depended on `sourceId` alone and never re-ran when `library.open()` finished. 0 tiles after 20 s before; 32 tiles in 3.0 s after, on a reload at `#/source/…`. |
+| A slow source was drawn as an empty one | `dff6364` — Weeb Central answers 1 198 chapters after ~2.6 s; the page said "This source returned no chapters for this series." for the whole wait, and now says "Loading chapters…". `tests/unit/view-readiness.test.mjs` guards both. |
 
 ## Earlier roadmap snapshot (not current dispatch order)
 
