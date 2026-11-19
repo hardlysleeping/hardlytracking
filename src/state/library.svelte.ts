@@ -36,6 +36,7 @@ import { shouldKeepTitle } from "../lib/offline/policy";
 import { normalizePages, usableStoredPages } from "../lib/page-list";
 import { requestKeep } from "../lib/offline/sink";
 import { installTrackerSync } from "../lib/trackers/sync";
+import { registerKitsu } from "../lib/trackers/kitsu";
 import { planReadState, remoteReadCount } from "../lib/read-state";
 import { providerLabel } from "../api/source";
 import type { RemoteRead, SourceProvider } from "../api/source";
@@ -387,10 +388,15 @@ class LibraryState {
       );
       void imageCache.prune();
       void this.pruneSessions();
-      // Arm the tracker hook: a read mark becomes a queued push once a service is connected
-      // (T26–T28). With no adapter registered this is inert, and the day one lands nothing else
-      // has to be rewired.
+      // Arm the tracker hook: a read mark becomes a queued push once a service is connected.
       installTrackerSync(this.profile.store);
+      // Kitsu registers itself here when an account is stored, so a connected list survives a
+      // launch without re-entering anything. A stored token Kitsu no longer accepts is dropped
+      // rather than left to fail silently on every push.
+      void registerKitsu(this.profile.store).catch(async (error: unknown) => {
+        if (!/rejected that token/.test(error instanceof Error ? error.message : String(error))) return;
+        await this.profile?.store.removeTrackerAccount("kitsu");
+      });
       // A comic the system handed over (Files, iCloud Drive, a share sheet). Inert off iOS, and it
       // is installed after the library is open so an import has somewhere to land.
       void watchOpenedFiles(this.profile.store, async (result) => {

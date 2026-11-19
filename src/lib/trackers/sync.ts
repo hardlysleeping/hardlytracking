@@ -28,6 +28,26 @@ export function registerTracker(adapter: TrackerSet[TrackerService]): void {
   trackers[adapter.service] = adapter;
 }
 
+/**
+ * Stop talking to a service, without touching anything already downloaded or read.
+ *
+ * Disconnecting is a settings action, so it has to take effect now rather than at the next launch:
+ * an adapter left registered would keep receiving read marks from a list the reader just removed.
+ */
+export function unregisterTracker(service: TrackerService): void {
+  delete trackers[service];
+}
+
+/**
+ * "Sync now" — every owed push, the backoff ladder ignored because the reader asked.
+ *
+ * Lives here rather than in the panel so the panel never builds a host of its own and the shared
+ * `trackers` set stays the only place an adapter can be reached from.
+ */
+export function syncTrackersNow(store: LibraryStore, options: { now?: () => number } = {}): Promise<{ flushed: number; failed: number }> {
+  return flushPending({ store, trackers, ...(options.now === undefined ? {} : { now: options.now }) }, { force: true });
+}
+
 export interface TrackerSync {
   /** "Sync trackers now": every owed push, the backoff ladder ignored because the user asked. */
   syncAll(): Promise<{ flushed: number; failed: number }>;
